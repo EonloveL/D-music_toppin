@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 
 namespace MusicToppin;
 
@@ -85,6 +85,23 @@ internal sealed class TrayApp : ApplicationContext
         _itemPlayBv = new ToolStripMenuItem("点歌测试（播放 BV）…", null, (_, _) => PromptAndPlayBv());
         _itemStopPlay = new ToolStripMenuItem("停止播放", null, (_, _) => StopOwnPlayback());
 
+        _liveStatus = new ToolStripMenuItem("未连接直播间") { Enabled = false };
+        _itemLiveConnect = new ToolStripMenuItem("连接直播间…", null, (_, _) => PromptLiveRoom());
+        _itemLiveDisconnect = new ToolStripMenuItem("断开直播间", null, (_, _) => DisconnectLive()) { Enabled = false };
+        _itemQueueNext = new ToolStripMenuItem("队列：空", null, (_, _) => StartNextQueuedSong()) { Enabled = false };
+        _itemQueueClear = new ToolStripMenuItem("清空点歌队列", null, (_, _) => ClearQueue()) { Enabled = false };
+
+        var liveMenu = new ToolStripMenuItem("弹幕点歌");
+        liveMenu.DropDownItems.AddRange(new ToolStripItem[]
+        {
+            _itemLiveConnect,
+            _itemLiveDisconnect,
+            new ToolStripSeparator(),
+            _liveStatus,
+            _itemQueueNext,
+            _itemQueueClear
+        });
+
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
         styleMenu.DropDownItems.Add(_itemCompact);
@@ -115,6 +132,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemGreen,
             new ToolStripSeparator(),
             controlsMenu,
+            liveMenu,
             styleMenu,
             _colorMenu,
             positionMenu,
@@ -175,6 +193,54 @@ internal sealed class TrayApp : ApplicationContext
                 timer.Start();
             }
         }
+        // 调试/自动化用：--room=5050 启动即连直播间；--fake-danmaku="点歌 BV…" 注入一条假弹幕
+        var roomArg = Environment.GetCommandLineArgs()
+            .FirstOrDefault(a => a.StartsWith("--room=", StringComparison.OrdinalIgnoreCase));
+        if (roomArg != null)
+        {
+            var roomId = BilibiliLive.ParseRoomId(roomArg.Substring("--room=".Length));
+            if (roomId > 0)
+            {
+                var roomTimer = new System.Windows.Forms.Timer { Interval = 1500 };
+                roomTimer.Tick += (_, _) =>
+                {
+                    roomTimer.Stop();
+                    roomTimer.Dispose();
+                    ConnectLive(roomId, remember: false);
+                };
+                roomTimer.Start();
+            }
+        }
+        else if (!_demo && _settings.LiveRoomId > 0 && _settings.LiveAutoConnect)
+        {
+            var liveTimer = new System.Windows.Forms.Timer { Interval = 2200 };
+            liveTimer.Tick += (_, _) =>
+            {
+                liveTimer.Stop();
+                liveTimer.Dispose();
+                ConnectLive(_settings.LiveRoomId, remember: false);
+            };
+            liveTimer.Start();
+        }
+
+        var fakeDanmaku = Environment.GetCommandLineArgs()
+            .FirstOrDefault(a => a.StartsWith("--fake-danmaku=", StringComparison.OrdinalIgnoreCase));
+        if (fakeDanmaku != null)
+        {
+            var text = fakeDanmaku.Substring("--fake-danmaku=".Length).Trim();
+            if (text.Length > 0)
+            {
+                var fakeTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+                fakeTimer.Tick += (_, _) =>
+                {
+                    fakeTimer.Stop();
+                    fakeTimer.Dispose();
+                    HandleDanmaku(new DanmakuMessage { Text = text, UserName = "测试观众", Uid = 10001 });
+                };
+                fakeTimer.Start();
+            }
+        }
+
         if (_settings.Visible) ShowHud();
         EnsureHotkeys();
         if (!_settings.WizardShown)
@@ -239,6 +305,16 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemCheckUpdate;
     private ToolStripMenuItem _itemPlayBv;
     private ToolStripMenuItem _itemStopPlay;
+    private ToolStripMenuItem _liveStatus;
+    private ToolStripMenuItem _itemLiveConnect;
+    private ToolStripMenuItem _itemLiveDisconnect;
+    private ToolStripMenuItem _itemQueueNext;
+    private ToolStripMenuItem _itemQueueClear;
+
+    private readonly RequestQueue _queue = new RequestQueue();
+    private DanmakuClient _danmaku;
+    private bool _playingFromQueue;
+    private int _idleTicks;
     private ToolStripMenuItem _colorMenu;
     private ToolStripMenuItem _itemAccentColor;
     private ToolStripMenuItem _itemTitleColor;
@@ -579,14 +655,7 @@ internal sealed class TrayApp : ApplicationContext
                 return;
             }
 
-            if (_player == null)
-            {
-                _player = new WebView2Player();
-                _player.StateChanged += OnOwnPlaybackState;
-                _player.Failed += message => _tray.ShowBalloonTip(4000, "Music Toppin", message, ToolTipIcon.Warning);
-            }
-
-            await _player.PlayAsync(song);
+            await EnsurePlayer().PlayAsync(song);
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
         }
         catch (Exception ex)
@@ -599,14 +668,16 @@ internal sealed class TrayApp : ApplicationContext
     private void OnOwnPlaybackState(PlaybackState state)
     {
         var song = _player == null ? null : _player.Current;
-        if (song == null) return;
 
         if (state.Ended)
         {
+            // 一首放完：清掉当前项，队列里还有就接着放
             StopOwnPlayback();
+            StartNextQueuedSong();
             return;
         }
 
+        if (song == null) return;
         PushOwnState(song, state);
     }
 
@@ -625,8 +696,265 @@ internal sealed class TrayApp : ApplicationContext
 
     private void StopOwnPlayback()
     {
+        _playingFromQueue = false;
+        _queue.ClearCurrent();
         try { if (_player != null) _ = _player.StopAsync(); } catch { }
         if (_service != null) _service.SetOwnPlayback(null);
+        UpdateQueueMenu();
+    }
+
+    private WebView2Player EnsurePlayer()
+    {
+        if (_player == null)
+        {
+            _player = new WebView2Player();
+            _player.StateChanged += OnOwnPlaybackState;
+            _player.Failed += OnPlayerFailed;
+        }
+        return _player;
+    }
+
+    private void OnPlayerFailed(string message)
+    {
+        Logger.Write("player failed: " + message);
+        _tray.ShowBalloonTip(4000, "Music Toppin", message, ToolTipIcon.Warning);
+
+        if (!_playingFromQueue) return;
+
+        // 点歌播放失败：清掉当前项，接着放下面的，别卡住
+        StopOwnPlayback();
+        StartNextQueuedSong();
+    }
+
+    // ---- 弹幕点歌（S2）----
+
+    private void PromptLiveRoom()
+    {
+        var initial = _settings.LiveRoomId > 0 ? _settings.LiveRoomId.ToString() : "";
+        using (var prompt = new PromptDialog("连接直播间", "输入 B 直播间号（如 5050），或粘贴 live.bilibili.com 链接", initial))
+        {
+            if (prompt.ShowDialog(_hud) != DialogResult.OK) return;
+
+            var roomId = BilibiliLive.ParseRoomId(prompt.Value);
+            if (roomId <= 0)
+            {
+                _tray.ShowBalloonTip(2500, "Music Toppin", "没认出直播间号", ToolTipIcon.Warning);
+                return;
+            }
+
+            ConnectLive(roomId, remember: true);
+        }
+    }
+
+    private void ConnectLive(long roomId, bool remember)
+    {
+        if (_danmaku == null)
+        {
+            _danmaku = new DanmakuClient();
+            _danmaku.Received += OnDanmaku;
+            _danmaku.ConnectionChanged += connected => _ui.Post(_ => OnLiveConnectionChanged(connected), null);
+            _danmaku.StatusChanged += status =>
+            {
+                Logger.Write("danmaku: " + status);
+                _ui.Post(_ => UpdateLiveStatus(status), null);
+            };
+        }
+
+        _danmaku.Start(roomId);
+
+        if (remember)
+        {
+            _settings.LiveRoomId = (int)roomId;
+            _settings.LiveAutoConnect = true;
+            _settings.Save();
+        }
+
+        _itemLiveDisconnect.Enabled = true;
+        UpdateLiveStatus("正在连接直播间 " + roomId + " …");
+        _tray.ShowBalloonTip(2200, "Music Toppin", "正在连接直播间 " + roomId + " 的弹幕…", ToolTipIcon.Info);
+    }
+
+    private void DisconnectLive()
+    {
+        if (_danmaku != null) _danmaku.Stop();
+
+        _settings.LiveAutoConnect = false;
+        _settings.Save();
+
+        _itemLiveDisconnect.Enabled = false;
+        UpdateLiveStatus("未连接直播间");
+    }
+
+    private void OnLiveConnectionChanged(bool connected)
+    {
+        if (_danmaku == null) return;
+
+        if (connected)
+        {
+            _tray.ShowBalloonTip(3000, "Music Toppin",
+                "弹幕已连接：直播间 " + _danmaku.RoomId + "\n观众发「点歌 BV…」即可入队。", ToolTipIcon.Info);
+        }
+
+        UpdateQueueMenu();
+    }
+
+    /// <summary>更新一行状态（连接中/重连/断开这类瞬时文案）。</summary>
+    private void UpdateLiveStatus(string status)
+    {
+        if (_liveStatus == null) return;
+        _liveStatus.Text = status;
+        UpdateTrayText();
+    }
+
+    /// <summary>按当前连接/队列状态重算那一行。</summary>
+    private void RefreshLiveStatus()
+    {
+        if (_liveStatus == null) return;
+
+        _liveStatus.Text = _danmaku != null && _danmaku.IsConnected
+            ? "直播间 " + _danmaku.RoomId + " · 弹幕 " + _danmaku.MessageCount + " 条 · 队列 " + _queue.Count + " 首"
+            : "未连接直播间";
+
+        UpdateTrayText();
+    }
+
+    private void UpdateTrayText()
+    {
+        var text = "Music Toppin";
+        if (_danmaku != null && _danmaku.IsConnected) text += " · 直播间 " + _danmaku.RoomId;
+        if (_queue.Count > 0) text += " · 点歌 " + _queue.Count;
+
+        _tray.Text = text.Length > 63 ? text.Substring(0, 63) : text;
+    }
+
+    private void OnDanmaku(DanmakuMessage message)
+    {
+        if (message == null) return;
+        _ui.Post(_ => HandleDanmaku(message), null);
+    }
+
+    private void HandleDanmaku(DanmakuMessage message)
+    {
+        if (message == null) return;
+
+        SongRequest request;
+        if (!SongRequestParser.TryParse(message.Text, message.UserName, message.Uid, out request)) return;
+
+        var result = _queue.Enqueue(request);
+        if (result.Accepted)
+        {
+            Logger.Write("song request: " + message.UserName + " -> " + request.SourceLabel + " " + request.Query + " (#" + result.Position + ")");
+            _tray.ShowBalloonTip(2500, "已加入点歌队列（第 " + result.Position + " 位）",
+                message.UserName + "：" + request.Query, ToolTipIcon.Info);
+            UpdateQueueMenu();
+            StartNextQueuedSong();
+        }
+        else
+        {
+            Logger.Write("song request rejected: " + result.Message + " | " + message.UserName + ": " + message.Text);
+        }
+
+        RefreshLiveStatus();
+    }
+
+    private void UpdateQueueMenu()
+    {
+        if (_itemQueueNext == null) return;
+
+        var count = _queue.Count;
+        _itemQueueNext.Text = count > 0 ? "队列：下一首（还有 " + count + " 首）" : "队列：空";
+        _itemQueueNext.Enabled = count > 0;
+        _itemQueueClear.Enabled = count > 0;
+
+        RefreshLiveStatus();
+    }
+
+    private async void StartNextQueuedSong()
+    {
+        if (_playingFromQueue) return;
+
+        var item = _queue.TakeNext();
+        if (item == null) return;
+
+        _playingFromQueue = true;
+        UpdateQueueMenu();
+
+        ResolvedSong song = null;
+        try
+        {
+            song = await ResolveQueuedSongAsync(item);
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("queue resolve: " + ex.Message);
+        }
+
+        if (song == null)
+        {
+            var label = item.Request != null ? item.Request.SourceLabel : "未知来源";
+            Logger.Write("queue skip: " + label + " " + item.DisplayName);
+            _tray.ShowBalloonTip(3500, "Music Toppin",
+                "这首暂时放不了：" + label + " " + (item.Request != null ? item.Request.Query : "") +
+                "\n目前只接了 B 站 BV 点播（S3 多平台还没做）。",
+                ToolTipIcon.Warning);
+
+            _queue.ClearCurrent();
+            _playingFromQueue = false;
+            UpdateQueueMenu();
+            StartNextQueuedSong();
+            return;
+        }
+
+        item.Title = song.Title;
+        item.Artist = song.Artist;
+        item.ResolvedUrl = song.AudioUrl;
+        item.Duration = song.Duration;
+        item.Resolved = true;
+
+        try
+        {
+            await EnsurePlayer().PlayAsync(song);
+            PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
+            Logger.Write("queue play: " + song.Title + (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist));
+            _tray.ShowBalloonTip(2500, "正在播放点歌",
+                item.Requester + "：" + song.Title + (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist),
+                ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("queue play failed: " + ex.Message);
+            _tray.ShowBalloonTip(4000, "Music Toppin", ex.Message, ToolTipIcon.Warning);
+
+            _queue.ClearCurrent();
+            _playingFromQueue = false;
+            UpdateQueueMenu();
+            StartNextQueuedSong();
+        }
+    }
+
+    private async Task<ResolvedSong> ResolveQueuedSongAsync(QueueItem item)
+    {
+        var request = item.Request;
+        if (request == null || request.Source != SongSource.Bilibili)
+        {
+            return null;
+        }
+
+        var query = request.Query;
+        if (query.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            query = await Task.Run(() => Bilibili.ResolveShortLink(query));
+            if (string.IsNullOrWhiteSpace(query)) return null;
+        }
+
+        return await Task.Run(() => Bilibili.Resolve(query));
+    }
+
+    private void ClearQueue()
+    {
+        _queue.Clear();
+        UpdateQueueMenu();
+        _tray.ShowBalloonTip(1800, "Music Toppin", "点歌队列已清空", ToolTipIcon.Info);
     }
     private void ShowWizard()
     {
@@ -1015,6 +1343,10 @@ internal sealed class TrayApp : ApplicationContext
     private void CheckIdle()
     {
         if (_demo) return;
+
+        // 2 秒一次，约每分钟清一次过期的冷却记录
+        if (++_idleTicks % 30 == 0) _queue.TrimCooldowns();
+
         if (_latest.HasSession || !_hud.Visible) return;
         if ((DateTime.UtcNow - _lastSessionUtc).TotalSeconds < 4) return;
         HideHud();
@@ -1075,6 +1407,8 @@ internal sealed class TrayApp : ApplicationContext
             _demoTimer?.Stop();
             _demoTimer?.Dispose();
             ReleaseHotkeys();
+            try { _danmaku?.Dispose(); } catch { }
+            try { _player?.Dispose(); } catch { }
             _service?.Dispose();
 
             foreach (Form form in Application.OpenForms)

@@ -29,6 +29,12 @@ internal sealed class AppSettings
 
     /// <summary>启动时是否自动检查更新。</summary>
     public bool UpdateCheckOnStart = true;
+
+    /// <summary>弹幕点歌：上次连接的直播间号（0 = 未配置）。</summary>
+    public int LiveRoomId;
+
+    /// <summary>启动时是否自动重连上次的直播间。</summary>
+    public bool LiveAutoConnect = true;
     public int Schema;
 
     // 颜色（ARGB），默认值与设计稿一致
@@ -70,6 +76,8 @@ internal sealed class AppSettings
                 s.WizardShown = ReadInt(key, "WizardShown", 0) == 1;
                 s.UpdateUrl = ReadString(key, "UpdateUrl", "");
                 s.UpdateCheckOnStart = ReadInt(key, "UpdateCheckOnStart", 1) == 1;
+                s.LiveRoomId = ReadInt(key, "LiveRoomId", 0);
+                s.LiveAutoConnect = ReadInt(key, "LiveAutoConnect", 1) == 1;
                 s.Schema = ReadInt(key, "Schema", 0);
                 s.AccentColor = ReadInt(key, "AccentColor", unchecked((int)0xFFFF3B30));
                 s.TitleColor = ReadInt(key, "TitleColor", unchecked((int)0xFFF5F8FC));
@@ -139,6 +147,8 @@ internal sealed class AppSettings
                 try { key.SetValue("Hotkey", Hotkey ?? "", RegistryValueKind.String); } catch { }
                 WriteInt(key, "WizardShown", WizardShown ? 1 : 0);
                 WriteInt(key, "UpdateCheckOnStart", UpdateCheckOnStart ? 1 : 0);
+                WriteInt(key, "LiveRoomId", LiveRoomId);
+                WriteInt(key, "LiveAutoConnect", LiveAutoConnect ? 1 : 0);
                 try { key.SetValue("UpdateUrl", UpdateUrl ?? "", RegistryValueKind.String); } catch { }
                 WriteInt(key, "Schema", CurrentSchema);
                 WriteInt(key, "AccentColor", AccentColor);

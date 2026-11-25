@@ -6,7 +6,7 @@ internal sealed class PromptDialog : Form
     private readonly TextBox _input;
     public string Value { get; private set; }
 
-    public PromptDialog(string title, string hint)
+    public PromptDialog(string title, string hint, string initial = null)
     {
         Text = title + " · Music Toppin";
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -33,7 +33,8 @@ internal sealed class PromptDialog : Form
         {
             Location = new Point(20, 50),
             Width = 420,
-            BorderStyle = BorderStyle.FixedSingle
+            BorderStyle = BorderStyle.FixedSingle,
+            Text = initial ?? ""
         };
 
         var ok = new Button

@@ -47,6 +47,24 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 
 ![上屏向导](docs/screenshots/wizard.png)
 
+## 弹幕点歌（V2 · S2 已接入）
+
+托盘右键 →「弹幕点歌」→「连接直播间…」，填房间号（`5050`，或直接粘贴 `https://live.bilibili.com/5050`）。连上后观众在直播间发：
+
+| 弹幕 | 行为 |
+|---|---|
+| `点歌 BV1GJ411x7h7` | 解析 B 站视频的 DASH 音频，入队并自动播放 |
+| `点歌 b23.tv/xxxx` | 先展开短链，再按 BV 处理 |
+| `点歌 起风了`、`点歌 wy 起风了` | 入队，但**暂时放不了**——网易云/QQ/Apple Music 取流是 S3 |
+
+- 队列：同曲 5 分钟内不重复、同一人 30 秒冷却、最多 20 首、先点先放；托盘菜单实时显示「队列：下一首（还有 N 首）」
+- 第一首自动开播，放完自动下一首；放不了的会提示并跳过，不会卡住
+- 断线自动重连（2 秒起翻倍，最长 30 秒）；菜单里能看到「直播间 xxx · 弹幕 N 条 · 队列 N 首」
+- 直播间号会记住，下次启动自动重连；「断开直播间」会关掉自动重连
+- 弹幕走**游客身份**，不用登录 B 站账号
+
+> 只认「点歌」开头的弹幕（`点歌姬` 这类词不会误判）。协议细节与排错见 [docs/v2-danmaku.md](docs/v2-danmaku.md)。
+
 ## 安装
 
 双击 `MusicToppin-Setup.exe`：
@@ -116,14 +134,14 @@ Uninstall.exe /S                                      静默卸载
 ![更新提示](docs/screenshots/update.png)
 ## 低占用
 
-| 项目 | 实测（2560×1440 / Win11 26200，Apple Music 播放中） |
+| 项目 | 实测（本机 Win11，V2 构建，纯显示模式） |
 |---|---|
-| 安装包 | **108 KB** |
-| 主程序 | **102 KB**（.NET Framework 4.8，系统自带运行时） |
-| 内存（私有） | **27 MB** |
-| 内存（含共享） | 47 MB |
-| CPU | **0.16 %** |
-| GPU | 0（纯 GDI+ 绘制，不用 WPF / WebView2 / 浏览器内核） |
+| 安装包 | **361 KB** |
+| 主程序 | **153 KB**（.NET Framework 4.8，系统自带运行时） |
+| 内存（私有） | **25–33 MB**（点歌播放时才加载 WebView2，约 +160 MB） |
+| 内存（含共享） | 56 MB |
+| CPU | 空闲 **≈0 %**（2 秒轮询；点歌播放时由 WebView2 占用） |
+| GPU | 0（纯 GDI+ 绘制，不用 WPF；点歌播放才加载 WebView2） |
 
 关键优化：分批轮询（SMTC 在放歌时跳过窗口枚举）、窗口扫描 2 秒缓存、音频会话查询 2 秒缓存 + COM 对象显式释放、只在内容变化时重绘。
 
@@ -145,9 +163,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 产物：
 
 ```
-build\app\MusicToppin.exe        102 KB
-build\app\Uninstall.exe          14 KB
-build\MusicToppin-Setup.exe      108 KB
+build\app\MusicToppin.exe        153 KB
+build\app\Uninstall.exe          15 KB
+build\MusicToppin-Setup.exe      361 KB
 ```
 
 构建链路：`toolchain.ps1` 定位 Roslyn `csc`（`Microsoft.Net.Compilers.Toolset`）、.NET Framework 4.8 引用程序集、WinRT 元数据（`Microsoft.Windows.SDK.Contracts`）→ 编译主程序（引用 `Windows.Media.winmd` 调 SMTC）→ 编译卸载器 → 打包 payload → 嵌入安装器。
@@ -172,21 +190,34 @@ src/MusicToppin/
   TrackHistory.cs       曲目历史（注册表）
   NowPlaying.cs         状态结构
   Logger.cs             日志（%TEMP%\musictoppin.log）
+  SongRequest.cs        点歌指令解析（V2 S1）
+  RequestQueue.cs       点歌队列：去重/冷却/上限/顶歌/撤回（V2 S1）
+  Danmaku.cs            B 站直播弹幕客户端 + 弹幕协议（V2 S2）
+  Json.cs               零依赖只读 JSON 解析
+  Bilibili.cs           B 站取流：BV → view / playurl → DASH 音频
+  WebView2Player.cs     隐藏 WebView2 音频宿主（Referer 注入、状态轮询）
+  PromptDialog.cs       单行输入框
+tests/                  单元测试（79 项：解析/队列/协议/JSON）
 installer/
   Installer.cs          安装器（静默模式 / 安装中禁止关窗）
   Uninstall.cs          卸载器
 build.ps1               一键构建
+run-tests.ps1           一键跑单元测试
 toolchain.ps1           编译器与引用程序集定位
 docs/code-review-v1.md  V1 三轮独立评审与修复记录
+docs/v2-danmaku.md      B 站弹幕协议笔记（S2）
 ```
 
 ## 命令行
 
 ```
-MusicToppin.exe --demo           演示数据
-MusicToppin.exe --demo-fast      演示数据，12 秒切一首
-MusicToppin-Setup.exe /S         静默安装（成功返回 0）
-Uninstall.exe /S                 静默卸载
+MusicToppin.exe --demo                        演示数据
+MusicToppin.exe --demo-fast                   演示数据，12 秒切一首
+MusicToppin.exe --play-bv=BV1xx411c7mD        启动即播放指定 BV
+MusicToppin.exe --room=5050                   启动即连接直播间弹幕
+MusicToppin.exe --fake-danmaku="点歌 BV…"     注入一条假弹幕（自动化验证用）
+MusicToppin-Setup.exe /S                      静默安装（成功返回 0）
+Uninstall.exe /S                              静默卸载
 ```
 
 ## 已知限制
@@ -197,18 +228,24 @@ Uninstall.exe /S                 静默卸载
 - 播放判断依赖该进程的音频会话；输出到独占模式/WASAPI exclusive 时可能查不到状态，会退回端点峰值
 - 播放器窗口标题格式被改过（foobar2000 自定义 title format）时可能解析错，可在 `WindowPlayers.cs` 按进程调整
 - 独占全屏游戏会盖住任何置顶窗口 → 用无边框窗口化
+- 弹幕点歌目前只支持 **B 站 BV**；网易云/QQ/Apple Music 只入队、真正播放要等 S3
+- 弹幕压缩只解 zlib（鉴权时请求 `protover=2`）；B 站以后若强制 brotli，会提示并继续重试
+- 弹幕走游客身份，只能拿到 uid / 昵称，拿不到完整用户资料；房间号必须是**开播中或有人说话**的直播间（冷场房间连上也收不到弹幕）
 
 ## V2 进度
 
-- ✅ **S1 队列核心**：`点歌 / 點歌`、`wy/qq/am` 前缀、`id:`、`BV 号`、`b23.tv` 短链；去重/冷却/上限/顶歌/撤回（27 项单元测试）
+- ✅ **S1 队列核心**：`点歌 / 點歌`、`wy/qq/am` 前缀、`id:`、`BV 号`、`b23.tv` 短链；去重/冷却/上限/顶歌/撤回
+- ✅ **S2 弹幕接入**：直播间握手 → 游客鉴权 → 30 秒心跳 → zlib 解包 → `DANMU_MSG` 解析 → 入队 → 自动播放；断线自动重连；托盘可连接/断开/看队列
 - ✅ **S4 播放链路验证**：托盘「点歌测试（播放 BV）…」输入 BV 号 → 解析 DASH 音频 → WebView2 播放 → HUD 显示真实标题与进度
-- ⏳ S2 弹幕接入、S3 多平台取流
+- ⏳ S3 多平台取流、S5 展示整合（HUD 下一首/队列预览）
+
+`tests/` 里 **79 项单元测试**覆盖解析、队列、弹幕协议、JSON；`run-tests.ps1` 一键跑（0 = 全过）。
 
 **接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。
 
-播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 105 KB / 26 MB 的轻量形态。
+播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 153 KB / 25 MB 的轻量形态。
 ## 下一步（V2）
 
-- 点歌队列 → 真正的「下一首」、点歌人、排队
-- 歌词行（滚动/逐字）
-- 样式编辑器（字号/宽度/圆角）
+- S3：网易云 / QQ / Apple Music 取流，每个源一个 resolver，失败只影响单源
+- S5：HUD 增加「下一首 / 队列预览」（点歌人、排队数），点歌板上屏
+- 歌词行（滚动/逐字）、样式编辑器（字号/宽度/圆角）

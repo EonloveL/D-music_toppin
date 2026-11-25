@@ -1,0 +1,712 @@
+using System.IO.Compression;
+using System.Net;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace MusicToppin;
+
+/// <summary>一条直播间弹幕（只保留点歌用得上的字段）。</summary>
+internal sealed class DanmakuMessage
+{
+    public string Text = "";
+    public string UserName = "";
+    public long Uid;
+    public bool IsAdmin;
+    public int MedalLevel;
+    public string MedalName = "";
+    public DateTime ReceivedUtc = DateTime.UtcNow;
+}
+
+/// <summary>拆出来的一个协议包。</summary>
+internal sealed class DanmakuPacket
+{
+    public int Version;
+    public int Operation;
+    public byte[] Body = Array.Empty<byte>();
+}
+
+internal sealed class LiveRoomInfo
+{
+    public long RoomId;
+    public long ShortId;
+    public int LiveStatus;
+}
+
+internal sealed class DanmakuEndpoint
+{
+    public string Token = "";
+    public readonly List<string> WssHosts = new List<string>();
+}
+
+/// <summary>
+/// B 站直播弹幕协议：16 字节头（长度 / 头长 / 协议版本 / 操作码 / 序号）+ body。
+/// 这里只做纯函数部分（封包、拆包、解压、解析），方便离线跑单元测试。
+///
+/// 头布局（大端）：
+///   0..4  总长度
+///   4..6  头长度（固定 16）
+///   6..8  协议版本：0=普通 JSON，1=心跳/人气，2=zlib 压缩，3=brotli 压缩
+///   8..12 操作码：2=心跳，3=心跳回复(人气)，5=通知，7=鉴权，8=鉴权回复
+///   12..16 序号
+/// </summary>
+internal static class DanmakuProtocol
+{
+    public const int HeaderSize = 16;
+    public const int OpHeartbeat = 2;
+    public const int OpHeartbeatReply = 3;
+    public const int OpMessage = 5;
+    public const int OpAuth = 7;
+    public const int OpAuthReply = 8;
+
+    private static readonly byte[] HeartbeatBody = Encoding.UTF8.GetBytes("[object Object]");
+
+    public static byte[] BuildPacket(int operation, byte[] body, int version = 1)
+    {
+        body = body ?? Array.Empty<byte>();
+
+        var packet = new byte[HeaderSize + body.Length];
+        WriteInt32(packet, 0, packet.Length);
+        WriteInt16(packet, 4, HeaderSize);
+        WriteInt16(packet, 6, version);
+        WriteInt32(packet, 8, operation);
+        WriteInt32(packet, 12, 1);
+        if (body.Length > 0) Buffer.BlockCopy(body, 0, packet, HeaderSize, body.Length);
+        return packet;
+    }
+
+    /// <summary>鉴权包：游客 uid=0 即可，protover=2 让服务器回 zlib（.NET Framework 没有 brotli）。</summary>
+    public static byte[] BuildAuthPacket(long roomId, string token, int protoVersion = 2)
+    {
+        var body =
+            "{\"uid\":0,\"roomid\":" + roomId.ToString() +
+            ",\"protover\":" + protoVersion.ToString() +
+            ",\"platform\":\"web\",\"type\":2,\"key\":" + Json.Escape(token ?? "") + "}";
+
+        return BuildPacket(OpAuth, Encoding.UTF8.GetBytes(body));
+    }
+
+    public static byte[] BuildHeartbeatPacket()
+    {
+        return BuildPacket(OpHeartbeat, HeartbeatBody);
+    }
+
+    /// <summary>从累积缓冲区里取出一个完整包；不够一个包时返回 false。</summary>
+    public static bool TryTakePacket(List<byte> buffer, out DanmakuPacket packet)
+    {
+        packet = null;
+        if (buffer == null || buffer.Count < HeaderSize) return false;
+
+        var total = ReadInt32(buffer, 0);
+        if (total < HeaderSize || total > 16 * 1024 * 1024)
+        {
+            // 长度明显不对：丢掉整个缓冲区，让上层重连，比死循环安全
+            buffer.Clear();
+            throw new InvalidDataException("弹幕包长度异常：" + total);
+        }
+        if (buffer.Count < total) return false;
+
+        var headerLength = (buffer[4] << 8) | buffer[5];
+        if (headerLength < HeaderSize || headerLength > total) headerLength = HeaderSize;
+
+        var version = (buffer[6] << 8) | buffer[7];
+        var operation = ReadInt32(buffer, 8);
+
+        var body = new byte[total - headerLength];
+        for (var i = 0; i < body.Length; i++) body[i] = buffer[headerLength + i];
+
+        buffer.RemoveRange(0, total);
+        packet = new DanmakuPacket { Version = version, Operation = operation, Body = body };
+        return true;
+    }
+
+    /// <summary>解 zlib（B 站的压缩包带 2 字节头和 4 字节 Adler32，DeflateStream 只吃裸 deflate）。</summary>
+    public static byte[] Inflate(byte[] data)
+    {
+        if (data == null || data.Length == 0) return Array.Empty<byte>();
+
+        // zlib 头：低 4 位必须是 8（deflate），且 (CMF<<8|FLG) % 31 == 0
+        if (data.Length > 6 && (data[0] & 0x0F) == 8 && (((data[0] << 8) | data[1]) % 31) == 0)
+        {
+            var raw = new byte[data.Length - 6];
+            Buffer.BlockCopy(data, 2, raw, 0, raw.Length);
+            try { return InflateRaw(raw); }
+            catch (Exception ex) { Logger.Write("danmaku inflate(zlib): " + ex.Message); }
+        }
+
+        return InflateRaw(data);
+    }
+
+    private static byte[] InflateRaw(byte[] payload)
+    {
+        using (var input = new MemoryStream(payload))
+        using (var deflate = new DeflateStream(input, CompressionMode.Decompress))
+        using (var output = new MemoryStream())
+        {
+            deflate.CopyTo(output);
+            return output.ToArray();
+        }
+    }
+
+    /// <summary>把一条 DANMU_MSG 的 JSON 解析成消息；不是弹幕返回 null。</summary>
+    public static DanmakuMessage ParseDanmaku(JsonValue root)
+    {
+        if (root == null) return null;
+
+        var cmd = root["cmd"] != null ? root["cmd"].AsString : null;
+        if (string.IsNullOrEmpty(cmd) || cmd.IndexOf("DANMU_MSG", StringComparison.Ordinal) < 0) return null;
+
+        var info = root["info"];
+        if (info == null || info.Kind != JsonKind.Array || info.Count < 3) return null;
+
+        var text = info[1] != null ? info[1].AsString : null;
+        if (string.IsNullOrWhiteSpace(text)) return null;
+
+        var user = info[2];
+        var message = new DanmakuMessage
+        {
+            Text = text.Trim(),
+            Uid = user != null ? user[0].AsLong : 0,
+            UserName = user != null && user[1] != null ? user[1].AsString : "",
+            IsAdmin = user != null && user[2] != null && user[2].AsBool
+        };
+
+        // info[7] 是粉丝牌：[等级, 牌子名, 主播名, 房间号, ...]
+        var medal = info[7];
+        if (medal != null && medal.Kind == JsonKind.Array && medal.Count >= 2 && medal[0] != null)
+        {
+            message.MedalLevel = medal[0].AsInt;
+            message.MedalName = medal[1] != null ? (medal[1].AsString ?? "") : "";
+        }
+
+        if (string.IsNullOrEmpty(message.UserName)) message.UserName = "观众" + message.Uid;
+        return message;
+    }
+
+    private static int ReadInt32(List<byte> buffer, int offset)
+    {
+        return (buffer[offset] << 24) | (buffer[offset + 1] << 16) | (buffer[offset + 2] << 8) | buffer[offset + 3];
+    }
+
+    private static void WriteInt32(byte[] buffer, int offset, int value)
+    {
+        buffer[offset] = (byte)(value >> 24);
+        buffer[offset + 1] = (byte)(value >> 16);
+        buffer[offset + 2] = (byte)(value >> 8);
+        buffer[offset + 3] = (byte)value;
+    }
+
+    private static void WriteInt16(byte[] buffer, int offset, int value)
+    {
+        buffer[offset] = (byte)(value >> 8);
+        buffer[offset + 1] = (byte)value;
+    }
+}
+
+/// <summary>直播间解析与弹幕服务器地址（走公开的 live 接口，游客身份即可）。</summary>
+internal static class BilibiliLive
+{
+    public const string UserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+    private static readonly Regex RoomIdPattern = new Regex(@"\d{1,12}", RegexOptions.Compiled);
+
+    /// <summary>支持「6」「https://live.bilibili.com/7734200?x=1」这类输入。</summary>
+    public static long ParseRoomId(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return 0;
+
+        var match = RoomIdPattern.Match(text.Trim());
+        long roomId;
+        return match.Success && long.TryParse(match.Value, out roomId) ? roomId : 0;
+    }
+
+    /// <summary>短号 → 真实房间号（房号 6 其实是 7734200）。</summary>
+    public static LiveRoomInfo ResolveRoom(long roomInput)
+    {
+        var json = Get("https://api.live.bilibili.com/room/v1/Room/room_init?id=" + roomInput,
+            "https://live.bilibili.com/" + roomInput);
+        if (json == null) return null;
+
+        var root = ParseOrNull(json);
+        if (root == null || root["code"] == null || root["code"].AsInt != 0) return null;
+
+        var data = root["data"];
+        if (data == null) return null;
+
+        return new LiveRoomInfo
+        {
+            RoomId = data["room_id"] != null ? data["room_id"].AsLong : 0,
+            ShortId = data["short_id"] != null ? data["short_id"].AsLong : 0,
+            LiveStatus = data["live_status"] != null ? data["live_status"].AsInt : 0
+        };
+    }
+
+    /// <summary>
+    /// 拿鉴权 token 和弹幕服务器列表。
+    /// 注意：新的 getDanmuInfo 需要 wbi 签名，未签名会返回 -352；老接口 getConf 目前仍然可用。
+    /// </summary>
+    public static DanmakuEndpoint GetEndpoint(long realRoomId)
+    {
+        var json = Get("https://api.live.bilibili.com/room/v1/Danmu/getConf?room_id=" + realRoomId,
+            "https://live.bilibili.com/" + realRoomId);
+        if (json == null) return null;
+
+        var root = ParseOrNull(json);
+        if (root == null || root["code"] == null || root["code"].AsInt != 0) return null;
+
+        var data = root["data"];
+        if (data == null) return null;
+
+        var endpoint = new DanmakuEndpoint { Token = data["token"] != null ? (data["token"].AsString ?? "") : "" };
+
+        var hosts = data["host_server_list"];
+        if (hosts != null && hosts.Kind == JsonKind.Array)
+        {
+            foreach (var host in hosts.Items)
+            {
+                if (host == null) continue;
+                var name = host["host"] != null ? host["host"].AsString : null;
+                if (string.IsNullOrEmpty(name)) continue;
+
+                var port = host["wss_port"] != null ? host["wss_port"].AsInt : 443;
+                var url = "wss://" + name + ":" + port + "/sub";
+                if (!endpoint.WssHosts.Contains(url)) endpoint.WssHosts.Add(url);
+            }
+        }
+
+        if (endpoint.WssHosts.Count == 0)
+        {
+            endpoint.WssHosts.Add("wss://broadcastlv.chat.bilibili.com:443/sub");
+        }
+
+        return endpoint;
+    }
+
+    private static JsonValue ParseOrNull(string json)
+    {
+        try { return Json.Parse(json); }
+        catch (Exception ex)
+        {
+            Logger.Write("bilibili live json: " + ex.Message);
+            return null;
+        }
+    }
+
+    private static string Get(string url, string referer)
+    {
+        try
+        {
+            try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+
+            var request = (HttpWebRequest)WebRequest.Create(url);
+            request.UserAgent = UserAgent;
+            request.Referer = referer;
+            request.Accept = "application/json, text/plain, */*";
+            request.Timeout = 12000;
+            request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+
+            using (var response = (HttpWebResponse)request.GetResponse())
+            using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+            {
+                return reader.ReadToEnd();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("bilibili live api: " + ex.Message);
+            return null;
+        }
+    }
+}
+
+/// <summary>
+/// 弹幕客户端：房间解析 → 取 token → WebSocket 鉴权 → 30 秒心跳 → 收包解压解析。
+/// 断线自动重连（2s 起指数退避，最长 30s）。事件在后台线程触发，UI 侧自己 Post 回去。
+/// </summary>
+internal sealed class DanmakuClient : IDisposable
+{
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(8);
+
+    private CancellationTokenSource _cts;
+    private Task _loop;
+    private int _messageCount;
+    private volatile bool _connected;
+    private volatile bool _brotliWarned;
+
+    /// <summary>收到一条弹幕（后台线程）。</summary>
+    public event Action<DanmakuMessage> Received;
+
+    /// <summary>人气值（心跳回复）。</summary>
+    public event Action<int> PopularityChanged;
+
+    /// <summary>连接状态变化（true=已连上并鉴权成功）。</summary>
+    public event Action<bool> ConnectionChanged;
+
+    /// <summary>给 UI 看的状态文案：正在连接 / 已连接 / X 秒后重连 / 已断开。</summary>
+    public event Action<string> StatusChanged;
+
+    /// <summary>诊断用：每拆出一个协议包回调一次（操作码, 协议版本, body 长度）。</summary>
+    public event Action<int, int, int> PacketTraced;
+
+    public long RoomId { get; private set; }
+    public long ShortId { get; private set; }
+    public bool IsConnected { get { return _connected; } }
+    public int MessageCount { get { return Volatile.Read(ref _messageCount); } }
+    public int ReconnectCount { get; private set; }
+    public string LastError { get; private set; } = "";
+    public bool IsRunning { get { return _loop != null && !_loop.IsCompleted; } }
+
+    public void Start(long roomInput)
+    {
+        Stop();
+
+        ShortId = roomInput;
+        _cts = new CancellationTokenSource();
+        var token = _cts.Token;
+        _loop = Task.Run(() => RunAsync(roomInput, token));
+    }
+
+    public void Stop()
+    {
+        var cts = _cts;
+        _cts = null;
+
+        if (cts != null)
+        {
+            try { cts.Cancel(); } catch { }
+        }
+
+        SetConnected(false);
+    }
+
+    private async Task RunAsync(long roomInput, CancellationToken ct)
+    {
+        LiveRoomInfo room = null;
+        try
+        {
+            room = await Task.Run(() => BilibiliLive.ResolveRoom(roomInput), ct);
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex) { LastError = ex.Message; }
+
+        if (room != null && room.RoomId > 0)
+        {
+            RoomId = room.RoomId;
+            ReportStatus("房间 " + RoomId + (room.LiveStatus == 1 ? "（直播中）" : "（未开播，弹幕仍可收）"));
+        }
+        else
+        {
+            // 接口失败也允许直接当真实房号用，免得一次接口抖动就完全连不上
+            RoomId = roomInput;
+            ReportStatus("房间号解析失败，按 " + RoomId + " 直连");
+        }
+
+        var backoff = 2;
+        while (!ct.IsCancellationRequested)
+        {
+            DanmakuEndpoint endpoint = null;
+            try
+            {
+                endpoint = await Task.Run(() => BilibiliLive.GetEndpoint(RoomId), ct);
+            }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex) { LastError = ex.Message; }
+
+            if (endpoint == null || string.IsNullOrEmpty(endpoint.Token))
+            {
+                LastError = "拿不到弹幕服务器或 token";
+                ReportStatus("获取弹幕服务器失败，" + backoff + " 秒后重试");
+                Logger.Write("danmaku: no token for room " + RoomId);
+            }
+            else
+            {
+                var connectedAt = DateTime.UtcNow;
+                try
+                {
+                    await PumpAsync(endpoint, ct);
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex)
+                {
+                    LastError = ex.Message;
+                    Logger.Write("danmaku pump: " + ex.GetType().Name + " " + ex.Message);
+                    ReportStatus("弹幕连接断开：" + ex.Message);
+                }
+                finally
+                {
+                    SetConnected(false);
+                }
+
+                if (ct.IsCancellationRequested) break;
+
+                // 连上过足够久就重置退避，避免长期运行后被一次偶发断线拖成 30 秒
+                if (DateTime.UtcNow - connectedAt > TimeSpan.FromSeconds(60)) backoff = 2;
+            }
+
+            ReconnectCount++;
+            ReportStatus(backoff + " 秒后重连（第 " + ReconnectCount + " 次）");
+            try { await Task.Delay(TimeSpan.FromSeconds(backoff), ct); }
+            catch (OperationCanceledException) { break; }
+
+            backoff = Math.Min(backoff * 2, 30);
+        }
+
+        SetConnected(false);
+        ReportStatus("已断开");
+    }
+
+    private async Task PumpAsync(DanmakuEndpoint endpoint, CancellationToken ct)
+    {
+        using (var session = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        using (var socket = await ConnectAnyAsync(endpoint, ct))
+        {
+            await socket.SendAsync(
+                new ArraySegment<byte>(DanmakuProtocol.BuildAuthPacket(RoomId, endpoint.Token)),
+                WebSocketMessageType.Binary, true, ct);
+
+            var heartbeat = Task.Run(() => HeartbeatLoopAsync(socket, session.Token));
+
+            try
+            {
+                var buffer = new byte[32 * 1024];
+                var pending = new List<byte>(64 * 1024);
+
+                while (!session.IsCancellationRequested)
+                {
+                    WebSocketReceiveResult result;
+                    try
+                    {
+                        result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), session.Token);
+                    }
+                    catch (OperationCanceledException) { break; }
+                    catch (WebSocketException ex)
+                    {
+                        Logger.Write("danmaku receive: " + ex.Message);
+                        break;
+                    }
+
+                    if (result.MessageType == WebSocketMessageType.Close) break;
+                    if (result.Count <= 0) continue;
+
+                    for (var i = 0; i < result.Count; i++) pending.Add(buffer[i]);
+
+                    DanmakuPacket packet;
+                    while (DanmakuProtocol.TryTakePacket(pending, out packet))
+                    {
+                        HandlePacket(packet, 0);
+                    }
+                }
+            }
+            finally
+            {
+                try { session.Cancel(); } catch { }
+                try { await heartbeat; } catch { }
+                try { socket.Abort(); } catch { }
+            }
+        }
+    }
+
+    private static async Task<ClientWebSocket> ConnectAnyAsync(DanmakuEndpoint endpoint, CancellationToken ct)
+    {
+        Exception last = null;
+
+        foreach (var url in endpoint.WssHosts)
+        {
+            // 每个 host 用新 socket：ConnectAsync 失败后同一个实例不能复用
+            var socket = new ClientWebSocket();
+            try { socket.Options.SetRequestHeader("User-Agent", BilibiliLive.UserAgent); } catch { }
+            try { socket.Options.SetRequestHeader("Origin", "https://live.bilibili.com"); } catch { }
+
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                timeout.CancelAfter(ConnectTimeout);
+                try
+                {
+                    await socket.ConnectAsync(new Uri(url), timeout.Token);
+                    Logger.Write("danmaku connected: " + url);
+                    return socket;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    socket.Dispose();
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    Logger.Write("danmaku connect " + url + ": " + ex.Message);
+                }
+            }
+
+            socket.Dispose();
+        }
+
+        throw new InvalidOperationException("所有弹幕服务器都连不上：" + (last != null ? last.Message : "无可用地址"), last);
+    }
+
+    private async Task HeartbeatLoopAsync(ClientWebSocket socket, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested && socket.State == WebSocketState.Open)
+            {
+                await Task.Delay(HeartbeatInterval, ct);
+                if (ct.IsCancellationRequested || socket.State != WebSocketState.Open) break;
+                await socket.SendAsync(new ArraySegment<byte>(DanmakuProtocol.BuildHeartbeatPacket()),
+                    WebSocketMessageType.Binary, true, ct);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Logger.Write("danmaku heartbeat: " + ex.Message); }
+    }
+
+    private void HandlePacket(DanmakuPacket packet, int depth)
+    {
+        if (packet == null || depth > 4) return;
+
+        var traced = PacketTraced;
+        if (traced != null) try { traced(packet.Operation, packet.Version, packet.Body.Length); } catch { }
+
+        switch (packet.Operation)
+        {
+            case DanmakuProtocol.OpAuthReply:
+                HandleAuthReply(packet.Body);
+                break;
+
+            case DanmakuProtocol.OpHeartbeatReply:
+                HandlePopularity(packet.Body);
+                break;
+
+            case DanmakuProtocol.OpMessage:
+                if (packet.Version == 2)
+                {
+                    byte[] inflated;
+                    try
+                    {
+                        inflated = DanmakuProtocol.Inflate(packet.Body);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Write("danmaku inflate: " + ex.Message);
+                        return;
+                    }
+
+                    var nested = new List<byte>(inflated);
+                    DanmakuPacket inner;
+                    while (DanmakuProtocol.TryTakePacket(nested, out inner)) HandlePacket(inner, depth + 1);
+                }
+                else if (packet.Version == 3)
+                {
+                    if (!_brotliWarned)
+                    {
+                        _brotliWarned = true;
+                        LastError = "服务器返回 brotli 压缩，当前只支持 zlib";
+                        Logger.Write("danmaku: protover 3 (brotli) not supported");
+                    }
+                }
+                else
+                {
+                    HandleBody(packet.Body);
+                }
+                break;
+        }
+    }
+
+    private void HandleAuthReply(byte[] body)
+    {
+        var text = Encoding.UTF8.GetString(body ?? Array.Empty<byte>());
+        var code = 0;
+        try
+        {
+            var root = Json.Parse(text);
+            if (root != null && root["code"] != null) code = root["code"].AsInt;
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("danmaku auth reply: " + ex.Message + " " + text);
+        }
+
+        if (code != 0)
+        {
+            LastError = "鉴权失败 code=" + code;
+            Logger.Write("danmaku auth failed: " + text);
+            throw new InvalidOperationException(LastError);
+        }
+
+        Logger.Write("danmaku auth ok: room " + RoomId);
+        SetConnected(true);
+    }
+
+    private void HandlePopularity(byte[] body)
+    {
+        if (body == null || body.Length == 0) return;
+
+        int value;
+        if (body.Length == 4)
+        {
+            value = (body[0] << 24) | (body[1] << 16) | (body[2] << 8) | body[3];
+        }
+        else if (!int.TryParse(Encoding.UTF8.GetString(body), out value))
+        {
+            return;
+        }
+
+        var handler = PopularityChanged;
+        if (handler != null) try { handler(value); } catch { }
+    }
+
+    private void HandleBody(byte[] body)
+    {
+        if (body == null || body.Length == 0) return;
+
+        var text = Encoding.UTF8.GetString(body);
+        if (text.IndexOf("DANMU_MSG", StringComparison.Ordinal) < 0) return;
+
+        JsonValue root;
+        try
+        {
+            root = Json.Parse(text);
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("danmaku json: " + ex.Message);
+            return;
+        }
+
+        var message = DanmakuProtocol.ParseDanmaku(root);
+        if (message == null) return;
+
+        Interlocked.Increment(ref _messageCount);
+
+        var handler = Received;
+        if (handler != null)
+        {
+            try { handler(message); }
+            catch (Exception ex) { Logger.Write("danmaku handler: " + ex.Message); }
+        }
+    }
+
+    private void SetConnected(bool value)
+    {
+        if (_connected == value) return;
+        _connected = value;
+
+        var handler = ConnectionChanged;
+        if (handler != null) try { handler(value); } catch { }
+
+        if (value) this.ReportStatus("已连接直播间 " + RoomId + "（弹幕通道）");
+    }
+
+    private void ReportStatus(string status)
+    {
+        var handler = StatusChanged;
+        if (handler != null) try { handler(status); } catch { }
+    }
+
+    public void Dispose()
+    {
+        Stop();
+    }
+}

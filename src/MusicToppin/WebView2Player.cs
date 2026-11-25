@@ -36,9 +36,10 @@ internal sealed class WebView2Player : IDisposable
     private Form _host;
     private WebView2 _web;
     private System.Windows.Forms.Timer _poll;
-    private bool _initializing;
+    private Task _initTask;
     private bool _ready;
     private bool _backupTried;
+    private bool _failureReported;
     private ResolvedSong _current;
     private readonly object _gate = new object();
 
@@ -58,9 +59,22 @@ internal sealed class WebView2Player : IDisposable
     public async Task EnsureReadyAsync()
     {
         if (_ready) return;
-        if (_initializing) return;
-        _initializing = true;
 
+        // 同时来两次播放请求时共用同一个初始化任务，避免重复创建窗口
+        if (_initTask == null) _initTask = InitializeAsync();
+        try
+        {
+            await _initTask;
+        }
+        catch
+        {
+            _initTask = null;   // 失败可重试（比如用户刚装好 WebView2 运行时）
+            throw;
+        }
+    }
+
+    private async Task InitializeAsync()
+    {
         try
         {
             _host = new Form
@@ -105,10 +119,6 @@ internal sealed class WebView2Player : IDisposable
             throw new InvalidOperationException(
                 "需要 WebView2 运行时（Windows 11 自带；Windows 10 请安装 Edge WebView2 Runtime）。\n" + ex.Message, ex);
         }
-        finally
-        {
-            _initializing = false;
-        }
     }
 
     private void OnWebResourceRequested(object sender, CoreWebView2WebResourceRequestedEventArgs e)
@@ -135,6 +145,7 @@ internal sealed class WebView2Player : IDisposable
         await EnsureReadyAsync();
         _current = song;
         _backupTried = false;
+        _failureReported = false;
 
         await _web.CoreWebView2.ExecuteScriptAsync("playAudio(" + ToJsString(song.AudioUrl) + ")");
         _poll.Start();
@@ -142,13 +153,16 @@ internal sealed class WebView2Player : IDisposable
 
     public async Task StopAsync()
     {
+        // 先清当前项，避免「停止」的异步收尾把下一首的 Current 抹掉
+        _current = null;
+        _failureReported = false;
+
         try
         {
             _poll.Stop();
             if (_ready) await _web.CoreWebView2.ExecuteScriptAsync("stopAudio()");
         }
         catch { }
-        _current = null;
     }
 
     public async Task SeekAsync(TimeSpan position)
@@ -190,6 +204,18 @@ internal sealed class WebView2Player : IDisposable
                 _backupTried = true;
                 await _web.CoreWebView2.ExecuteScriptAsync("playAudio(" + ToJsString(_current.BackupUrl) + ")");
                 return;
+            }
+
+            // 主地址和备用地址都失败：报一次，让上层跳到下一首，而不是卡住
+            if (error != 0 && _current != null && !_failureReported)
+            {
+                _failureReported = true;
+                var failed = Failed;
+                if (failed != null)
+                {
+                    try { failed("音频加载失败（直链可能已过期，或这一条需要登录 B 站）"); }
+                    catch (Exception ex) { Logger.Write("player failed handler: " + ex.Message); }
+                }
             }
 
             var state = new PlaybackState
