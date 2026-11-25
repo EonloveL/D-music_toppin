@@ -204,6 +204,8 @@ Uninstall.exe /S                 静默卸载
 - ✅ **S4 播放链路验证**：托盘「点歌测试（播放 BV）…」输入 BV 号 → 解析 DASH 音频 → WebView2 播放 → HUD 显示真实标题与进度
 - ⏳ S2 弹幕接入、S3 多平台取流
 
+**接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。
+
 播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 105 KB / 26 MB 的轻量形态。
 ## 下一步（V2）
 
