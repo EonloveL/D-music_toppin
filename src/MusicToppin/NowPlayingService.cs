@@ -35,6 +35,7 @@ internal sealed class NowPlayingService : IDisposable
     private readonly List<string[]> _recent = new List<string[]>();
     private int _playedCount;
 
+    private NowPlaying? _own;
     private SourceKind _activeKind = SourceKind.None;
     private SourceKind _candidateKind = SourceKind.None;
     private int _candidateHits;
@@ -81,6 +82,16 @@ internal sealed class NowPlayingService : IDisposable
         _pollStartedUtc = DateTime.UtcNow;
         try
         {
+            // 点歌模式自己在播时，优先用自家状态（有真实进度和下一首）
+            var own = _own;
+            if (own != null)
+            {
+                var ownSnapshot = WithHistory(own.Value);
+                UpdateHistory(ownSnapshot.Title, ownSnapshot.Artist);
+                Publish(ownSnapshot);
+                return;
+            }
+
             var smtc = await _smtc.ReadAsync();
             if (_disposed) return;
 
@@ -97,20 +108,7 @@ internal sealed class NowPlayingService : IDisposable
 
             UpdateHistory(value.Value.Title, value.Value.Artist);
 
-            var titles = new string[NowPlaying.HistorySlots];
-            var artists = new string[NowPlaying.HistorySlots];
-            for (var i = 0; i < _recent.Count && i < NowPlaying.HistorySlots; i++)
-            {
-                titles[i] = _recent[i][0];
-                artists[i] = _recent[i][1];
-            }
-
-            var np = value.Value;
-            np.PrevTitles = titles;
-            np.PrevArtists = artists;
-            np.PrevCount = Math.Min(_recent.Count, NowPlaying.HistorySlots);
-            np.PlayedCount = _playedCount;
-            Publish(np);
+            Publish(WithHistory(value.Value));
         }
         catch (Exception ex)
         {
@@ -257,6 +255,30 @@ internal sealed class NowPlayingService : IDisposable
         _lastTitle = title;
         _lastArtist = artist ?? "";
         _titleSinceUtc = DateTime.UtcNow;
+    }
+
+    /// <summary>把历史曲目挂到状态上（上一首/灰卡要用）。</summary>
+    private NowPlaying WithHistory(NowPlaying np)
+    {
+        var titles = new string[NowPlaying.HistorySlots];
+        var artists = new string[NowPlaying.HistorySlots];
+        for (var i = 0; i < _recent.Count && i < NowPlaying.HistorySlots; i++)
+        {
+            titles[i] = _recent[i][0];
+            artists[i] = _recent[i][1];
+        }
+
+        np.PrevTitles = titles;
+        np.PrevArtists = artists;
+        np.PrevCount = Math.Min(_recent.Count, NowPlaying.HistorySlots);
+        np.PlayedCount = _playedCount;
+        return np;
+    }
+
+    /// <summary>点歌模式下由播放器推状态进来；传 null 表示回到外部播放器。</summary>
+    public void SetOwnPlayback(NowPlaying? np)
+    {
+        _own = np;
     }
 
     private void Publish(NowPlaying np)

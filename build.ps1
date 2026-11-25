@@ -9,7 +9,8 @@ if (-not (Test-Path (Join-Path $cacheRoot 'roslyn\tasks\net472\csc.exe')))
     $packages = @(
         @{ Name = 'sdk-contracts'; Id = 'microsoft.windows.sdk.contracts'; Version = '10.0.19041.1' },
         @{ Name = 'fwref';         Id = 'microsoft.netframework.referenceassemblies.net48'; Version = '1.0.3' },
-        @{ Name = 'roslyn';        Id = 'microsoft.net.compilers.toolset'; Version = '4.11.0' }
+        @{ Name = 'roslyn';        Id = 'microsoft.net.compilers.toolset'; Version = '4.11.0' },
+        @{ Name = 'webview2';      Id = 'microsoft.web.webview2'; Version = '1.0.4370.26' }
     )
 
     New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
@@ -52,6 +53,13 @@ if (-not (Test-Path $icon)) {
 
 Write-Host "== [2/5] 编译主程序（.NET Framework 4.8，产物几十 KB）" -ForegroundColor Cyan
 $refs = @(Get-FrameworkRefArgs) + @(Get-WinmdRefArgs)
+
+$webView2 = Join-Path $cacheRoot 'webview2\pkg\lib\net462'
+if (Test-Path (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll'))
+{
+    $refs += '/r:"' + (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll') + '"'
+    $refs += '/r:"' + (Join-Path $webView2 'Microsoft.Web.WebView2.WinForms.dll') + '"'
+}
 $sources = Get-ChildItem (Join-Path $root 'src\MusicToppin') -Filter *.cs -File | ForEach-Object { '"' + $_.FullName + '"' }
 $appArgs = @(
     '/target:winexe',
@@ -64,6 +72,12 @@ $appArgs = @(
 ) + $refs + $sources
 $code = Invoke-Csc -Arguments $appArgs
 if ($code -ne 0) { throw "主程序编译失败 ($code)" }
+if (Test-Path (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll'))
+{
+    Copy-Item (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll') $appOut -Force
+    Copy-Item (Join-Path $webView2 'Microsoft.Web.WebView2.WinForms.dll') $appOut -Force
+    Copy-Item (Join-Path $cacheRoot 'webview2\pkg\runtimes\win-x64\native\WebView2Loader.dll') $appOut -Force
+}
 Write-Host ("   MusicToppin.exe = " + [math]::Round((Get-Item $appExe).Length / 1KB, 1) + " KB")
 
 Write-Host "== [3/5] 编译卸载器" -ForegroundColor Cyan

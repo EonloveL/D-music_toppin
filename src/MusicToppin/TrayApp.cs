@@ -82,6 +82,8 @@ internal sealed class TrayApp : ApplicationContext
 
         _itemWizard = new ToolStripMenuItem("上屏向导…", null, (_, _) => ShowWizard());
         _itemCheckUpdate = new ToolStripMenuItem("检查更新…", null, (_, _) => CheckForUpdates(manual: true));
+        _itemPlayBv = new ToolStripMenuItem("点歌测试（播放 BV）…", null, (_, _) => PromptAndPlayBv());
+        _itemStopPlay = new ToolStripMenuItem("停止播放", null, (_, _) => StopOwnPlayback());
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -118,6 +120,8 @@ internal sealed class TrayApp : ApplicationContext
             positionMenu,
             _itemWizard,
             _itemCheckUpdate,
+            _itemPlayBv,
+            _itemStopPlay,
             _itemAutoStart,
             new ToolStripSeparator(),
             new ToolStripMenuItem("退出", null, (_, _) => ExitApp())
@@ -158,6 +162,19 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         ApplyTheme();
+
+        var playBv = Environment.GetCommandLineArgs()
+            .FirstOrDefault(a => a.StartsWith("--play-bv=", StringComparison.OrdinalIgnoreCase));
+        if (playBv != null)
+        {
+            var bvid = playBv.Substring("--play-bv=".Length).Trim();
+            if (bvid.Length > 0)
+            {
+                var timer = new System.Windows.Forms.Timer { Interval = 1200 };
+                timer.Tick += (_, _) => { timer.Stop(); timer.Dispose(); _ = PlayBvidAsync(bvid); };
+                timer.Start();
+            }
+        }
         if (_settings.Visible) ShowHud();
         EnsureHotkeys();
         if (!_settings.WizardShown)
@@ -220,6 +237,8 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemHotkey;
     private ToolStripMenuItem _itemWizard;
     private ToolStripMenuItem _itemCheckUpdate;
+    private ToolStripMenuItem _itemPlayBv;
+    private ToolStripMenuItem _itemStopPlay;
     private ToolStripMenuItem _colorMenu;
     private ToolStripMenuItem _itemAccentColor;
     private ToolStripMenuItem _itemTitleColor;
@@ -227,6 +246,7 @@ internal sealed class TrayApp : ApplicationContext
     private bool _wizardOpen;
     private bool _updateDialogOpen;
     private bool _checkingUpdate;
+    private WebView2Player _player;
     private DateTime _lastLockToggleUtc = DateTime.MinValue;
     private string _anchor = "";
     private bool _reanchoring;
@@ -313,6 +333,7 @@ internal sealed class TrayApp : ApplicationContext
             _settings.ArtistColor = defaults.ArtistColor;
             _settings.Save();
             ApplyTheme();
+
             RefreshColorSwatches();
         }));
 
@@ -349,6 +370,7 @@ internal sealed class TrayApp : ApplicationContext
         if (percent > 100) percent = 100;
         _settings.CardOpacity = percent;
         ApplyTheme();
+
     }
 
     private void SetOpacity(int percent)
@@ -376,6 +398,7 @@ internal sealed class TrayApp : ApplicationContext
             _settings.ArtistColor = artist;
             _settings.Save();
             ApplyTheme();
+
             RefreshColorSwatches();
         });
     }
@@ -515,6 +538,95 @@ internal sealed class TrayApp : ApplicationContext
         {
             _updateDialogOpen = false;
         }
+    }
+    private void PromptAndPlayBv()
+    {
+        using (var prompt = new PromptDialog("播放 B 站视频", "输入 BV 号或视频链接（例如 BV1xx411c7mD）"))
+        {
+            if (prompt.ShowDialog(_hud) != DialogResult.OK) return;
+            var text = prompt.Value;
+            if (string.IsNullOrWhiteSpace(text)) return;
+
+            string bvid;
+            if (!Bilibili.TryExtractBvid(text, out bvid))
+            {
+                if (text.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                {
+                    bvid = Bilibili.ResolveShortLink(text.Trim());
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(bvid))
+            {
+                _tray.ShowBalloonTip(2500, "Music Toppin", "没认出 BV 号", ToolTipIcon.Warning);
+                return;
+            }
+
+            _ = PlayBvidAsync(bvid);
+        }
+    }
+
+    private async Task PlayBvidAsync(string bvid)
+    {
+        try
+        {
+            _tray.ShowBalloonTip(1500, "Music Toppin", "正在解析 " + bvid + " …", ToolTipIcon.Info);
+
+            var song = await Task.Run(() => Bilibili.Resolve(bvid));
+            if (song == null)
+            {
+                _tray.ShowBalloonTip(3000, "Music Toppin", "解析失败：可能需要在 B 站登录后才能播放高码率", ToolTipIcon.Warning);
+                return;
+            }
+
+            if (_player == null)
+            {
+                _player = new WebView2Player();
+                _player.StateChanged += OnOwnPlaybackState;
+                _player.Failed += message => _tray.ShowBalloonTip(4000, "Music Toppin", message, ToolTipIcon.Warning);
+            }
+
+            await _player.PlayAsync(song);
+            PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("play bv: " + ex.Message);
+            _tray.ShowBalloonTip(4000, "Music Toppin", ex.Message, ToolTipIcon.Warning);
+        }
+    }
+
+    private void OnOwnPlaybackState(PlaybackState state)
+    {
+        var song = _player == null ? null : _player.Current;
+        if (song == null) return;
+
+        if (state.Ended)
+        {
+            StopOwnPlayback();
+            return;
+        }
+
+        PushOwnState(song, state);
+    }
+
+    private void PushOwnState(ResolvedSong song, PlaybackState state)
+    {
+        if (_service == null || song == null) return;
+
+        var np = new NowPlaying(
+            true, song.Title, song.Artist, state.Position,
+            state.Duration > TimeSpan.Zero ? state.Duration : song.Duration,
+            state.Playing, true,
+            new string[NowPlaying.HistorySlots], new string[NowPlaying.HistorySlots], 0, 0);
+
+        _service.SetOwnPlayback(np);
+    }
+
+    private void StopOwnPlayback()
+    {
+        try { if (_player != null) _ = _player.StopAsync(); } catch { }
+        if (_service != null) _service.SetOwnPlayback(null);
     }
     private void ShowWizard()
     {

@@ -145,6 +145,30 @@ internal interface IPlaybackEngine : IDisposable
 
 ---
 
+## 六点五、S4 实测结论（已完成验证）
+
+用 `BV1xx411c7mD` 走通了完整链路：
+
+```
+view API（拿 cid/标题/时长，无需 cookie）
+  → playurl?fnval=16（DASH，AAC 132kbps，mcdn/bilivideo CDN）
+  → WebView2 <audio> + WebResourceRequested 注入 Referer
+  → 正常播放：duration 2055s、currentTime 每秒 +1、readyState=4、无 error
+  → HUD 显示 B 站标题/UP主 + 真实进度
+```
+
+实测数据：
+
+| 项 | 数值 |
+|---|---|
+| 安装包 | 85.5 KB → **348 KB**（多了 WebView2 的 Core/WinForms/Loader 共 ~916 KB，压缩后 ~260 KB） |
+| 主程序 | 105.5 KB → 123 KB |
+| WebView2 进程 | 3 个，合计约 **180 MB** 内存 |
+| 播放延迟 | 解析 + 起播约 1–2 秒 |
+
+**结论**：方案 A 可行，BV 点播保留 WebView2；纯显示模式不受影响（不创建播放器就不加载 WebView2）。
+
+踩坑记录：安装器原本会「删除除两个 exe 外的所有文件」，加入依赖 DLL 后会被误删——已改成只清理已知的 `*_MusicToppin.exe` 残留。
 ## 七、风险与合规
 
 1. **非官方接口**：网易云/QQ/B站的搜索与取流都不是公开 API，随时可能变；建议每个源做成可替换插件，失败只影响单个源。

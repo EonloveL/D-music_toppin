@@ -155,14 +155,12 @@ internal static class Program
             try { File.Delete(tempZip); } catch { }
         }
 
-        // 清掉历史残留（例如被占用后改名遗留的 {guid}_MusicToppin.exe）
+        // 只清掉已知的历史残留（被占用后改名遗留的 {guid}_MusicToppin.exe）。
+        // 绝对不能"删除除两个 exe 之外的所有文件"——payload 里还有 WebView2 的依赖 DLL。
         try
         {
-            var keep = new[] { AppExe, "Uninstall.exe" };
-            foreach (var file in Directory.GetFiles(targetDir))
+            foreach (var file in Directory.GetFiles(targetDir, "*_MusicToppin.exe"))
             {
-                var name = Path.GetFileName(file);
-                if (Array.IndexOf(keep, name) >= 0) continue;
                 try { File.Delete(file); } catch { }
             }
         }
