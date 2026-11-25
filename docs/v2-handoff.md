@@ -5,7 +5,7 @@
 ## 0. 一句话现状
 
 **V1.1.1 已发布（叠加层 / 离屏采集 / 遮挡模式，已合进 main）；V2 已完成 S1（点歌指令 + 队列）、S2（B 站弹幕接入 + 点歌自动播放）、S3-网易云、S4（BV 播放链路）。**
-S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示）。剩下 Apple Music、酷我/酷狗候选。版本号 **1.2.0**（未发布）。
+S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示 + 视频小窗）。剩下酷狗、Apple Music。版本号 **1.2.0**（未发布）。
 
 ## 1. 仓库与构建
 
@@ -15,7 +15,7 @@ S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「�
 | 分支 | `main` 是唯一开发线（V2 + v1.1.1 已合并）；`fix/v1` 保留为 v1.1.1 发布点 |
 | 最新提交 | 见 `git log -1` |
 | 构建 | `powershell -ExecutionPolicy Bypass -File .\build.ps1`（**不需要 .NET SDK**，首次自动下载工具链到 `.cache\nuget`） |
-| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（124 项，退出码 0 = 全过） |
+| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（129 项，退出码 0 = 全过） |
 | 产物 | `build\MusicToppin-Setup.exe`（约 367 KB）、`build\app\`（主程序 182 KB） |
 | 运行 | 装好后从托盘启动；调试直接跑 `build\app\MusicToppin.exe` |
 
@@ -111,7 +111,10 @@ QQ 音乐：点歌 qq 起风了
   `QQMusicCache\WebkitCache\*\Cookies` 里的 `pt2gguin`（值形如 `o1305835491`，也认 `uin` / `qm_keyst`），
   `ComData\qmcomdata.ini` 的 `[SectQMAPI] uin` 只作辅助（实测登录后它仍是 0，不能单靠它）；
   酷狗读 `HKCU\Software\KuGoo3` 的 `LastLoginUserID` 或 `kugou.ini`；没开客户端可直接「启动」，状态可「再次检查」
-- 完整接口与候选平台（酷我 / 酷狗 / 汽水 / YouTube / Spotify）见 **[docs/v2-sources.md](v2-sources.md)**
+- **自动选平台**：`点歌 歌名` 只看「应用内可播」的登录态 —— 只登录一个就用它，都登录网易云优先、QQ 兜底；
+  `wy` / `qq` 前缀强制指定；`BV` 永远走 B 站（`SongResolvers.AutoOrder` 有单元测试）
+- **单队列播放**：同一时间只放一首（`_playingFromQueue` + 手动点播先 `StopOwnPlayback`）
+- 完整接口与候选平台（酷狗 / 汽水 / YouTube / Spotify）见 **[docs/v2-sources.md](v2-sources.md)**
 
 > 直播中**默认不弹任何通知**：点歌/连接/播放只写日志 + 更新菜单状态行，避免右下角弹窗干扰键鼠输入判定。
 > 需要气泡时打开「弹幕点歌 → 点歌/播放时弹气泡提示」（`HKCU\Software\MusicToppin\LiveToast=1`）。
@@ -129,7 +132,9 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 - 截图：`docs/screenshots/hud-next.png`
 - 托盘「点歌队列（N 首）」展开列表（前 10 首：歌名 · 点歌人），带「下一首 / 清空」
 - 叠加层（OBS 浏览器源）同步「下一首 + 队列数」；点歌成功/放不了在叠加层底部弹 4.5 秒提示（`OverlayState.Toast / ToastId`）
-- 至此 S5 完成；剩余是 S3 的 Apple Music / 酷我 / 酷狗
+- **视频小窗**：`OverlayState.VideoBvid` → `/video` 页用 B 站官方嵌入播放器（`muted=1`，声音仍由应用播放器输出）；
+  播放 B 站视频时 `TrayApp._videoBvid` 置位，停止/下一首自动清空。OBS 再加一个浏览器源指向 `/video`（480×270）
+- 至此 S5 完成；剩余是 S3 的酷狗 / Apple Music
 ## 3. 关键决策与代价
 
 | 决策 | 原因 | 代价 |
@@ -144,11 +149,11 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 
 ## 4. 待办（建议顺序）
 
-### S3 剩余：Apple Music / 酷我 / 酷狗
+### S3 剩余：酷狗 / Apple Music
 
 - 分派已经做好：`SongResolvers.Resolve()` 里加一个 `case`，照 `Netease.cs` 的形状写（搜索 → 取流 → 兜底 → 纯函数解析 + 测试）
-- **酷我**：`search.kuwo.cn/r.s` + `antiserver.kuwo.cn/anti.s?type=convert_url…` 匿名就给 mp3，约 100 行，优先做
 - **酷狗**：搜索匿名可用，取流要 `key = md5(hash + "kgcloud")` 的 tracker 接口 + 跟随 302，中等成本
+- **酷我（已放弃）**：`anti.s` 匿名只给 ~11 秒试听（免费歌只有移动端能听），实测后撤掉，别再重复踩
 - **Apple Music**：网页端无直链，只能试听或 MusicKit（要开发者 token），保持「只入队提示」
 - 候选平台评估见 [docs/v2-sources.md](v2-sources.md)
 
@@ -204,7 +209,7 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - 日志：`%TEMP%\musictoppin.log`（`sources:`、`netease client:`、`netease account:`、`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`qq:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
 - 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded` 等）
 - 安装目录：默认 `%LocalAppData%\Programs\MusicToppin`，可自定义
-- 单元测试：`run-tests.ps1`（124 项，不必联网）
+- 单元测试：`run-tests.ps1`（129 项，不必联网）
 - 叠加层：托盘开启后日志里有 `overlay server started at http://127.0.0.1:<port>/`，浏览器可直接打开验证
 
 ## 7. 新会话建议的第一次动作

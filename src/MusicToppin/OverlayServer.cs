@@ -30,6 +30,9 @@ internal sealed class OverlayState
     public string Toast = "";
     public int ToastId;
 
+    /// <summary>视频点播：要显示在直播画面小窗里的 B 站视频（空 = 不显示）。</summary>
+    public string VideoBvid = "";
+
     /// <summary>手写 JSON（.NET Framework 4.8 没有 System.Text.Json）。</summary>
     public string ToJson()
     {
@@ -45,6 +48,7 @@ internal sealed class OverlayState
         AppendString(builder, "nextTitle", NextTitle);
         AppendString(builder, "nextArtist", NextArtist);
         AppendString(builder, "toast", Toast);
+        AppendString(builder, "videoBvid", VideoBvid);
         builder.Append(",\"queueCount\":").Append(QueueCount);
         builder.Append(",\"toastId\":").Append(ToastId);
         builder.Append(",\"playing\":").Append(Playing ? "true" : "false");
@@ -179,6 +183,11 @@ internal sealed class OverlayServer : IDisposable
                 else if (path == "/" || path == "/index.html")
                 {
                     body = Page;
+                    contentType = "text/html; charset=utf-8";
+                }
+                else if (path == "/video")
+                {
+                    body = VideoPage;
                     contentType = "text/html; charset=utf-8";
                 }
                 else
@@ -358,6 +367,49 @@ internal sealed class OverlayServer : IDisposable
     fetch('/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});
   }
   tick(); setInterval(tick,400);
+})();
+</script>
+</body>
+</html>";
+
+    /// <summary>
+    /// 视频小窗：OBS 里再加一个「浏览器源」指向 /video。
+    /// 平时透明；点歌点到 B 站视频时，这里用小窗播放（静音，声音仍走应用自己的播放器）。
+    /// 它只存在于浏览器源里，所以主播自己的桌面上不会出现，只有直播画面里能看到。
+    /// </summary>
+    private const string VideoPage = @"<!DOCTYPE html>
+<html lang=""zh-CN"">
+<head>
+<meta charset=""utf-8"">
+<title>Music Toppin Video</title>
+<style>
+  html,body{margin:0;padding:0;background:transparent;overflow:hidden;}
+  #stage{position:fixed;left:0;top:0;right:0;bottom:0;display:none;border-radius:12px;overflow:hidden;
+    background:#000;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 40px rgba(0,0,0,.55);}
+  #stage.on{display:block;}
+  #player{width:100%;height:100%;border:0;display:block;}
+</style>
+</head>
+<body>
+<div id=""stage""><iframe id=""player"" allow=""autoplay; fullscreen"" allowfullscreen></iframe></div>
+<script>
+(function(){
+  var stage=document.getElementById('stage');
+  var player=document.getElementById('player');
+  var current='';
+  function apply(st){
+    var bv=st.videoBvid||'';
+    if(bv===current) return;
+    current=bv;
+    if(!bv){stage.className='';player.removeAttribute('src');return;}
+    stage.className='on';
+    player.src='https://player.bilibili.com/player.html?bvid='+encodeURIComponent(bv)+
+      '&p=1&autoplay=1&muted=1&danmaku=0&high_quality=1&as_wide=1';
+  }
+  function tick(){
+    fetch('/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});
+  }
+  tick();setInterval(tick,600);
 })();
 </script>
 </body>

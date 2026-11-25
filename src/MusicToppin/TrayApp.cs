@@ -453,6 +453,7 @@ internal sealed class TrayApp : ApplicationContext
     private string _toastText = "";
     private int _toastId;
     private DateTime _toastUntilUtc = DateTime.MinValue;
+    private string _videoBvid = "";
     private ToolStripMenuItem _itemOverlay;
     private ToolStripMenuItem _itemOffscreen;
     private ToolStripMenuItem _itemOccluded;
@@ -796,6 +797,9 @@ internal sealed class TrayApp : ApplicationContext
     {
         try
         {
+            // 单播放：手动点播前先停掉队列里正在放的那首
+            if (_playingFromQueue) StopOwnPlayback();
+
             _tray.ShowBalloonTip(1500, "Music Toppin", "正在解析 " + bvid + " …", ToolTipIcon.Info);
 
             var song = await Task.Run(() => Bilibili.Resolve(bvid));
@@ -805,6 +809,7 @@ internal sealed class TrayApp : ApplicationContext
                 return;
             }
 
+            _videoBvid = bvid;
             await EnsurePlayer().PlayAsync(song);
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
         }
@@ -856,6 +861,7 @@ internal sealed class TrayApp : ApplicationContext
     private void StopOwnPlayback()
     {
         _playingFromQueue = false;
+        _videoBvid = "";
         _queue.ClearCurrent();
         try { if (_player != null) _ = _player.StopAsync(); } catch { }
         if (_service != null) _service.SetOwnPlayback(null);
@@ -1293,10 +1299,14 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (_playingFromQueue) return;
 
+        // 手动点播（托盘「点歌测试」）还在放：等它结束，避免两路同时出声
+        if (_player != null && _player.Current != null) return;
+
         var item = _queue.TakeNext();
         if (item == null) return;
 
         _playingFromQueue = true;
+        _videoBvid = "";
         UpdateQueueMenu();
 
         ResolvedSong song = null;
@@ -1332,6 +1342,9 @@ internal sealed class TrayApp : ApplicationContext
         item.Duration = song.Duration;
         item.Resolved = true;
 
+        // 视频点播：叠加层 /video 小窗里同步播放（静音，声音仍由应用播放）
+        _videoBvid = item.Request != null && item.Request.IsVideo ? ExtractVideoBvid(item, song) : "";
+
         try
         {
             await EnsurePlayer().PlayAsync(song);
@@ -1351,6 +1364,19 @@ internal sealed class TrayApp : ApplicationContext
             UpdateQueueMenu();
             StartNextQueuedSong();
         }
+    }
+
+    private static string ExtractVideoBvid(QueueItem item, ResolvedSong song)
+    {
+        string bvid;
+
+        var pageUrl = song != null ? song.PageUrl : null;
+        if (!string.IsNullOrEmpty(pageUrl) && Bilibili.TryExtractBvid(pageUrl, out bvid)) return bvid;
+
+        var query = item != null && item.Request != null ? item.Request.Query : null;
+        if (!string.IsNullOrEmpty(query) && Bilibili.TryExtractBvid(query, out bvid)) return bvid;
+
+        return "";
     }
 
     private async Task<ResolvedSong> ResolveQueuedSongAsync(QueueItem item)
@@ -1397,6 +1423,7 @@ internal sealed class TrayApp : ApplicationContext
             QueueCount = np.QueueCount,
             Toast = DateTime.UtcNow < _toastUntilUtc ? _toastText : "",
             ToastId = _toastId,
+            VideoBvid = _videoBvid,
             Show = np.HasSession && np.Title.Length > 0 && _hud.Visible || (np.HasSession && np.Title.Length > 0 && _settings.Overlay)
         };
     }
@@ -1440,7 +1467,8 @@ internal sealed class TrayApp : ApplicationContext
         if (!notify) return;
 
         _tray.ShowBalloonTip(6000, "Music Toppin",
-            "叠加层地址已复制：" + url + "\n在 OBS 添加「浏览器源」，粘贴地址，宽 400 高 320。\n现在可以关掉桌面浮窗，观众仍能看到。",
+            "叠加层地址已复制：" + url + "\n在 OBS 添加「浏览器源」，宽 400 高 320。\n" +
+            "视频点播再加一个浏览器源：" + url + "video（480×270）。\n现在可以关掉桌面浮窗，观众仍能看到。",
             ToolTipIcon.Info);
     }
 

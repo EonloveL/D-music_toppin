@@ -42,7 +42,7 @@ MUSIC_U / __csrf / NMTID  → 直接当请求 cookie
 
 | 平台 | 搜索 | 取流 | 登录/风控 | 结论 |
 |---|---|---|---|---|
-| **酷我音乐** | `search.kuwo.cn/r.s?all=…` 匿名可用 | `antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=MUSIC_<id>` **匿名直接给 mp3** | 基本不需要 | ⭐ 最优先：约 100 行，能明显提高「没登录也能点歌」的命中率 |
+| ~~酷我音乐~~ | `search.kuwo.cn/r.s` 匿名可用（单引号 JSON） | `antiserver.kuwo.cn/anti.s?…` 匿名只给 **~11 秒试听**（181 KB） | 免费歌只有移动端能听 | ❌ 已实测放弃，接了一半又撤掉 |
 | **酷狗音乐** | `mobilecdn.kugou.com/api/v3/search/song` 匿名可用 | `trackercdn.kugou.com/i/v2/?…` 需要 `key = md5(hash + "kgcloud")` + `appid/pid`，返回 302 到 CDN | 免费曲匿名可用 | 中等成本（MD5 签名 + 302 跟随），值得做 |
 | **汽水音乐（抖音）** | 有但需要 `X-Bogus` / `a_bogus` 签名 | 同上 | 风控强、接口常变 | ❌ 不建议，维护成本高 |
 | **YouTube Music** | 需要 YouTube Data API + 第三方解析 | 音轨提取要 yt-dlp / 第三方服务 | 合规风险高 | ❌ 不做 |

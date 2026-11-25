@@ -11,6 +11,7 @@ namespace MusicToppin.Tests
             DanmakuTests.Run();
             NeteaseTests.Run();
             QQMusicTests.Run();
+            ResolverTests.Run();
             IniFileTests.Run();
             return TestRun.Summarize();
         }
