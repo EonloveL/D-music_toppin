@@ -375,6 +375,7 @@ internal sealed class DanmakuClient : IDisposable
     public int PacketCount { get { return Volatile.Read(ref _packetCount); } }
 
     private int _packetCount;
+    private volatile bool _reconnectRequested;
     private readonly HashSet<string> _seenCommands = new HashSet<string>(StringComparer.Ordinal);
     public bool IsConnected { get { return _connected; } }
     public int MessageCount { get { return Volatile.Read(ref _messageCount); } }
@@ -521,6 +522,8 @@ internal sealed class DanmakuClient : IDisposable
 
     private async Task PumpAsync(DanmakuEndpoint endpoint, CancellationToken ct)
     {
+        _reconnectRequested = false;
+
         using (var session = CancellationTokenSource.CreateLinkedTokenSource(ct))
         using (var socket = await ConnectAnyAsync(endpoint, ct))
         {
@@ -572,7 +575,10 @@ internal sealed class DanmakuClient : IDisposable
                     while (DanmakuProtocol.TryTakePacket(pending, out packet))
                     {
                         HandlePacket(packet, 0);
+                        if (_reconnectRequested) break;
                     }
+
+                    if (_reconnectRequested) break;
                 }
             }
             finally
@@ -636,6 +642,69 @@ internal sealed class DanmakuClient : IDisposable
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { Logger.Write("danmaku heartbeat: " + ex.Message); }
+    }
+
+    /// <summary>
+    /// 处理 PREPARING / LIVE / STOP_LIVE_ROOM_LIST：
+    /// 主播重开直播时，旧 WebSocket 不会断，但弹幕订阅会静默失效（表现为“第一条之后再也收不到”），
+    /// 所以收到本房间的开播/下播通知就立刻换一条新连接。
+    /// </summary>
+    private bool HandleRoomLifecycle(JsonValue root)
+    {
+        if (root == null) return false;
+
+        var cmd = root["cmd"] != null ? root["cmd"].AsString : "";
+        if (string.IsNullOrEmpty(cmd)) return false;
+
+        if (cmd == "STOP_LIVE_ROOM_LIST")
+        {
+            if (RoomListContains(root, RoomId))
+            {
+                Logger.Write("danmaku lifecycle: 本房间出现在下播列表，重连");
+                RequestReconnect();
+            }
+            return true;
+        }
+
+        if (cmd != "PREPARING" && cmd != "LIVE") return false;
+
+        long roomId = 0;
+        if (root["roomid"] != null) roomId = root["roomid"].AsInt;
+        else if (root["data"] != null && root["data"]["roomid"] != null) roomId = root["data"]["roomid"].AsInt;
+
+        Logger.Write("danmaku lifecycle: " + cmd + " room=" + roomId);
+
+        // 有些房间的 LIVE/PREPARING 不带 roomid，只能当作本房间处理
+        if (roomId > 0 && roomId != RoomId) return true;
+
+        LiveStatus = cmd == "LIVE" ? 1 : 0;
+        ReportStatus("房间 " + RoomId + (cmd == "LIVE" ? "（直播中）" : "（准备中 / 已下播）"));
+        RequestReconnect();
+        return true;
+    }
+
+    private static bool RoomListContains(JsonValue root, long roomId)
+    {
+        try
+        {
+            var list = root["data"] != null ? root["data"]["room_list"] : null;
+            if (list == null || list.Kind != JsonKind.Array) return false;
+
+            foreach (var item in list.Items)
+            {
+                if (item == null) continue;
+
+                var id = item.Kind == JsonKind.Object && item["roomid"] != null ? item["roomid"].AsInt : item.AsInt;
+                if (id == roomId) return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private void RequestReconnect()
+    {
+        _reconnectRequested = true;
     }
 
     private void HandlePacket(DanmakuPacket packet, int depth)
@@ -749,6 +818,9 @@ internal sealed class DanmakuClient : IDisposable
             Logger.Write("danmaku json: " + ex.Message);
             return;
         }
+
+        // 房间生命周期：重开直播后旧连接还在、但弹幕订阅会失效，主动换新连接
+        if (HandleRoomLifecycle(root)) return;
 
         var message = DanmakuProtocol.ParseDanmaku(root);
         if (message == null)
