@@ -16,9 +16,34 @@ internal static class Netease
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
     private const string Referer = "https://music.163.com/";
-    private const string Cookie = "os=pc; appver=8.9.70";
+    private const string GuestCookie = "os=pc; appver=8.9.70";
+
+    /// <summary>登录后的 cookie（空 = 游客，只能放免费曲）。</summary>
+    public static string Cookie = "";
+
+    public static bool IsLoggedIn
+    {
+        get { return !string.IsNullOrWhiteSpace(Cookie); }
+    }
 
     private const int MaxCandidates = 3;
+
+    private static string CookieHeader()
+    {
+        return string.IsNullOrWhiteSpace(Cookie) ? GuestCookie : GuestCookie + "; " + Cookie;
+    }
+
+    /// <summary>用当前 cookie 查账号，返回昵称；未登录/失效返回 null。</summary>
+    public static string CheckAccount()
+    {
+        var json = Get("https://music.163.com/api/nuser/account/get");
+        if (json == null) return null;
+
+        var root = SafeParse(json);
+        var profile = root != null ? root["profile"] : null;
+        var nickname = profile != null && profile["nickname"] != null ? profile["nickname"].AsString : null;
+        return string.IsNullOrWhiteSpace(nickname) ? null : nickname;
+    }
 
     /// <summary>搜索/详情里的一条候选。</summary>
     internal sealed class Candidate
@@ -115,7 +140,7 @@ internal static class Netease
             var request = (HttpWebRequest)WebRequest.Create("https://music.163.com/song/media/outer/url?id=" + id + ".mp3");
             request.UserAgent = UserAgent;
             request.Referer = Referer;
-            request.Headers["Cookie"] = Cookie;
+            request.Headers["Cookie"] = CookieHeader();
             request.AllowAutoRedirect = true;
             request.Timeout = 12000;
 
@@ -246,7 +271,7 @@ internal static class Netease
             var request = (HttpWebRequest)WebRequest.Create(url);
             request.UserAgent = UserAgent;
             request.Referer = Referer;
-            request.Headers["Cookie"] = Cookie;
+            request.Headers["Cookie"] = CookieHeader();
             request.Accept = "*/*";
             request.Timeout = 12000;
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;

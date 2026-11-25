@@ -5,7 +5,7 @@
 ## 0. 一句话现状
 
 **V1.1.1 已发布（叠加层 / 离屏采集 / 遮挡模式，已合进 main）；V2 已完成 S1（点歌指令 + 队列）、S2（B 站弹幕接入 + 点歌自动播放）、S3-网易云、S4（BV 播放链路）。**
-剩下 S3 的 QQ / Apple Music、S5（展示整合）。版本号已升到 **1.2.0**（未发布）。
+S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」）。剩下 Apple Music、酷我/酷狗候选，以及 S5（展示整合）。版本号 **1.2.0**（未发布）。
 
 ## 1. 仓库与构建
 
@@ -15,7 +15,7 @@
 | 分支 | `main` 是唯一开发线（V2 + v1.1.1 已合并）；`fix/v1` 保留为 v1.1.1 发布点 |
 | 最新提交 | 见 `git log -1` |
 | 构建 | `powershell -ExecutionPolicy Bypass -File .\build.ps1`（**不需要 .NET SDK**，首次自动下载工具链到 `.cache\nuget`） |
-| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（94 项，退出码 0 = 全过） |
+| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（110 项，退出码 0 = 全过） |
 | 产物 | `build\MusicToppin-Setup.exe`（约 367 KB）、`build\app\`（主程序 182 KB） |
 | 运行 | 装好后从托盘启动；调试直接跑 `build\app\MusicToppin.exe` |
 
@@ -45,7 +45,7 @@
 | `src/MusicToppin/Json.cs` | 零依赖只读 JSON（对象→Dictionary / 数组→List） |
 | `src/MusicToppin/TrayApp.cs` | 「弹幕点歌」菜单：连接/断开、队列状态、自动播放、放不了就跳下一首 |
 | `src/MusicToppin/Settings.cs` | `LiveRoomId`、`LiveAutoConnect`（记住直播间，启动自动重连） |
-| `tests/` | 94 项单元测试（点歌解析、队列、弹幕协议、JSON） |
+| `tests/` | 110 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
 
 行为要点：
 
@@ -75,28 +75,37 @@ BV 号 → api.bilibili.com/x/web-interface/view（cid/标题/时长，实测无
 
 托盘菜单已有：**「弹幕点歌」**（连接直播间/断开/队列/气泡开关）、**「点歌测试（播放 BV）…」**、**「停止播放」**、**「直播叠加层（OBS 浏览器源）」**、**「离屏采集」**、**「遮挡模式」**。
 
-### S3 网易云取流（已验证可播）
+### S3 曲源：网易云 + QQ 音乐（已验证可播）
 
 ```
-点歌 起风了 / id:1330348068
+网易云：点歌 起风了 / id:1330348068
   → /api/search/get/web?s=…（或 /api/song/detail?ids=[id]）
-  → /api/song/enhance/player/url?br=320000   （320k mp3 直链）
-  → 失败再走 /song/media/outer/url?id=<id>.mp3（302 → 128k）
-  → 隐藏 WebView2 <audio> 直接播（CDN 实测不校验 Referer）
+  → /api/song/enhance/player/url?br=320000（320k）→ 失败走 /song/media/outer/url（128k）
+QQ 音乐：点歌 qq 起风了
+  → c.y.qq.com/soso/fcgi-bin/client_search_cp（搜索）
+  → u.y.qq.com/cgi-bin/musicu.fcg → vkey.GetVkeyServer → sip + purl
+两者都 → 隐藏 WebView2 <audio> 直接播
 ```
 
 | 文件 | 职责 |
 |---|---|
 | `src/MusicToppin/Netease.cs` | 搜索 / 详情 / 320k 取流 / outer 兜底 / 解析（纯函数可测） |
-| `src/MusicToppin/SongResolvers.cs` | 按 `SongRequest.Source` 分派：`Auto`/`Netease` → 网易云，`Bilibili` → BV |
+| `src/MusicToppin/QQMusic.cs` | QQ 搜索 / vkey / uin 归一化 / 解析（纯函数可测） |
+| `src/MusicToppin/NeteaseClient.cs` | 从官方客户端读登录 cookie（winsqlite3 + DPAPI + AES-GCM） |
+| `src/MusicToppin/WebLoginForm.cs` | 应用内登录窗口（官方登录页 + 自动抓 cookie） |
+| `src/MusicToppin/SourceCheck.cs` | 播放器检查：已安装 / 运行中 / 登录 |
+| `src/MusicToppin/SongResolvers.cs` | 按 `SongRequest.Source` 分派：`Auto`/`Netease` → 网易云，`QQ` → QQ 音乐，`Bilibili` → BV |
 | `src/MusicToppin/ResolvedSong.cs` | 各平台统一的「可播放条目」（从 `Bilibili.cs` 拆出来） |
 
 行为要点：
 
-- **不需要 weapi 加密**：2026-11 实测 `/api/*` 带 UA + `Referer: https://music.163.com/` + `Cookie: os=pc; appver=8.9.70` 就能用
+- **网易云不需要 weapi 加密**：2026-11 实测 `/api/*` 带 UA + `Referer` + `os=pc` Cookie 就能用
+- **网易云登录优先「同步官方客户端」**：读 `webapp*xx*\LocalPrefs.json` 的 `os_crypt.encrypted_key`
+  → DPAPI 得到 AES 密钥 → `Cookies`（SQLite）里 AES-GCM 解出 `MUSIC_U`；读不到再走应用内扫码
 - 关键词取搜索前 3 个候选逐个试（搜索第一名常是翻唱）；`id:` 直接查详情
-- 无版权 / 会员歌：`player/url` 返回 `code=404`、`outer/url` 302 到 `music.163.com/404` → 返回 null → 队列跳过并提示
-- 游客身份拿不到 VIP 曲库；以后要做「登录 cookie」的话，从 `MUSIC_U` 读起
+- 无版权 / 会员歌：`player/url` 返回 `code=404`、`outer/url` 302 到 `music.163.com/404` → null → 队列跳过
+- **QQ 音乐匿名大概率拿不到 purl**（`req_0.code=1000`），少数免费歌可以；登录后正常
+- 完整接口与候选平台（酷我 / 酷狗 / 汽水 / YouTube / Spotify）见 **[docs/v2-sources.md](v2-sources.md)**
 
 > 直播中**默认不弹任何通知**：点歌/连接/播放只写日志 + 更新菜单状态行，避免右下角弹窗干扰键鼠输入判定。
 > 需要气泡时打开「弹幕点歌 → 点歌/播放时弹气泡提示」（`HKCU\Software\MusicToppin\LiveToast=1`）。
@@ -105,22 +114,23 @@ BV 号 → api.bilibili.com/x/web-interface/view（cid/标题/时长，实测无
 
 | 决策 | 原因 | 代价 |
 |---|---|---|
-| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **369 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
+| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **381 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
 | **双模式**：纯显示 / 点歌 | 保住 V1「轻量」卖点 | 首次播放时才创建 WebView2（纯显示模式 25–33 MB） |
 | 弹幕用 **getConf** 而不是 getDanmuInfo | 新接口要 wbi 签名 + cookie，未签名直接 -352 | 老接口随时可能下线，届时要做 wbi |
 | 鉴权 **protover=2**（只 zlib） | .NET Framework 4.8 没有 Brotli | 服务器若强制 brotli 就收不到弹幕（会记警告） |
-| 点歌自动播放做成「队列驱动」 | S2 先闭环：弹幕 → 入队 → 出声 | 目前支持网易云 + B 站 BV；QQ/Apple 入队后会被跳过并提示 |
-| 网易云走 **公开 `/api/*`** 而不是 weapi 加密 | 2026-11 实测游客可用，省掉 AES/RSA 一大段代码 | 只拿得到游客曲库；风控一变就得补 weapi |
+| 点歌自动播放做成「队列驱动」 | S2 先闭环：弹幕 → 入队 → 出声 | 支持网易云 + QQ 音乐 + B 站 BV；Apple 入队后会被跳过并提示 |
+| 网易云走 **公开 `/api/*`** 而不是 weapi 加密 | 2026-11 实测游客可用，省掉 AES/RSA 一大段代码 | 游客曲库有限；登录后更多（客户端同步 / 扫码） |
+| 登录优先「**同步官方客户端**」 | 参考工具的文档就是「登录交给官方客户端」，用户不想复制 cookie | 读客户端私有 cookie（仅本机、不上传）；换号后要重新同步；依赖 Win10+ 的 `winsqlite3.dll` |
 
 ## 4. 待办（建议顺序）
 
-### S3 剩余：QQ 音乐 / Apple Music
+### S3 剩余：Apple Music / 酷我 / 酷狗
 
-- 分派已经做好了：`SongResolvers.Resolve()` 里加一个 `case`，各平台实现 `ISongResolver` 形状的方法即可
-- 网易云已完成，可作为模板：`Netease.cs`（搜索 → 取流 → 兜底 → 解析纯函数 + 测试）
-- QQ 音乐：非官方接口（`u.y.qq.com/cgi-bin/musicu.fcg`），需要构造 `comm` + `req_1`，返回的播放地址常带 `vkey` 有效期
-- Apple Music：网页端无直链，基本只能播 30 秒试听或走 MusicKit（要开发者 token），建议先做成「只入队提示、不播放」并标注清楚
-- 两个源都建议做成可开关，失败只影响单源；播放失败的兜底逻辑（跳过下一首）已经由队列负责
+- 分派已经做好：`SongResolvers.Resolve()` 里加一个 `case`，照 `Netease.cs` 的形状写（搜索 → 取流 → 兜底 → 纯函数解析 + 测试）
+- **酷我**：`search.kuwo.cn/r.s` + `antiserver.kuwo.cn/anti.s?type=convert_url…` 匿名就给 mp3，约 100 行，优先做
+- **酷狗**：搜索匿名可用，取流要 `key = md5(hash + "kgcloud")` 的 tracker 接口 + 跟随 302，中等成本
+- **Apple Music**：网页端无直链，只能试听或 MusicKit（要开发者 token），保持「只入队提示」
+- 候选平台评估见 [docs/v2-sources.md](v2-sources.md)
 
 ### S5 展示整合
 
@@ -146,6 +156,13 @@ BV 号 → api.bilibili.com/x/web-interface/view（cid/标题/时长，实测无
 13. **网易云的「无版权」不是网络错误**：`player/url` 会回 `code=404` + `url=null`，`outer/url` 会 302 到
     `music.163.com/404` 的 HTML —— 必须校验 `Content-Type` 与落地域名，否则会把 404 页面当音频播。
 14. **网易云搜索第一名常是翻唱/直播版**：`Netease.Resolve` 会依次试前 3 个候选，不要只取第一个。
+15. **客户端 cookie 是 CEF 方案**：`webapp*xx*\LocalPrefs.json` 的 `os_crypt.encrypted_key` 用 DPAPI 解出
+    AES-256-GCM 密钥；cookie 值是 `v10 + nonce(12) + 密文 + tag(16)`。BCrypt 的 P/Invoke 必须
+    `CharSet.Unicode`，否则 `BCryptOpenAlgorithmProvider` 返回 `0xC0000225`（找不到算法）。
+16. **`winsqlite3.dll` 只有 Win10/11 自带**；没有就回退「应用内登录」。客户端锁着 Cookies 文件，
+    必须先复制到 `%TEMP%` 再读。
+17. **QQ 音乐「搜索成功 ≠ 能播」**：匿名时 vkey 返回 `req_0.code=1000` + 空 `purl`，不要只看搜索有结果。
+18. **读客户端 cookie 是敏感操作**：只在本机做、只用于网易云官方请求；README/文档里写明，不要外传或落盘到别处。
 
 ## 6. 调试入口
 
@@ -156,21 +173,23 @@ MusicToppin.exe --play-bv=BV1xx411c7mD      启动即播放指定 BV（自动化
 MusicToppin.exe --room=5050                 启动即连接直播间弹幕
 MusicToppin.exe --fake-danmaku="点歌 BV…"   注入一条假弹幕，走「解析→入队→播放」全链路
 MusicToppin.exe --fake-danmaku="点歌 起风了" 同上，但走网易云取流（S3 验证用）
+MusicToppin.exe --fake-danmaku="点歌 qq 起风了" 走 QQ 音乐取流（需要登录才有地址）
+MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|qq）
 ```
 
-- 日志：`%TEMP%\musictoppin.log`（`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`netease:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
-- 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded` 等）
+- 日志：`%TEMP%\musictoppin.log`（`sources:`、`netease client:`、`netease account:`、`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`qq:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
+- 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded` 等）
 - 安装目录：默认 `%LocalAppData%\Programs\MusicToppin`，可自定义
-- 单元测试：`run-tests.ps1`（94 项，不必联网）
+- 单元测试：`run-tests.ps1`（110 项，不必联网）
 - 叠加层：托盘开启后日志里有 `overlay server started at http://127.0.0.1:<port>/`，浏览器可直接打开验证
 
 ## 7. 新会话建议的第一次动作
 
 1. `git checkout main && git pull`
-2. `run-tests.ps1` + `build.ps1` 确认环境（应全绿、约 369 KB）
+2. `run-tests.ps1` + `build.ps1` 确认环境（应全绿、约 381 KB）
 3. `MusicToppin.exe --room=5050` 跑 30 秒，看日志里有没有 `danmaku auth ok` 与 `song request`
 4. `MusicToppin.exe --fake-danmaku="点歌 起风了"` 验证网易云链路（日志应有 `resolved:` + `queue play:`）
-5. 接着做 **S3 剩余（QQ 音乐）**：照着 `Netease.cs` 的形状写 `QQ.cs`，在 `SongResolvers` 加 case
+5. 接着做 **S3 剩余**：Apple Music（只有试听）或酷我/酷狗，见 `docs/v2-sources.md`
 
 ## 8. 分支与版本（重要）
 

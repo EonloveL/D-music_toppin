@@ -49,6 +49,13 @@ internal sealed class TrayApp : ApplicationContext
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settings = AppSettings.Load();
 
+        // 曲源登录态：cookie 存注册表，启动时装回静态字段
+        Netease.Cookie = _settings.NeteaseCookie ?? "";
+        QQMusic.Cookie = _settings.QQMusicCookie ?? "";
+        QQMusic.Uin = _settings.QQMusicUin ?? "";
+        Logger.Write("sources: netease=" + (Netease.IsLoggedIn ? "logged in" : "guest") +
+                     ", qq=" + (QQMusic.IsLoggedIn ? "logged in" : "guest"));
+
         _hud = new HudForm();
         _hud.SetCompact(_settings.Compact);
         _hud.SetGreen(_settings.Green);
@@ -104,6 +111,31 @@ internal sealed class TrayApp : ApplicationContext
             new ToolStripSeparator(),
             _itemLiveToast
         });
+
+        _itemNeteaseLogin = new ToolStripMenuItem("网易云：登录（扫码 / 手机号）…", null, (_, _) => LoginNetease());
+        _itemNeteaseLogout = new ToolStripMenuItem("网易云：退出登录", null, (_, _) => LogoutNetease());
+        _itemQqLogin = new ToolStripMenuItem("QQ 音乐：登录（QQ / 微信扫码）…", null, (_, _) => LoginQQMusic());
+        _itemQqLogout = new ToolStripMenuItem("QQ 音乐：退出登录", null, (_, _) => LogoutQQMusic());
+        _neteaseStatus = new ToolStripMenuItem("网易云：未登录（游客曲库）") { Enabled = false };
+        _qqStatus = new ToolStripMenuItem("QQ 音乐：未登录（只能搜索）") { Enabled = false };
+
+        _itemNeteaseSync = new ToolStripMenuItem("网易云：从官方客户端同步登录（推荐）", null, (_, _) => SyncNeteaseFromClient());
+        _itemPlayerCheck = new ToolStripMenuItem("播放器检查…", null, (_, _) => ShowPlayerCheck());
+
+        var sourceMenu = new ToolStripMenuItem("曲源（登录）");
+        sourceMenu.DropDownItems.AddRange(new ToolStripItem[]
+        {
+            _itemNeteaseSync,
+            _itemNeteaseLogin,
+            _neteaseStatus,
+            _itemNeteaseLogout,
+            new ToolStripSeparator(),
+            _itemQqLogin,
+            _qqStatus,
+            _itemQqLogout,
+            new ToolStripSeparator(),
+            _itemPlayerCheck
+        });
         _itemOverlay = new ToolStripMenuItem("直播叠加层（OBS 浏览器源）", null, (_, _) => ToggleOverlay()) { Checked = _settings.Overlay };
         _itemOffscreen = new ToolStripMenuItem("离屏采集（窗口采集用）", null, (_, _) => ToggleOffscreen()) { Checked = _settings.CaptureOffscreen };
         _itemOccluded = new ToolStripMenuItem("遮挡模式（压在其他窗口后面）", null, (_, _) => ToggleOccluded()) { Checked = _settings.CaptureOccluded };
@@ -139,6 +171,7 @@ internal sealed class TrayApp : ApplicationContext
             new ToolStripSeparator(),
             controlsMenu,
             liveMenu,
+            sourceMenu,
             styleMenu,
             _colorMenu,
             positionMenu,
@@ -189,6 +222,32 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         ApplyTheme();
+        RefreshSourceStatus();
+
+        // 有网易云 cookie 就后台校验一次，失效了在菜单里标出来
+        if (!string.IsNullOrWhiteSpace(Netease.Cookie))
+        {
+            var sourceTimer = new System.Windows.Forms.Timer { Interval = 2800 };
+            sourceTimer.Tick += (_, _) =>
+            {
+                sourceTimer.Stop();
+                sourceTimer.Dispose();
+                _ = ValidateNeteaseAsync();
+            };
+            sourceTimer.Start();
+        }
+        else if (NeteaseClient.IsInstalled)
+        {
+            // 没手动登录过，但本机装了官方客户端：自动同步一次（开箱即用）
+            var importTimer = new System.Windows.Forms.Timer { Interval = 2200 };
+            importTimer.Tick += (_, _) =>
+            {
+                importTimer.Stop();
+                importTimer.Dispose();
+                _ = ImportNeteaseFromClientAsync(report: false);
+            };
+            importTimer.Start();
+        }
 
         var playBv = Environment.GetCommandLineArgs()
             .FirstOrDefault(a => a.StartsWith("--play-bv=", StringComparison.OrdinalIgnoreCase));
@@ -232,9 +291,25 @@ internal sealed class TrayApp : ApplicationContext
             liveTimer.Start();
         }
 
+        // 调试用：--login-test=netease|qq 直接打开登录窗口
+        var loginTest = Environment.GetCommandLineArgs()
+            .FirstOrDefault(a => a.StartsWith("--login-test=", StringComparison.OrdinalIgnoreCase));
+        if (loginTest != null)
+        {
+            var target = loginTest.Substring("--login-test=".Length).Trim().ToLowerInvariant();
+            var loginTimer = new System.Windows.Forms.Timer { Interval = 1600 };
+            loginTimer.Tick += (_, _) =>
+            {
+                loginTimer.Stop();
+                loginTimer.Dispose();
+                if (target == "qq") LoginQQMusic();
+                else LoginNetease();
+            };
+            loginTimer.Start();
+        }
+
         var fakeDanmaku = Environment.GetCommandLineArgs()
-            .FirstOrDefault(a => a.StartsWith("--fake-danmaku=", StringComparison.OrdinalIgnoreCase));
-        if (fakeDanmaku != null)
+            .FirstOrDefault(a => a.StartsWith("--fake-danmaku=", StringComparison.OrdinalIgnoreCase));        if (fakeDanmaku != null)
         {
             var text = fakeDanmaku.Substring("--fake-danmaku=".Length).Trim();
             if (text.Length > 0)
@@ -333,6 +408,14 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemQueueNext;
     private ToolStripMenuItem _itemQueueClear;
     private ToolStripMenuItem _itemLiveToast;
+    private ToolStripMenuItem _itemNeteaseLogin;
+    private ToolStripMenuItem _itemNeteaseLogout;
+    private ToolStripMenuItem _itemNeteaseSync;
+    private ToolStripMenuItem _itemPlayerCheck;
+    private ToolStripMenuItem _itemQqLogin;
+    private ToolStripMenuItem _itemQqLogout;
+    private ToolStripMenuItem _neteaseStatus;
+    private ToolStripMenuItem _qqStatus;
 
     private readonly RequestQueue _queue = new RequestQueue();
     private DanmakuClient _danmaku;
@@ -785,6 +868,186 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Save();
     }
 
+    // ---- 曲源登录（S3）----
+
+    private void LoginNetease()
+    {
+        using (var form = new WebLoginForm(
+            "登录网易云音乐",
+            "https://music.163.com/#/login",
+            "https://music.163.com",
+            cookies => cookies.ContainsKey("MUSIC_U") && !string.IsNullOrWhiteSpace(cookies["MUSIC_U"]),
+            "扫码或用手机号登录；成功后窗口会自动关闭并保存"))
+        {
+            if (form.ShowDialog(_hud) != DialogResult.OK) return;
+
+            _settings.NeteaseCookie = form.CookieHeader;
+            _settings.NeteaseNick = "";
+            _settings.Save();
+
+            Netease.Cookie = _settings.NeteaseCookie;
+            _neteaseStatus.Text = "网易云：已登录（校验中…）";
+            _itemNeteaseLogout.Enabled = true;
+
+            _ = ValidateNeteaseAsync();
+        }
+    }
+
+    private void LogoutNetease()
+    {
+        _settings.NeteaseCookie = "";
+        _settings.NeteaseNick = "";
+        _settings.Save();
+
+        Netease.Cookie = "";
+        RefreshSourceStatus();
+    }
+
+    private async Task ValidateNeteaseAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.NeteaseCookie))
+        {
+            RefreshSourceStatus();
+            return;
+        }
+
+        var nickname = await Task.Run(() => Netease.CheckAccount()).ConfigureAwait(false);
+        Logger.Write("netease account: " + (string.IsNullOrEmpty(nickname) ? "not logged in" : nickname));
+
+        _ui.Post(_ =>
+        {
+            if (string.IsNullOrWhiteSpace(_settings.NeteaseCookie)) return;
+
+            if (string.IsNullOrEmpty(nickname))
+            {
+                _neteaseStatus.Text = "网易云：登录已失效，请重新登录";
+                return;
+            }
+
+            if (_settings.NeteaseNick != nickname)
+            {
+                _settings.NeteaseNick = nickname;
+                _settings.Save();
+            }
+            _neteaseStatus.Text = "网易云：已登录 " + nickname;
+        }, null);
+    }
+
+    private void LoginQQMusic()
+    {
+        using (var form = new WebLoginForm(
+            "登录 QQ 音乐",
+            "https://y.qq.com/",
+            "https://y.qq.com",
+            cookies =>
+            {
+                string uin, key;
+                if (!cookies.TryGetValue("uin", out uin) || string.IsNullOrWhiteSpace(uin)) return false;
+
+                var normalized = QQMusic.NormalizeUin(uin);
+                if (string.IsNullOrEmpty(normalized) || normalized == "0") return false;
+
+                return (cookies.TryGetValue("qm_keyst", out key) && !string.IsNullOrWhiteSpace(key))
+                    || (cookies.TryGetValue("qqmusic_key", out key) && !string.IsNullOrWhiteSpace(key));
+            },
+            "点右上角「登录」，扫码或 QQ / 微信授权；成功后窗口会自动关闭并保存"))
+        {
+            if (form.ShowDialog(_hud) != DialogResult.OK) return;
+
+            var uin = "";
+            string value;
+            if (form.CookieValues.TryGetValue("uin", out value)) uin = QQMusic.NormalizeUin(value);
+            if (string.IsNullOrEmpty(uin) && form.CookieValues.TryGetValue("p_uin", out value))
+            {
+                uin = QQMusic.NormalizeUin(value);
+            }
+
+            _settings.QQMusicCookie = form.CookieHeader;
+            _settings.QQMusicUin = uin;
+            _settings.QQMusicNick = "";
+            _settings.Save();
+
+            QQMusic.Cookie = _settings.QQMusicCookie;
+            QQMusic.Uin = uin;
+            RefreshSourceStatus();
+        }
+    }
+
+    private void LogoutQQMusic()
+    {
+        _settings.QQMusicCookie = "";
+        _settings.QQMusicUin = "";
+        _settings.QQMusicNick = "";
+        _settings.Save();
+
+        QQMusic.Cookie = "";
+        QQMusic.Uin = "";
+        RefreshSourceStatus();
+    }
+
+    private void RefreshSourceStatus()
+    {
+        if (_neteaseStatus != null)
+        {
+            _neteaseStatus.Text = string.IsNullOrWhiteSpace(_settings.NeteaseCookie)
+                ? "网易云：未登录（游客曲库）"
+                : "网易云：已登录" + (string.IsNullOrWhiteSpace(_settings.NeteaseNick) ? "" : " " + _settings.NeteaseNick);
+        }
+
+        if (_qqStatus != null)
+        {
+            _qqStatus.Text = string.IsNullOrWhiteSpace(_settings.QQMusicCookie)
+                ? "QQ 音乐：未登录（只能搜索）"
+                : "QQ 音乐：已登录" + (string.IsNullOrWhiteSpace(_settings.QQMusicUin) ? "" : "（uin " + _settings.QQMusicUin + "）");
+        }
+
+        if (_itemNeteaseLogout != null) _itemNeteaseLogout.Enabled = !string.IsNullOrWhiteSpace(_settings.NeteaseCookie);
+        if (_itemQqLogout != null) _itemQqLogout.Enabled = !string.IsNullOrWhiteSpace(_settings.QQMusicCookie);
+    }
+
+    private void SyncNeteaseFromClient()
+    {
+        _neteaseStatus.Text = "网易云：正在读取客户端登录…";
+        _ = ImportNeteaseFromClientAsync(report: true);
+    }
+
+    /// <summary>从本机「网易云音乐」客户端读已登录的 cookie（客户端登录过就不用用户再操作）。</summary>
+    private async Task ImportNeteaseFromClientAsync(bool report)
+    {
+        var cookie = await Task.Run(() => NeteaseClient.ImportCookie()).ConfigureAwait(false);
+
+        _ui.Post(_ =>
+        {
+            if (string.IsNullOrEmpty(cookie))
+            {
+                if (report)
+                {
+                    _tray.ShowBalloonTip(3000, "Music Toppin",
+                        "没读到网易云客户端的登录状态。请确认客户端已安装并登录，或用「应用内登录」。",
+                        ToolTipIcon.Warning);
+                }
+                RefreshSourceStatus();
+                return;
+            }
+
+            _settings.NeteaseCookie = cookie;
+            _settings.Save();
+
+            Netease.Cookie = cookie;
+            _itemNeteaseLogout.Enabled = true;
+            _neteaseStatus.Text = "网易云：已从客户端同步登录";
+            _ = ValidateNeteaseAsync();
+        }, null);
+    }
+
+    private void ShowPlayerCheck()
+    {
+        var text = SourceCheck.Describe();
+        MessageBox.Show(_hud,
+            text + "\n\n网易云的登录状态读自本机官方客户端，只在本机使用，不会上传。",
+            "播放器检查 · Music Toppin", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
     // ---- 弹幕点歌（S2）----
 
     private void PromptLiveRoom()
@@ -953,8 +1216,8 @@ internal sealed class TrayApp : ApplicationContext
             var label = item.Request != null ? item.Request.SourceLabel : "未知来源";
             Logger.Write("queue skip: " + label + " " + item.DisplayName);
             LiveNotify("Music Toppin",
-                "这首暂时放不了：" + label + " " + (item.Request != null ? item.Request.Query : "") +
-                "\n已支持：网易云、B 站 BV；QQ / Apple Music 还没接入。",
+                "这首暂时放不了（没版权 / 需要登录）：" + label + " " + (item.Request != null ? item.Request.Query : "") +
+                "\n网易云与 QQ 音乐可在「曲源（登录）」里登录；B 站 BV 不需要登录。",
                 ToolTipIcon.Warning);
 
             _queue.ClearCurrent();

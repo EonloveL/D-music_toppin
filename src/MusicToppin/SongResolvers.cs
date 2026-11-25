@@ -19,6 +19,9 @@ internal static class SongResolvers
             case SongSource.Auto:
                 return Netease.Resolve(request);
 
+            case SongSource.QQ:
+                return QQMusic.Resolve(request);
+
             default:
                 Logger.Write("resolver: unsupported source " + request.SourceLabel + " (" + request.Source + ")");
                 return null;

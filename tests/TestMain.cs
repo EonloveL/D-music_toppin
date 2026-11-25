@@ -10,6 +10,7 @@ namespace MusicToppin.Tests
             RequestTests.Run();
             DanmakuTests.Run();
             NeteaseTests.Run();
+            QQMusicTests.Run();
             return TestRun.Summarize();
         }
     }

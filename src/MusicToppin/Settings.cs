@@ -39,6 +39,15 @@ internal sealed class AppSettings
     /// <summary>点歌/播放时是否弹 Windows 气泡（默认关闭：直播中弹窗会干扰键鼠输入）。</summary>
     public bool LiveToast;
 
+    /// <summary>网易云登录 cookie（MUSIC_U 等；空 = 游客）。</summary>
+    public string NeteaseCookie = "";
+    public string NeteaseNick = "";
+
+    /// <summary>QQ 音乐登录 cookie + uin（空 = 只能搜索不能播）。</summary>
+    public string QQMusicCookie = "";
+    public string QQMusicUin = "";
+    public string QQMusicNick = "";
+
     /// <summary>是否开启浏览器源叠加层（给 OBS 用，桌面浮窗可以隐藏）。</summary>
     public bool Overlay;
 
@@ -91,6 +100,11 @@ internal sealed class AppSettings
                 s.LiveRoomId = ReadInt(key, "LiveRoomId", 0);
                 s.LiveAutoConnect = ReadInt(key, "LiveAutoConnect", 1) == 1;
                 s.LiveToast = ReadInt(key, "LiveToast", 0) == 1;
+                s.NeteaseCookie = ReadString(key, "NeteaseCookie", "");
+                s.NeteaseNick = ReadString(key, "NeteaseNick", "");
+                s.QQMusicCookie = ReadString(key, "QQMusicCookie", "");
+                s.QQMusicUin = ReadString(key, "QQMusicUin", "");
+                s.QQMusicNick = ReadString(key, "QQMusicNick", "");
                 s.Overlay = ReadInt(key, "Overlay", 0) == 1;
                 s.CaptureOffscreen = ReadInt(key, "CaptureOffscreen", 0) == 1;
                 s.CaptureOccluded = ReadInt(key, "CaptureOccluded", 0) == 1;
@@ -166,6 +180,11 @@ internal sealed class AppSettings
                 WriteInt(key, "LiveRoomId", LiveRoomId);
                 WriteInt(key, "LiveAutoConnect", LiveAutoConnect ? 1 : 0);
                 WriteInt(key, "LiveToast", LiveToast ? 1 : 0);
+                try { key.SetValue("NeteaseCookie", NeteaseCookie ?? "", RegistryValueKind.String); } catch { }
+                try { key.SetValue("NeteaseNick", NeteaseNick ?? "", RegistryValueKind.String); } catch { }
+                try { key.SetValue("QQMusicCookie", QQMusicCookie ?? "", RegistryValueKind.String); } catch { }
+                try { key.SetValue("QQMusicUin", QQMusicUin ?? "", RegistryValueKind.String); } catch { }
+                try { key.SetValue("QQMusicNick", QQMusicNick ?? "", RegistryValueKind.String); } catch { }
                 WriteInt(key, "Overlay", Overlay ? 1 : 0);
                 WriteInt(key, "CaptureOffscreen", CaptureOffscreen ? 1 : 0);
                 WriteInt(key, "CaptureOccluded", CaptureOccluded ? 1 : 0);
