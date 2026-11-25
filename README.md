@@ -64,7 +64,7 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 
 - **不写前缀**（`点歌 起风了`）：按登录情况自动选 —— **只登录了一个平台就用它**；都登录了网易云优先、QQ 兜底
 - **写前缀**：`点歌 wy …` / `点歌 qq …` 强制指定平台；`点歌 BV…` 走 B 站视频
-- 酷狗目前只做了登录检测，取流还没接（见 [docs/v2-sources.md](docs/v2-sources.md)）
+- 酷狗按需求先移除（后续要加时再看 [docs/v2-sources.md](docs/v2-sources.md)）
 
 ### 曲源登录（开箱即用）
 
@@ -73,7 +73,7 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 - **网易云：从官方客户端同步登录（推荐）** —— 只要本机装了网易云客户端并登录过，应用会自动读出登录会话（本机读取，不上传），会员曲也能按你账号的权限放。启动时如果还没登录，会自动尝试一次。
 - **网易云：登录（扫码 / 手机号）…** —— 没装客户端时的备选，应用内打开官方登录页，扫码后自动保存。
 - **QQ 音乐：登录（QQ / 微信扫码）…** —— QQ 音乐未登录时大部分歌只给空地址；登录后正常。
-- **播放器检查…** —— 列出网易云 / QQ 音乐 / 酷狗 的「已安装 / 运行中 / 登录」状态：网易云读客户端会话，QQ 音乐读内嵌 chromium 的 cookie（`pt2gguin`，兼容 `qmcomdata.ini`），酷狗读注册表 / `kugou.ini`；没开客户端时可以直接点「启动」，状态不对可以点「再次检查」。
+- **播放器检查…** —— 列出网易云 / QQ 音乐的「已安装 / 运行中 / 登录」状态：网易云读客户端会话，QQ 音乐读内嵌 chromium 的 cookie（`pt2gguin`，兼容 `qmcomdata.ini`）；没开客户端时可以直接点「启动」，状态不对可以点「再次检查」。
 
 > 各平台取流接口、登录方式和候选平台（酷狗、汽水、YouTube、Spotify）的可行性见 [docs/v2-sources.md](docs/v2-sources.md)。
 
@@ -89,6 +89,7 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 ![叠加层下一首 + 提示](docs/screenshots/overlay-next.png)
 - 断线自动重连（2 秒起翻倍，最长 30 秒）；菜单里能看到「直播间 xxx · 弹幕 N 条 · 队列 N 首」
 - 直播间号会记住，下次启动自动重连；「断开直播间」会关掉自动重连
+- **「直播间状态…」**：看开播状态 / 是否连上弹幕 / 收到多少条 / 最后一条时间 / 最近错误；未开播会明确标出来（未开播时 B 站不推弹幕），可一键「重新连接」
 - 弹幕走**游客身份**，不用登录 B 站账号
 - **默认不弹通知**：点歌/连接/播放状态只写日志和托盘「弹幕点歌」菜单里的状态行，不会在右下角弹窗（直播时弹窗会干扰键鼠输入判定）；想要气泡提示可在菜单底部打开「点歌/播放时弹气泡提示」
 
@@ -219,7 +220,7 @@ Uninstall.exe /S                                      静默卸载
 | 项目 | 实测（本机 Win11，V2 构建，纯显示模式） |
 |---|---|
 | 安装包 | **388 KB** |
-| 主程序 | **232 KB**（.NET Framework 4.8，系统自带运行时） |
+| 主程序 | **234 KB**（.NET Framework 4.8，系统自带运行时） |
 | 内存（私有） | **25–33 MB**（点歌播放时才加载 WebView2，约 +160 MB） |
 | 内存（含共享） | 56 MB |
 | CPU | 空闲 **≈0 %**（2 秒轮询；点歌播放时由 WebView2 占用） |
@@ -245,7 +246,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 产物：
 
 ```
-build\app\MusicToppin.exe        232 KB
+build\app\MusicToppin.exe        234 KB
 build\app\Uninstall.exe          15 KB
 build\MusicToppin-Setup.exe      388 KB
 ```
@@ -283,7 +284,7 @@ src/MusicToppin/
   WebLoginForm.cs       应用内登录窗口（官方登录页 + 自动抓 cookie）
   SourceCheck.cs        播放器检查：已安装 / 运行中 / 登录（三平台各自的本地信号）
   PlayerCheckForm.cs    播放器检查对话框（再次检查 / 启动客户端）
-  IniFile.cs            极简 ini 读取（QQ 音乐 / 酷狗登录账号）
+  IniFile.cs            极简 ini 读取（QQ 音乐登录账号）
   Sqlite.cs             只读 SQLite（winsqlite3.dll，读客户端 cookie 库）
   ResolvedSong.cs       各平台统一的「可播放条目」
   Json.cs               零依赖只读 JSON 解析
@@ -311,6 +312,7 @@ MusicToppin.exe --play-bv=BV1xx411c7mD        启动即播放指定 BV
 MusicToppin.exe --room=5050                   启动即连接直播间弹幕
 MusicToppin.exe --fake-danmaku="点歌 BV…"     注入假弹幕（可重复传多个，依次触发）
 MusicToppin.exe --login-test=netease          打开网易云登录窗口（调试）
+MusicToppin.exe --live-status                 打开「直播间状态」窗口（配合 --room 用）
 MusicToppin-Setup.exe /S                      静默安装（成功返回 0）
 Uninstall.exe /S                              静默卸载
 ```
@@ -330,6 +332,7 @@ Uninstall.exe /S                              静默卸载
 - 弹幕走游客身份，只能拿到 uid / 昵称，拿不到完整用户资料；房间号必须是**开播中或有人说话**的直播间（冷场房间连上也收不到弹幕）
 - 视频小窗用的是 B 站官方嵌入播放器：UP 主禁止站外播放的视频会黑屏报错（音频不受影响）
 - 酷我经实测免费歌只有移动端能用（桌面只给 ~11 秒试听），已放弃接入
+- 抖音直播间暂不支持：链接能识别但弹幕要签名 + protobuf，后续再接（现在只支持 B 站房间号 / 链接）
 
 ## V2 进度
 
@@ -339,14 +342,14 @@ Uninstall.exe /S                              静默卸载
 - ✅ **S4 播放链路验证**：托盘「点歌测试（播放 BV）…」输入 BV 号 → 解析 DASH 音频 → WebView2 播放 → HUD 显示真实标题与进度
 - ✅ **S5**：HUD 与叠加层都显示「下一首 + 队列长度」；托盘可展开队列列表；点歌成功/失败在叠加层弹提示
 - ✅ **视频小窗**：B 站视频点播在直播画面里用小窗播放（静音，声音走应用播放器），主播桌面不出现
-- ⏳ S3 剩余：酷狗（需签名）、Apple Music（只有试听）
+- ⏳ S3 剩余：Apple Music（只有试听）；酷狗按需求先移除
 
 `tests/` 里 **129 项单元测试**覆盖解析、队列、弹幕协议、JSON；`run-tests.ps1` 一键跑（0 = 全过）。
 
 **接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。
 
-播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 232 KB / 25 MB 的轻量形态。
+播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 234 KB / 25 MB 的轻量形态。
 ## 下一步（V2）
 
-- S3 剩余：酷狗（tracker 签名）、Apple Music（只有试听），见 [docs/v2-sources.md](docs/v2-sources.md)
+- S3 剩余：Apple Music（只有试听）；酷狗/酷我按需求先不做，见 [docs/v2-sources.md](docs/v2-sources.md)
 - 歌词行（滚动/逐字）、样式编辑器（字号/宽度/圆角）

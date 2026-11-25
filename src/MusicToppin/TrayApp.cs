@@ -95,6 +95,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemStopPlay = new ToolStripMenuItem("停止播放", null, (_, _) => StopOwnPlayback());
 
         _liveStatus = new ToolStripMenuItem("未连接直播间") { Enabled = false };
+        _itemLiveDiag = new ToolStripMenuItem("直播间状态…", null, (_, _) => ShowLiveStatus());
         _itemLiveConnect = new ToolStripMenuItem("连接直播间…", null, (_, _) => PromptLiveRoom());
         _itemLiveDisconnect = new ToolStripMenuItem("断开直播间", null, (_, _) => DisconnectLive()) { Enabled = false };
         _itemQueueNext = new ToolStripMenuItem("队列：空", null, (_, _) => StartNextQueuedSong()) { Enabled = false };
@@ -110,6 +111,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemLiveDisconnect,
             new ToolStripSeparator(),
             _liveStatus,
+            _itemLiveDiag,
             _itemQueueList,
             new ToolStripSeparator(),
             _itemLiveToast
@@ -310,6 +312,19 @@ internal sealed class TrayApp : ApplicationContext
             loginTimer.Start();
         }
 
+        // 调试用：--live-status 打开「直播间状态」窗口
+        if (Environment.GetCommandLineArgs().Any(a => a.Equals("--live-status", StringComparison.OrdinalIgnoreCase)))
+        {
+            var statusTimer = new System.Windows.Forms.Timer { Interval = 4500 };
+            statusTimer.Tick += (_, _) =>
+            {
+                statusTimer.Stop();
+                statusTimer.Dispose();
+                ShowLiveStatus();
+            };
+            statusTimer.Start();
+        }
+
         // 调试用：--player-check 打开播放器检查对话框
         if (Environment.GetCommandLineArgs().Any(a => a.Equals("--player-check", StringComparison.OrdinalIgnoreCase)))
         {
@@ -436,6 +451,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemQueueNext;
     private ToolStripMenuItem _itemQueueClear;
     private ToolStripMenuItem _itemQueueList;
+    private ToolStripMenuItem _itemLiveDiag;
     private ToolStripMenuItem _itemLiveToast;
     private ToolStripMenuItem _itemNeteaseLogin;
     private ToolStripMenuItem _itemNeteaseLogout;
@@ -450,6 +466,7 @@ internal sealed class TrayApp : ApplicationContext
     private DanmakuClient _danmaku;
     private bool _playingFromQueue;
     private int _idleTicks;
+    private int _danmakuReceived;
     private string _toastText = "";
     private int _toastId;
     private DateTime _toastUntilUtc = DateTime.MinValue;
@@ -1121,7 +1138,15 @@ internal sealed class TrayApp : ApplicationContext
             var roomId = BilibiliLive.ParseRoomId(prompt.Value);
             if (roomId <= 0)
             {
-                _tray.ShowBalloonTip(2500, "Music Toppin", "没认出直播间号", ToolTipIcon.Warning);
+                if (BilibiliLive.IsDouyinLink(prompt.Value))
+                {
+                    _tray.ShowBalloonTip(3500, "Music Toppin",
+                        "抖音直播间暂不支持：抖音弹幕要签名 + protobuf，后面再接。\n目前支持 B 站直播间（房间号或链接）。",
+                        ToolTipIcon.Warning);
+                    return;
+                }
+
+                _tray.ShowBalloonTip(2500, "Music Toppin", "没认出直播间号（支持 5050 或 live.bilibili.com 链接）", ToolTipIcon.Warning);
                 return;
             }
 
@@ -1168,14 +1193,54 @@ internal sealed class TrayApp : ApplicationContext
         UpdateLiveStatus("未连接直播间");
     }
 
+    private void ShowLiveStatus()
+    {
+        using (var form = new LiveStatusForm(BuildLiveSnapshot, () =>
+        {
+            var room = _settings.LiveRoomId > 0
+                ? _settings.LiveRoomId
+                : (int)(_danmaku != null ? _danmaku.RoomId : 0);
+            if (room > 0) ConnectLive(room, remember: false);
+        }))
+        {
+            form.ShowDialog(_hud);
+        }
+    }
+
+    private LiveStatusSnapshot BuildLiveSnapshot()
+    {
+        var client = _danmaku;
+
+        return new LiveStatusSnapshot
+        {
+            RoomId = client != null && client.RoomId > 0 ? client.RoomId : _settings.LiveRoomId,
+            LiveStatus = client != null ? client.LiveStatus : -1,
+            Connected = client != null && client.IsConnected,
+            Running = client != null && client.IsRunning,
+            MessageCount = client != null ? client.MessageCount : 0,
+            LastMessageUtc = client != null ? client.LastMessageUtc : DateTime.MinValue,
+            LastError = client != null ? client.LastError : ""
+        };
+    }
+
     private void OnLiveConnectionChanged(bool connected)
     {
         if (_danmaku == null) return;
 
         if (connected)
         {
-            LiveNotify("Music Toppin",
-                "弹幕已连接：直播间 " + _danmaku.RoomId + "\n观众发「点歌 BV…」即可入队。", ToolTipIcon.Info);
+            if (_danmaku.LiveStatus == 0)
+            {
+                LiveNotify("Music Toppin",
+                    "直播间 " + _danmaku.RoomId + " 未开播，收不到弹幕；开播后在「直播间状态」里点重新连接。",
+                    ToolTipIcon.Warning);
+                UpdateLiveStatus("直播间 " + _danmaku.RoomId + " 未开播（收不到弹幕）");
+            }
+            else
+            {
+                LiveNotify("Music Toppin",
+                    "弹幕已连接：直播间 " + _danmaku.RoomId + "\n观众发「点歌 BV…」即可入队。", ToolTipIcon.Info);
+            }
         }
 
         UpdateQueueMenu();
@@ -1194,9 +1259,16 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (_liveStatus == null) return;
 
-        _liveStatus.Text = _danmaku != null && _danmaku.IsConnected
-            ? "直播间 " + _danmaku.RoomId + " · 弹幕 " + _danmaku.MessageCount + " 条 · 队列 " + _queue.Count + " 首"
-            : "未连接直播间";
+        if (_danmaku != null && _danmaku.IsConnected)
+        {
+            var live = _danmaku.LiveStatus == 0 ? "（未开播）" : "";
+            _liveStatus.Text = "直播间 " + _danmaku.RoomId + live +
+                               " · 弹幕 " + _danmaku.MessageCount + " 条 · 队列 " + _queue.Count + " 首";
+        }
+        else
+        {
+            _liveStatus.Text = "未连接直播间";
+        }
 
         UpdateTrayText();
     }
@@ -1213,6 +1285,13 @@ internal sealed class TrayApp : ApplicationContext
     private void OnDanmaku(DanmakuMessage message)
     {
         if (message == null) return;
+
+        if (_danmakuReceived == 0)
+        {
+            Logger.Write("danmaku first: " + message.UserName + ": " + message.Text);
+        }
+        _danmakuReceived++;
+
         _ui.Post(_ => HandleDanmaku(message), null);
     }
 
@@ -1937,8 +2016,17 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (_demo) return;
 
-        // 2 秒一次，约每分钟清一次过期的冷却记录
-        if (++_idleTicks % 30 == 0) _queue.TrimCooldowns();
+        // 2 秒一次，约每分钟清一次过期的冷却记录；顺手记一下弹幕计数，方便排查
+        if (++_idleTicks % 30 == 0)
+        {
+            _queue.TrimCooldowns();
+
+            if (_danmaku != null && _danmaku.IsConnected)
+            {
+                Logger.Write("danmaku tick: room " + _danmaku.RoomId + " live=" + _danmaku.LiveStatus +
+                             " messages=" + _danmaku.MessageCount + " queue=" + _queue.Count);
+            }
+        }
 
         if (_latest.HasSession || !_hud.Visible) return;
         if ((DateTime.UtcNow - _lastSessionUtc).TotalSeconds < 4) return;

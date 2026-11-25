@@ -5,7 +5,7 @@
 ## 0. 一句话现状
 
 **V1.1.1 已发布（叠加层 / 离屏采集 / 遮挡模式，已合进 main）；V2 已完成 S1（点歌指令 + 队列）、S2（B 站弹幕接入 + 点歌自动播放）、S3-网易云、S4（BV 播放链路）。**
-S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示 + 视频小窗）。剩下酷狗、Apple Music。版本号 **1.2.0**（未发布）。
+S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示 + 视频小窗）。剩下 Apple Music（酷狗按需求先移除）。版本号 **1.2.0**（未发布）。
 
 ## 1. 仓库与构建
 
@@ -95,7 +95,7 @@ QQ 音乐：点歌 qq 起风了
 | `src/MusicToppin/WebLoginForm.cs` | 应用内登录窗口（官方登录页 + 自动抓 cookie） |
 | `src/MusicToppin/SourceCheck.cs` | 播放器检查：已安装 / 运行中 / 登录（三平台各自的本地信号） |
 | `src/MusicToppin/PlayerCheckForm.cs` | 播放器检查对话框（再次检查 / 启动客户端） |
-| `src/MusicToppin/IniFile.cs` | 极简 ini 读取（QQ 音乐 / 酷狗登录账号） |
+| `src/MusicToppin/IniFile.cs` | 极简 ini 读取（QQ 音乐登录账号） |
 | `src/MusicToppin/SongResolvers.cs` | 按 `SongRequest.Source` 分派：`Auto`/`Netease` → 网易云，`QQ` → QQ 音乐，`Bilibili` → BV |
 | `src/MusicToppin/ResolvedSong.cs` | 各平台统一的「可播放条目」（从 `Bilibili.cs` 拆出来） |
 
@@ -107,10 +107,13 @@ QQ 音乐：点歌 qq 起风了
 - 关键词取搜索前 3 个候选逐个试（搜索第一名常是翻唱）；`id:` 直接查详情
 - 无版权 / 会员歌：`player/url` 返回 `code=404`、`outer/url` 302 到 `music.163.com/404` → null → 队列跳过
 - **QQ 音乐匿名大概率拿不到 purl**（`req_0.code=1000`），少数免费歌可以；登录后正常
+- **直播间状态诊断**（`LiveStatusForm`）：房间号 / 开播状态 / 弹幕连接 / 收到条数 / 最后一条时间 / 最近错误；
+  未开播时明确提示「收不到弹幕」（实测房号 1820294367 就是 `live_status=0`，鉴权成功但 0 条弹幕）；
+  日志加 `danmaku first`（第一条）与 `danmaku tick`（每分钟计数），排查「发点歌没反应」先看这两个
 - **播放器检查**（对齐参考工具的 3.1.4）：网易云读 CEF cookie（MUSIC_U）；QQ 音乐读内嵌 chromium 的
   `QQMusicCache\WebkitCache\*\Cookies` 里的 `pt2gguin`（值形如 `o1305835491`，也认 `uin` / `qm_keyst`），
   `ComData\qmcomdata.ini` 的 `[SectQMAPI] uin` 只作辅助（实测登录后它仍是 0，不能单靠它）；
-  酷狗读 `HKCU\Software\KuGoo3` 的 `LastLoginUserID` 或 `kugou.ini`；没开客户端可直接「启动」，状态可「再次检查」
+  没开客户端可直接「启动」，状态可「再次检查」
 - **自动选平台**：`点歌 歌名` 只看「应用内可播」的登录态 —— 只登录一个就用它，都登录网易云优先、QQ 兜底；
   `wy` / `qq` 前缀强制指定；`BV` 永远走 B 站（`SongResolvers.AutoOrder` 有单元测试）
 - **单队列播放**：同一时间只放一首（`_playingFromQueue` + 手动点播先 `StopOwnPlayback`）
@@ -134,7 +137,7 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 - 叠加层（OBS 浏览器源）同步「下一首 + 队列数」；点歌成功/放不了在叠加层底部弹 4.5 秒提示（`OverlayState.Toast / ToastId`）
 - **视频小窗**：`OverlayState.VideoBvid` → `/video` 页用 B 站官方嵌入播放器（`muted=1`，声音仍由应用播放器输出）；
   播放 B 站视频时 `TrayApp._videoBvid` 置位，停止/下一首自动清空。OBS 再加一个浏览器源指向 `/video`（480×270）
-- 至此 S5 完成；剩余是 S3 的酷狗 / Apple Music
+- 至此 S5 完成；剩余是 S3 的 Apple Music（酷狗暂缓）
 ## 3. 关键决策与代价
 
 | 决策 | 原因 | 代价 |
@@ -149,10 +152,10 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 
 ## 4. 待办（建议顺序）
 
-### S3 剩余：酷狗 / Apple Music
+### S3 剩余：Apple Music（酷狗按需求先移除）
 
 - 分派已经做好：`SongResolvers.Resolve()` 里加一个 `case`，照 `Netease.cs` 的形状写（搜索 → 取流 → 兜底 → 纯函数解析 + 测试）
-- **酷狗**：搜索匿名可用，取流要 `key = md5(hash + "kgcloud")` 的 tracker 接口 + 跟随 302，中等成本
+- ~~酷狗~~：按用户要求先移除，后续要加时再实现（tracker 要 `md5(hash + "kgcloud")`）
 - **酷我（已放弃）**：`anti.s` 匿名只给 ~11 秒试听（免费歌只有移动端能听），实测后撤掉，别再重复踩
 - **Apple Music**：网页端无直链，只能试听或 MusicKit（要开发者 token），保持「只入队提示」
 - 候选平台评估见 [docs/v2-sources.md](v2-sources.md)
@@ -190,8 +193,7 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 19. **QQ 音乐的登录态不在 `qmcomdata.ini` 里**：`[SectQMAPI] uin` 实测登录后仍是 0（它是 QMAPI 插件的字段）。
     真正的账号在 `QQMusicCache\WebkitCache\*\Cookies`（SQLite）的 `pt2gguin=o<QQ号>`；文件被 qmbrowser 锁着，
     要复制到 temp 再用 winsqlite3 读。
-20. **酷狗的登录标记不统一**：新版读注册表 `HKCU\Software\KuGoo3` 的 `LastLoginUserID`/`UserID`，
-    老版可能在 `%APPDATA%\KuGou8\kugou.ini`；都没有就显示「未知」，别硬说成「未登录」。
+20. **酷狗已按需求移除**；如果以后再加，登录标记在 `HKCU\Software\KuGoo3`（`LastLoginUserID`/`UserID`）或 `kugou.ini`。
 
 ## 6. 调试入口
 
@@ -218,7 +220,7 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 2. `run-tests.ps1` + `build.ps1` 确认环境（应全绿、约 381 KB）
 3. `MusicToppin.exe --room=5050` 跑 30 秒，看日志里有没有 `danmaku auth ok` 与 `song request`
 4. `MusicToppin.exe --fake-danmaku="点歌 起风了"` 验证网易云链路（日志应有 `resolved:` + `queue play:`）
-5. 接着做 **S3 剩余**：Apple Music（只有试听）或酷我/酷狗，见 `docs/v2-sources.md`
+5. 接着做 **S3 剩余**：Apple Music（只有试听），或按用户要求再评估酷狗/酷我
 
 ## 8. 分支与版本（重要）
 

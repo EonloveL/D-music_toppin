@@ -34,7 +34,7 @@ MUSIC_U / __csrf / NMTID  → 直接当请求 cookie
 |---|---|---|
 | 网易云 | 客户端 CEF cookie 解密（`winsqlite3` + DPAPI + AES-GCM） | 能直接拿到会话，还能顺便用来播放 |
 | QQ 音乐 | 内嵌 chromium：`QQMusicCache\WebkitCache\*\Cookies` 里的 `pt2gguin`（`o<QQ号>`） | 也认 `uin` / `qm_keyst`；`ComData\qmcomdata.ini` 的 `[SectQMAPI] uin` 实测登录后仍为 0，只作辅助 |
-| 酷狗 | 注册表 `HKCU\Software\KuGoo3`（`LastLoginUserID`/`UserID`）或 `kugou.ini` | 都找不到时显示「未知」 |
+| ~~酷狗~~ | 按需求先移除 | — |
 
 对话框还会显示「已安装 / 运行中」，没开的客户端可以直接点「启动」。
 
@@ -43,7 +43,7 @@ MUSIC_U / __csrf / NMTID  → 直接当请求 cookie
 | 平台 | 搜索 | 取流 | 登录/风控 | 结论 |
 |---|---|---|---|---|
 | ~~酷我音乐~~ | `search.kuwo.cn/r.s` 匿名可用（单引号 JSON） | `antiserver.kuwo.cn/anti.s?…` 匿名只给 **~11 秒试听**（181 KB） | 免费歌只有移动端能听 | ❌ 已实测放弃，接了一半又撤掉 |
-| **酷狗音乐** | `mobilecdn.kugou.com/api/v3/search/song` 匿名可用 | `trackercdn.kugou.com/i/v2/?…` 需要 `key = md5(hash + "kgcloud")` + `appid/pid`，返回 302 到 CDN | 免费曲匿名可用 | 中等成本（MD5 签名 + 302 跟随），值得做 |
+| ~~酷狗音乐~~ | `mobilecdn.kugou.com/api/v3/search/song` 匿名可用 | `trackercdn.kugou.com/i/v2/?…` 需要 `key = md5(hash + "kgcloud")` + `appid/pid` | 免费曲匿名可用 | ⏸ 按需求先移除，后续再加 |
 | **汽水音乐（抖音）** | 有但需要 `X-Bogus` / `a_bogus` 签名 | 同上 | 风控强、接口常变 | ❌ 不建议，维护成本高 |
 | **YouTube Music** | 需要 YouTube Data API + 第三方解析 | 音轨提取要 yt-dlp / 第三方服务 | 合规风险高 | ❌ 不做 |
 | **Spotify** | 官方 API 可搜索 | 播放受 DRM 保护，无法直接取音频 | 必须 OAuth + Premium | ❌ 不可行 |

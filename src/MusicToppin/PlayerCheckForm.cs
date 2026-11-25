@@ -6,7 +6,7 @@ namespace MusicToppin;
 /// </summary>
 internal sealed class PlayerCheckForm : Form
 {
-    private const int Rows = 3;
+    private const int Rows = 2;
 
     private readonly Label[] _names = new Label[Rows];
     private readonly Label[] _status = new Label[Rows];
@@ -16,7 +16,7 @@ internal sealed class PlayerCheckForm : Form
     public PlayerCheckForm()
     {
         Text = "播放器检查 · Music Toppin";
-        ClientSize = new Size(560, 322);
+        ClientSize = new Size(560, 248);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -27,7 +27,7 @@ internal sealed class PlayerCheckForm : Form
 
         var title = new Label
         {
-            Text = "三个平台的客户端状态",
+            Text = "客户端状态（网易云 / QQ 音乐）",
             Location = new Point(20, 14),
             Size = new Size(300, 20),
             Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
@@ -73,7 +73,7 @@ internal sealed class PlayerCheckForm : Form
         var hint = new Label
         {
             Text = "登录请在各客户端里完成（扫码/账号登录）；状态每次打开或点「再次检查」都会重测。",
-            Location = new Point(20, 262),
+            Location = new Point(20, 188),
             Size = new Size(520, 18),
             ForeColor = Color.FromArgb(120, 126, 138)
         };
@@ -82,7 +82,7 @@ internal sealed class PlayerCheckForm : Form
         var refresh = new Button
         {
             Text = "再次检查",
-            Location = new Point(336, 282),
+            Location = new Point(336, 208),
             Size = new Size(96, 30),
             FlatStyle = FlatStyle.System
         };
@@ -91,7 +91,7 @@ internal sealed class PlayerCheckForm : Form
         var close = new Button
         {
             Text = "关闭",
-            Location = new Point(440, 282),
+            Location = new Point(440, 208),
             Size = new Size(96, 30),
             FlatStyle = FlatStyle.System,
             DialogResult = DialogResult.Cancel

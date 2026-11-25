@@ -211,10 +211,19 @@ internal static class BilibiliLive
 
     private static readonly Regex RoomIdPattern = new Regex(@"\d{1,12}", RegexOptions.Compiled);
 
-    /// <summary>支持「6」「https://live.bilibili.com/7734200?x=1」这类输入。</summary>
+    /// <summary>抖音直播间链接（目前只做识别，弹幕协议还没接）。</summary>
+    public static bool IsDouyinLink(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var lower = text.ToLowerInvariant();
+        return lower.Contains("douyin.com") || lower.Contains("iesdouyin.com");
+    }
+
+    /// <summary>支持「6」「https://live.bilibili.com/7734200?x=1」这类输入（抖音链接不当作 B 站房间号）。</summary>
     public static long ParseRoomId(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return 0;
+        if (IsDouyinLink(text)) return 0;
 
         var match = RoomIdPattern.Match(text.Trim());
         long roomId;
@@ -352,6 +361,12 @@ internal sealed class DanmakuClient : IDisposable
 
     public long RoomId { get; private set; }
     public long ShortId { get; private set; }
+
+    /// <summary>直播状态：1 = 直播中，0 = 未开播（未开播时通常收不到弹幕）。</summary>
+    public int LiveStatus { get; private set; }
+
+    /// <summary>最后一条弹幕的时间（UTC），没收到过就是 MinValue。</summary>
+    public DateTime LastMessageUtc { get; private set; }
     public bool IsConnected { get { return _connected; } }
     public int MessageCount { get { return Volatile.Read(ref _messageCount); } }
     public int ReconnectCount { get; private set; }
@@ -394,7 +409,8 @@ internal sealed class DanmakuClient : IDisposable
         if (room != null && room.RoomId > 0)
         {
             RoomId = room.RoomId;
-            ReportStatus("房间 " + RoomId + (room.LiveStatus == 1 ? "（直播中）" : "（未开播，弹幕仍可收）"));
+            LiveStatus = room.LiveStatus;
+            ReportStatus("房间 " + RoomId + (room.LiveStatus == 1 ? "（直播中）" : "（未开播，通常收不到弹幕）"));
         }
         else
         {
@@ -678,6 +694,7 @@ internal sealed class DanmakuClient : IDisposable
         var message = DanmakuProtocol.ParseDanmaku(root);
         if (message == null) return;
 
+        LastMessageUtc = DateTime.UtcNow;
         Interlocked.Increment(ref _messageCount);
 
         var handler = Received;

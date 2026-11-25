@@ -14,13 +14,11 @@ internal sealed class ClientStatus
 }
 
 /// <summary>
-/// 检测本机音乐客户端：已安装 / 运行中 / 是否登录。
+/// 检测本机音乐客户端：已安装 / 运行中 / 是否登录（网易云、QQ 音乐；酷狗按需求先移除）。
 ///
 /// 登录态信号（都用客户端自己的本地记录，不联网、不猜密码）：
 ///   网易云  —— 客户端 CEF 的 cookie（MUSIC_U），NeteaseClient 负责解密
-///   QQ 音乐 —— %APPDATA%\Tencent\QQMusic\ComData\qmcomdata.ini 的 [SectQMAPI] uin=
-///              （老版本没有这个文件时，退回看 UserData\&lt;QQ号&gt; 账号目录）
-///   酷狗   —— HKCU\Software\KuGoo3 的 LastLoginUserID / UserID，或 kugou.ini
+///   QQ 音乐 —— 内嵌 chromium 的 cookie（pt2gguin），兼容 ComData\qmcomdata.ini
 /// </summary>
 internal static class SourceCheck
 {
@@ -29,8 +27,7 @@ internal static class SourceCheck
         return new List<ClientStatus>
         {
             CheckNetease(),
-            CheckQQMusic(),
-            CheckKugou()
+            CheckQQMusic()
         };
     }
 
@@ -206,95 +203,6 @@ internal static class SourceCheck
             Logger.Write("sourcecheck qq: " + ex.Message);
         }
         return "";
-    }
-
-    // ---- 酷狗 ----
-
-    private static ClientStatus CheckKugou()
-    {
-        var status = new ClientStatus { Name = "酷狗音乐" };
-
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-        status.InstallPath = FirstExisting(
-            Path.Combine(appData, "KuGou8"),
-            Path.Combine(appData, "Kugou8"),
-            Path.Combine(localAppData, "KuGou"),
-            @"C:\Program Files (x86)\KuGou",
-            @"C:\Program Files\KuGou");
-
-        status.ExePath = FindProcessPath("KuGou") ?? FindProcessPath("KGMusic") ?? FindExe(
-            @"C:\Program Files (x86)\KuGou\KuGou.exe",
-            @"C:\Program Files\KuGou\KuGou.exe");
-
-        status.Installed = status.InstallPath.Length > 0 || status.ExePath.Length > 0;
-        status.Running = Process.GetProcessesByName("KuGou").Length > 0 || Process.GetProcessesByName("KGMusic").Length > 0;
-
-        if (!status.Installed)
-        {
-            status.LoginText = "未安装";
-            return status;
-        }
-
-        var uid = FindKugouAccount();
-        if (uid > 0)
-        {
-            status.LoginText = "已登录（账号 " + uid + "）";
-            return status;
-        }
-
-        status.LoginText = "未知（没找到登录标记，可在客户端里看一眼）";
-        return status;
-    }
-
-    /// <summary>酷狗把上次登录的账号写在注册表 / kugou.ini 里。</summary>
-    private static long FindKugouAccount()
-    {
-        var names = new[] { "LastLoginUserID", "UserID", "userid", "LoginUserID", "LastUserID" };
-
-        foreach (var subKey in new[] { @"Software\KuGoo3", @"Software\Kugou", @"Software\KuGou" })
-        {
-            try
-            {
-                using (var key = Registry.CurrentUser.OpenSubKey(subKey))
-                {
-                    if (key == null) continue;
-
-                    foreach (var name in names)
-                    {
-                        var value = key.GetValue(name);
-                        if (value is int i && i > 0) return i;
-                        if (value is long l && l > 0) return l;
-
-                        var text = value as string;
-                        long parsed;
-                        if (!string.IsNullOrEmpty(text) && long.TryParse(text, out parsed) && parsed > 0) return parsed;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Write("sourcecheck kugou: " + ex.Message);
-            }
-        }
-
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        foreach (var ini in new[]
-                 {
-                     Path.Combine(appData, "Kugou8", "kugou.ini"),
-                     Path.Combine(appData, "KuGou", "kugou.ini"),
-                     Path.Combine(appData, "KuGou8", "KuGou.ini")
-                 })
-        {
-            foreach (var name in names)
-            {
-                long parsed;
-                if (long.TryParse(IniFile.Read(ini, "", name), out parsed) && parsed > 0) return parsed;
-            }
-        }
-
-        return 0;
     }
 
     // ---- 小工具 ----
