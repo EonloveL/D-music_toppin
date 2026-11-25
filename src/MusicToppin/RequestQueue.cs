@@ -78,6 +78,13 @@ internal sealed class RequestQueue
         get { return _items; }
     }
 
+    private static string UserKey(SongRequest request)
+    {
+        if (request == null) return "";
+        if (request.RequesterUid > 0) return "u:" + request.RequesterUid;
+        return string.IsNullOrEmpty(request.Requester) ? "" : "n:" + request.Requester;
+    }
+
     public QueueResult Enqueue(SongRequest request)
     {
         if (request == null || string.IsNullOrWhiteSpace(request.Query))
@@ -86,12 +93,13 @@ internal sealed class RequestQueue
         }
 
         var now = DateTime.UtcNow;
+        var userKey = UserKey(request);
 
-        // 同一用户在冷却时间内只能点一次
-        if (UserCooldown > TimeSpan.Zero && !string.IsNullOrEmpty(request.Requester))
+        // 同一用户在冷却时间内只能点一次（按 uid，同名观众不互相影响、改昵称也绕不过）
+        if (UserCooldown > TimeSpan.Zero && userKey.Length > 0)
         {
             DateTime last;
-            if (_userLastUtc.TryGetValue(request.Requester, out last) && now - last < UserCooldown)
+            if (_userLastUtc.TryGetValue(userKey, out last) && now - last < UserCooldown)
             {
                 var wait = (int)Math.Ceiling((UserCooldown - (now - last)).TotalSeconds);
                 return Reject(QueueRejectReason.UserCooldown, request.Requester + " 还需等待 " + wait + " 秒");
@@ -126,7 +134,7 @@ internal sealed class RequestQueue
         _items.Add(item);
 
         _songSeenUtc[key] = now;
-        if (!string.IsNullOrEmpty(request.Requester)) _userLastUtc[request.Requester] = now;
+        if (userKey.Length > 0) _userLastUtc[userKey] = now;
 
         RaiseChanged();
 

@@ -387,6 +387,26 @@ internal sealed class DanmakuClient : IDisposable
         _loop = Task.Run(() => RunAsync(roomInput, token, generation));
     }
 
+    /// <summary>重新拉一次房间信息（用于「先连上、后开播」的情况，或接口抖动后修正 LiveStatus）。</summary>
+    public async Task RefreshLiveStatusAsync()
+    {
+        var room = RoomId;
+        if (room <= 0) return;
+
+        try
+        {
+            var info = await Task.Run(() => BilibiliLive.ResolveRoom(room));
+            if (info == null || info.RoomId <= 0) return;
+
+            LiveStatus = info.LiveStatus;
+            ReportStatus("房间 " + RoomId + (info.LiveStatus == 1 ? "（直播中）" : "（未开播，通常收不到弹幕）"));
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("live status refresh: " + ex.Message);
+        }
+    }
+
     public void Stop()
     {
         _generation++;

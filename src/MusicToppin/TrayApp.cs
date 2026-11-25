@@ -517,6 +517,8 @@ internal sealed class TrayApp : ApplicationContext
     private int _videoNonce;
     private int _playGeneration;
     private ResolvedSong _activeSong;
+    private volatile OverlayState _overlaySnapshot;
+    private volatile bool _exiting;
     private DateTime _lastSkipCommandUtc;
     private DateTime _lastRemoveCommandUtc;
     private ToolStripMenuItem _itemOverlay;
@@ -932,6 +934,7 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         _service.SetOwnPlayback(np);
+        RefreshOverlaySnapshot();
     }
 
     private void StopOwnPlayback()
@@ -1210,12 +1213,13 @@ internal sealed class TrayApp : ApplicationContext
     /// <summary>给观众看的一次性提示（叠加层网页顶部弹 4.5 秒），不影响主播的画面和键鼠。</summary>
     private void ShowOverlayToast(string text)
     {
-        if (string.IsNullOrWhiteSpace(text)) return;
+        if (_exiting || string.IsNullOrWhiteSpace(text)) return;
 
         _toastText = text;
         _toastId++;
         _toastUntilUtc = DateTime.UtcNow.AddSeconds(6);
         Logger.Write("toast: " + text);
+        RefreshOverlaySnapshot();
     }
 
     // ---- 曲源登录（S3）----
@@ -1554,6 +1558,8 @@ internal sealed class TrayApp : ApplicationContext
 
     private void UpdateTrayText()
     {
+        if (_exiting || _tray == null) return;
+
         var text = "Music Toppin";
         if (_danmaku != null && _danmaku.IsConnected) text += " · 直播间 " + _danmaku.RoomId;
         if (_queue.Count > 0) text += " · 点歌 " + _queue.Count;
@@ -1563,7 +1569,7 @@ internal sealed class TrayApp : ApplicationContext
 
     private void OnDanmaku(DanmakuMessage message)
     {
-        if (message == null) return;
+        if (_exiting || message == null) return;
 
         if (_danmakuReceived == 0)
         {
@@ -1819,6 +1825,7 @@ internal sealed class TrayApp : ApplicationContext
 
         RebuildQueueList();
         RefreshLiveStatus();
+        RefreshOverlaySnapshot();
     }
 
     /// <summary>托盘里的队列列表：每次展开时重建，最多列 10 首。</summary>
@@ -1984,10 +1991,17 @@ internal sealed class TrayApp : ApplicationContext
 
     private OverlayState BuildOverlayState()
     {
+        // HTTP 线程只读快照：不要在非 UI 线程读 _latest / _hud.Visible
+        return _overlaySnapshot ?? new OverlayState();
+    }
+
+    /// <summary>在 UI 线程生成不可变快照，供叠加层 HTTP 线程读取。</summary>
+    private void RefreshOverlaySnapshot()
+    {
         var np = _latest;
         var theme = HudRenderer.Theme;
 
-        return new OverlayState
+        _overlaySnapshot = new OverlayState
         {
             Title = np.HasSession ? np.Title : "",
             Artist = np.HasSession ? np.Artist : "",
@@ -2053,6 +2067,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemCopyOverlay.Enabled = true;
         _itemCopyVideo.Enabled = true;
         _itemCopyOverlay.Text = "复制叠加层地址（端口 " + _overlay.Port + "）";
+        RefreshOverlaySnapshot();
 
         var url = _overlay.Url;
         try { Clipboard.SetText(url); } catch { }
@@ -2566,6 +2581,8 @@ internal sealed class TrayApp : ApplicationContext
 
     private void Apply(NowPlaying np)
     {
+        if (_exiting) return;
+
         _latest = np;
         if (np.HasSession)
         {
@@ -2577,6 +2594,8 @@ internal sealed class TrayApp : ApplicationContext
         {
             _hud.SetState(np, animate: false);
         }
+
+        RefreshOverlaySnapshot();
     }
 
     private void CheckIdle()
@@ -2592,7 +2611,15 @@ internal sealed class TrayApp : ApplicationContext
             {
                 Logger.Write("danmaku tick: room " + _danmaku.RoomId + " live=" + _danmaku.LiveStatus +
                              " messages=" + _danmaku.MessageCount + " queue=" + _queue.Count);
+
+                // 「先连上、后开播」的情况：每分钟重新拉一次开播状态
+                if (_danmaku.LiveStatus != 1)
+                {
+                    _ = _danmaku.RefreshLiveStatusAsync();
+                }
             }
+
+            RefreshOverlaySnapshot();
         }
 
         if (_latest.HasSession || !_hud.Visible) return;
@@ -2652,6 +2679,8 @@ internal sealed class TrayApp : ApplicationContext
 
     private void ExitApp()
     {
+        _exiting = true;
+
         try
         {
             _idleTimer.Stop();

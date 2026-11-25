@@ -5,10 +5,10 @@ namespace MusicToppin.Tests
     /// <summary>点歌解析 + 队列核心（S1）的回归测试。</summary>
     internal static class RequestTests
     {
-        private static SongRequest Parse(string text, string user = "观众A")
+        private static SongRequest Parse(string text, string user = "观众A", long uid = 1001)
         {
             SongRequest request;
-            SongRequestParser.TryParse(text, user, 1001, out request);
+            SongRequestParser.TryParse(text, user, uid, out request);
             return request;
         }
 
@@ -83,22 +83,22 @@ namespace MusicToppin.Tests
 
             var queue = new RequestQueue { MaxSize = 3, UserCooldown = TimeSpan.FromSeconds(30), SongCooldown = TimeSpan.FromMinutes(5) };
 
-            var first = queue.Enqueue(Parse("点歌 起风了", "观众A"));
+            var first = queue.Enqueue(Parse("点歌 起风了", "观众A", 2001));
             TestRun.Check(first.Accepted && first.Position == 1, "第一首入队");
 
-            var duplicate = queue.Enqueue(Parse("点歌 起风了", "观众B"));
+            var duplicate = queue.Enqueue(Parse("点歌 起风了", "观众B", 2002));
             TestRun.Check(!duplicate.Accepted && duplicate.Reason == QueueRejectReason.SongCooldown, "同曲冷却拦截");
 
-            var userCooldown = queue.Enqueue(Parse("点歌 群青", "观众A"));
+            var userCooldown = queue.Enqueue(Parse("点歌 群青", "观众A", 2001));
             TestRun.Check(!userCooldown.Accepted && userCooldown.Reason == QueueRejectReason.UserCooldown, "用户冷却拦截");
 
-            var second = queue.Enqueue(Parse("点歌 群青", "观众B"));
+            var second = queue.Enqueue(Parse("点歌 群青", "观众B", 2002));
             TestRun.Check(second.Accepted && second.Position == 2, "第二首入队");
 
-            var third = queue.Enqueue(Parse("点歌 Lemon", "观众C"));
+            var third = queue.Enqueue(Parse("点歌 Lemon", "观众C", 2003));
             TestRun.Check(third.Accepted && third.Position == 3, "第三首入队");
 
-            var full = queue.Enqueue(Parse("点歌 群青2", "观众D"));
+            var full = queue.Enqueue(Parse("点歌 群青2", "观众D", 2004));
             TestRun.Check(!full.Accepted && full.Reason == QueueRejectReason.Full, "队列上限");
 
             var current = queue.TakeNext();
@@ -114,8 +114,14 @@ namespace MusicToppin.Tests
             TestRun.Check(queue.Current == null, "清空当前项");
 
             var loose = new RequestQueue { MaxSize = 5, UserCooldown = TimeSpan.Zero, SongCooldown = TimeSpan.Zero };
-            TestRun.Check(loose.Enqueue(Parse("点歌 起风了", "观众A")).Accepted, "冷却为 0 时可重复点");
-            TestRun.Check(loose.Enqueue(Parse("点歌 起风了", "观众A")).Accepted, "冷却为 0 时同用户可连点");
+            TestRun.Check(loose.Enqueue(Parse("点歌 起风了", "观众A", 4001)).Accepted, "冷却为 0 时可重复点");
+            TestRun.Check(loose.Enqueue(Parse("点歌 起风了", "观众A", 4001)).Accepted, "冷却为 0 时同用户可连点");
+
+            // 冷却按 uid：同名不同 uid 不互相影响，同 uid 改昵称也绕不过
+            var uidQueue = new RequestQueue { MaxSize = 5, UserCooldown = TimeSpan.FromSeconds(30), SongCooldown = TimeSpan.Zero };
+            TestRun.Check(uidQueue.Enqueue(Parse("点歌 起风了", "同名", 5001)).Accepted, "uid 冷却：第一首");
+            TestRun.Check(!uidQueue.Enqueue(Parse("点歌 群青", "同名", 5001)).Accepted, "同 uid 改昵称仍被冷却");
+            TestRun.Check(uidQueue.Enqueue(Parse("点歌 Lemon", "同名", 5002)).Accepted, "同名不同 uid 不互相冷却");
 
             // 弹幕撤回：按序号 / 撤回自己的 / 按歌名
             var removeQueue = new RequestQueue { MaxSize = 5, UserCooldown = TimeSpan.Zero, SongCooldown = TimeSpan.Zero };

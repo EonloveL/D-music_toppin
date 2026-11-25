@@ -33,7 +33,9 @@
   全部取流请求补 `ReadWriteTimeout`；断线重连代际隔离；视频时长缺失按 10 分钟兜底；退出清理视频计时器；
   叠加层 `/state` 只接受本机 Host、非 GET 返回 405、未知路径 404、nosniff；
   登录 cookie 用 DPAPI 加密落盘；临时 cookie 库 `try/finally` 清理；SQLite 文本按 UTF-8 解码；日志防 CRLF 注入并轮转
-- 单元测试扩到 **145 项**（点歌解析 + 队列 + 弹幕协议 + JSON + 网易云/QQ 解析），`run-tests.ps1` 一键跑，退出码即结果
+- **1.2.0 收尾**：队列冷却改按 uid（同名不误伤、改昵称不绕过）；先连后开播时每分钟自动刷新开播状态；
+  叠加层状态改为 UI 线程快照（HTTP 线程不再读 WinForms 字段）；退出加 `_exiting` 守卫
+- 单元测试扩到 **148 项**（点歌解析 + 队列 + 弹幕协议 + JSON + 网易云/QQ 解析），`run-tests.ps1` 一键跑，退出码即结果
 - 调试入口：`--room=5050`（启动即连弹幕）、`--fake-danmaku="点歌 BV…"`（注入假弹幕，自动化验证）、`--login-test=netease|qq`（打开登录窗口）
 - 文档：`docs/v2-danmaku.md`（协议笔记与排错）、`docs/v2-sources.md`（曲源接口、登录方式与候选平台调研）
 - 已并入 **v1.1.1**：直播叠加层（OBS 浏览器源）、离屏采集、遮挡模式（详见下方 v1.1.1）

@@ -274,8 +274,8 @@ internal sealed class WebView2Player : IDisposable
 
     private static string ToJsString(string value)
     {
-        // 用 JSON 字符串字面量（合法 JS），避免手写转义漏掉换行 / U+2028
-        return "\"" + Json.Escape(value ?? "") + "\"";
+        // Json.Escape 已经带引号，直接当 JS 字符串字面量用
+        return Json.Escape(value ?? "");
     }
 
     public void Dispose()
