@@ -22,6 +22,13 @@ internal struct NowPlaying
 
     public int PlayedCount;
 
+    /// <summary>队列里的下一首（只有点歌播放时有值）。</summary>
+    public string NextTitle;
+    public string NextArtist;
+
+    /// <summary>队列里还排着几首（含下一首）；0 = 没有队列。</summary>
+    public int QueueCount;
+
     public NowPlaying(bool hasSession, string title, string artist, TimeSpan position, TimeSpan duration,
         bool playing, bool hasTimeline, string[] prevTitles, string[] prevArtists, int prevCount, int playedCount)
     {

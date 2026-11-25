@@ -5,7 +5,7 @@
 ## 0. 一句话现状
 
 **V1.1.1 已发布（叠加层 / 离屏采集 / 遮挡模式，已合进 main）；V2 已完成 S1（点歌指令 + 队列）、S2（B 站弹幕接入 + 点歌自动播放）、S3-网易云、S4（BV 播放链路）。**
-S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」）。剩下 Apple Music、酷我/酷狗候选，以及 S5（展示整合）。版本号 **1.2.0**（未发布）。
+S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 的 HUD「下一首 / 队列预览」也已完成。剩下 Apple Music、酷我/酷狗候选，以及 S5 的托盘队列列表 / 弹幕提示。版本号 **1.2.0**（未发布）。
 
 ## 1. 仓库与构建
 
@@ -110,6 +110,18 @@ QQ 音乐：点歌 qq 起风了
 > 直播中**默认不弹任何通知**：点歌/连接/播放只写日志 + 更新菜单状态行，避免右下角弹窗干扰键鼠输入判定。
 > 需要气泡时打开「弹幕点歌 → 点歌/播放时弹气泡提示」（`HKCU\Software\MusicToppin\LiveToast=1`）。
 
+### S5 HUD 队列预览（已完成第一部分）
+
+```
+NowPlaying.NextTitle / NextArtist / QueueCount
+  → HudRenderer.Measure 多算一行（navNext），队列空了自动收起
+  → HudRenderer.Draw 画「下一首 ↓ 歌名 — 歌手（队列 N）」
+  → TrayApp.PushOwnState 每 500ms 从 RequestQueue.PeekNext() 刷新
+```
+
+- 演示模式（`--demo`）也会带一行假的「下一首」，方便预览上屏效果
+- 截图：`docs/screenshots/hud-next.png`
+- 还没做：托盘里的队列列表（现在只有数量）、点歌成功/失败的弹幕提示、叠加层（OBS）同步「下一首」
 ## 3. 关键决策与代价
 
 | 决策 | 原因 | 代价 |
@@ -132,11 +144,11 @@ QQ 音乐：点歌 qq 起风了
 - **Apple Music**：网页端无直链，只能试听或 MusicKit（要开发者 token），保持「只入队提示」
 - 候选平台评估见 [docs/v2-sources.md](v2-sources.md)
 
-### S5 展示整合
+### S5 剩余
 
-- HUD 增加「队列预览」（下一首/排队数）——`NowPlaying` 已有 `PrevTitles/PrevArtists` 模式可参考，建议加 `NextTitle/NextArtist/QueueCount`
-- 点歌成功/失败给一路弹幕提示（需要 S2 的发送能力；在那之前状态只在托盘菜单和日志里，不弹窗）
-- 托盘「点歌队列」可以列出前几首（现在是数量 + 下一首）
+- 托盘「点歌队列」列出前几首（现在只有数量 + 下一步按钮）
+- 点歌成功/失败给一路弹幕提示（需要 S2 的发送能力；在那之前状态只在托盘菜单和日志里）
+- 叠加层（OBS 浏览器源）加「下一首 / 队列」字段，和桌面 HUD 保持一致
 
 ## 5. 已知坑（别再踩）
 
@@ -171,7 +183,7 @@ MusicToppin.exe --demo                      演示数据（不读系统播放）
 MusicToppin.exe --demo-fast                 演示数据，12 秒切一首
 MusicToppin.exe --play-bv=BV1xx411c7mD      启动即播放指定 BV（自动化验证）
 MusicToppin.exe --room=5050                 启动即连接直播间弹幕
-MusicToppin.exe --fake-danmaku="点歌 BV…"   注入一条假弹幕，走「解析→入队→播放」全链路
+MusicToppin.exe --fake-danmaku="点歌 BV…"   注入假弹幕（可重复传多个，依次触发），走「解析→入队→播放」全链路
 MusicToppin.exe --fake-danmaku="点歌 起风了" 同上，但走网易云取流（S3 验证用）
 MusicToppin.exe --fake-danmaku="点歌 qq 起风了" 走 QQ 音乐取流（需要登录才有地址）
 MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|qq）

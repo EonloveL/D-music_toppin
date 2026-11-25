@@ -73,6 +73,9 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 
 - 队列：同曲 5 分钟内不重复、同一人 30 秒冷却、最多 20 首、先点先放；托盘菜单实时显示「队列：下一首（还有 N 首）」
 - 第一首自动开播，放完自动下一首；放不了的会提示并跳过，不会卡住
+- HUD 多显示一行「下一首 ↓」，带队列长度；队列空了这行会自动收起（点歌模式才有）
+
+![HUD 下一首](docs/screenshots/hud-next.png)
 - 断线自动重连（2 秒起翻倍，最长 30 秒）；菜单里能看到「直播间 xxx · 弹幕 N 条 · 队列 N 首」
 - 直播间号会记住，下次启动自动重连；「断开直播间」会关掉自动重连
 - 弹幕走**游客身份**，不用登录 B 站账号
@@ -282,7 +285,7 @@ MusicToppin.exe --demo                        演示数据
 MusicToppin.exe --demo-fast                   演示数据，12 秒切一首
 MusicToppin.exe --play-bv=BV1xx411c7mD        启动即播放指定 BV
 MusicToppin.exe --room=5050                   启动即连接直播间弹幕
-MusicToppin.exe --fake-danmaku="点歌 BV…"     注入一条假弹幕（自动化验证用）
+MusicToppin.exe --fake-danmaku="点歌 BV…"     注入假弹幕（可重复传多个，依次触发）
 MusicToppin.exe --login-test=netease          打开网易云登录窗口（调试）
 MusicToppin-Setup.exe /S                      静默安装（成功返回 0）
 Uninstall.exe /S                              静默卸载
@@ -308,6 +311,7 @@ Uninstall.exe /S                              静默卸载
 - ✅ **S2 弹幕接入**：直播间握手 → 游客鉴权 → 30 秒心跳 → zlib 解包 → `DANMU_MSG` 解析 → 入队 → 自动播放；断线自动重连；托盘可连接/断开/看队列
 - ✅ **S3（网易云 + QQ 音乐）**：`点歌 起风了` / `点歌 wy …` / `点歌 id:…` → 网易云搜索 → 320k 直链 → 播放；`点歌 qq …` → QQ 音乐搜索 → vkey → 播放；无版权自动跳过；登录支持「同步官方客户端 / 应用内扫码」
 - ✅ **S4 播放链路验证**：托盘「点歌测试（播放 BV）…」输入 BV 号 → 解析 DASH 音频 → WebView2 播放 → HUD 显示真实标题与进度
+- ✅ **S5（部分）**：HUD 显示「下一首 + 队列长度」，队列变化实时更新（托盘队列列表 / 弹幕提示还没做）
 - ⏳ Apple Music、S5 展示整合（HUD 下一首/队列预览）
 
 `tests/` 里 **110 项单元测试**覆盖解析、队列、弹幕协议、JSON；`run-tests.ps1` 一键跑（0 = 全过）。

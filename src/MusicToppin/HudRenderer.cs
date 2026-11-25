@@ -26,6 +26,7 @@ internal sealed class HudLayout
     public RectangleF Artist;
     public float DividerY;
     public RectangleF NavPrev;
+    public RectangleF NavNext;
     public RectangleF Progress;
 
     public List<PrevCardLayout> PrevCards = new List<PrevCardLayout>();
@@ -153,10 +154,13 @@ internal static class HudRenderer
 
         var hasTimeline = np.HasTimeline && np.Duration > TimeSpan.Zero;
 
-        // V1 只显示「上一首」，不再显示「下一首」
+        // 点歌播放时多一行「下一首」；队列空了就把这行收起来
+        var hasNext = np.QueueCount > 0 && !string.IsNullOrWhiteSpace(np.NextTitle);
+        var navBlockH = navRowH + (hasNext ? 3f * s + navRowH : 0f);
+
         var cardH = PadY * s * 2 + headerH + 8f * s + titleH + 5f * s + artistH
                     + (string.IsNullOrWhiteSpace(np.Artist) ? 0 : 4f * s)
-                    + 11f * s + navRowH
+                    + 11f * s + navBlockH
                     + (hasTimeline ? 5f * s : 0f);
 
         layout.Width = (int)width;
@@ -175,6 +179,11 @@ internal static class HudRenderer
 
         layout.NavPrev = new RectangleF(PadX * s + AccentW * s, y, innerW, navRowH);
         y += navRowH + 3f * s;
+        if (hasNext)
+        {
+            layout.NavNext = new RectangleF(PadX * s + AccentW * s, y, innerW, navRowH);
+            y += navRowH + 3f * s;
+        }
         layout.Progress = new RectangleF(0, cardH - 2f * s, width, hasTimeline ? 2f * s : 0f);
 
         var totalH = cardH;
@@ -231,6 +240,7 @@ internal static class HudRenderer
             layout.Title = Shift(layout.Title, pad);
             layout.Artist = Shift(layout.Artist, pad);
             layout.NavPrev = Shift(layout.NavPrev, pad);
+            layout.NavNext = Shift(layout.NavNext, pad);
             layout.Progress = Shift(layout.Progress, pad);
             foreach (var card in layout.PrevCards)
             {
@@ -319,6 +329,14 @@ internal static class HudRenderer
         var prevTitle = hasPrev ? np.PrevTitles[0] : "暂无历史";
         var prevArtist = hasPrev && np.PrevArtists != null && np.PrevArtists.Length > 0 ? np.PrevArtists[0] : null;
         DrawNavRow(g, s, l.NavPrev, "上一首", "↑", prevTitle, prevArtist);
+
+        if (np.QueueCount > 0 && !string.IsNullOrWhiteSpace(np.NextTitle))
+        {
+            var suffix = np.QueueCount > 1 ? "（队列 " + np.QueueCount + "）" : "";
+            DrawNavRow(g, s, l.NavNext, "下一首", "↓",
+                np.NextTitle + suffix,
+                string.IsNullOrWhiteSpace(np.NextArtist) ? null : np.NextArtist);
+        }
 
         if (np.HasTimeline && np.Duration > TimeSpan.Zero)
         {

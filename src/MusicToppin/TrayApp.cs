@@ -49,6 +49,8 @@ internal sealed class TrayApp : ApplicationContext
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _settings = AppSettings.Load();
 
+        Logger.Write("args: " + string.Join(" | ", Environment.GetCommandLineArgs()));
+
         // 曲源登录态：cookie 存注册表，启动时装回静态字段
         Netease.Cookie = _settings.NeteaseCookie ?? "";
         QQMusic.Cookie = _settings.QQMusicCookie ?? "";
@@ -308,21 +310,34 @@ internal sealed class TrayApp : ApplicationContext
             loginTimer.Start();
         }
 
-        var fakeDanmaku = Environment.GetCommandLineArgs()
-            .FirstOrDefault(a => a.StartsWith("--fake-danmaku=", StringComparison.OrdinalIgnoreCase));        if (fakeDanmaku != null)
+        var fakeArguments = Environment.GetCommandLineArgs()
+            .Where(a => a.StartsWith("--fake-danmaku=", StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.Substring("--fake-danmaku=".Length).Trim())
+            .Where(t => t.Length > 0)
+            .ToList();
+
+        if (fakeArguments.Count > 0)
         {
-            var text = fakeDanmaku.Substring("--fake-danmaku=".Length).Trim();
-            if (text.Length > 0)
+            var fakeIndex = 0;
+            var fakeTimer = new System.Windows.Forms.Timer { Interval = 2500 };
+            fakeTimer.Tick += (_, _) =>
             {
-                var fakeTimer = new System.Windows.Forms.Timer { Interval = 2000 };
-                fakeTimer.Tick += (_, _) =>
+                if (fakeIndex >= fakeArguments.Count)
                 {
                     fakeTimer.Stop();
                     fakeTimer.Dispose();
-                    HandleDanmaku(new DanmakuMessage { Text = text, UserName = "测试观众", Uid = 10001 });
-                };
-                fakeTimer.Start();
-            }
+                    return;
+                }
+
+                fakeIndex++;
+                HandleDanmaku(new DanmakuMessage
+                {
+                    Text = fakeArguments[fakeIndex - 1],
+                    UserName = "测试观众" + fakeIndex,
+                    Uid = 10000 + fakeIndex
+                });
+            };
+            fakeTimer.Start();
         }
 
         if (_settings.Visible) ShowHud();
@@ -808,6 +823,15 @@ internal sealed class TrayApp : ApplicationContext
             state.Duration > TimeSpan.Zero ? state.Duration : song.Duration,
             state.Playing, true,
             new string[NowPlaying.HistorySlots], new string[NowPlaying.HistorySlots], 0, 0);
+
+        // 点歌模式：HUD 多显示一行「下一首」
+        var next = _queue.PeekNext();
+        if (next != null)
+        {
+            np.NextTitle = next.DisplayName;
+            np.NextArtist = next.Artist;
+            np.QueueCount = _queue.Count;
+        }
 
         _service.SetOwnPlayback(np);
     }
@@ -1853,6 +1877,12 @@ internal sealed class TrayApp : ApplicationContext
             true, track.Title, track.Artist,
             TimeSpan.FromSeconds(elapsed), TimeSpan.FromSeconds(trackSeconds),
             true, true, titles, artists, historyCount, Math.Max(1, _demoPlayed));
+
+        // 演示数据也带上「下一首」，方便上屏预览
+        var nextTrack = DemoTracks[(_demoIndex + 1) % DemoTracks.Length];
+        np.NextTitle = nextTrack.Title;
+        np.NextArtist = nextTrack.Artist;
+        np.QueueCount = 2;
 
         Apply(np);
     }
