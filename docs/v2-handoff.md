@@ -138,14 +138,17 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 - 截图：`docs/screenshots/hud-next.png`
 - 托盘「点歌队列（N 首）」展开列表（前 10 首：歌名 · 点歌人），带「下一首 / 清空」
 - 叠加层（OBS 浏览器源）同步「下一首 + 队列数」；点歌成功/放不了在叠加层底部弹 4.5 秒提示（`OverlayState.Toast / ToastId`）
-- **视频小窗**：`OverlayState.VideoBvid` → `/video` 页用 B 站官方嵌入播放器（`muted=1`，声音仍由应用播放器输出）；
-  播放 B 站视频时 `TrayApp._videoBvid` 置位，停止/下一首自动清空。OBS 再加一个浏览器源指向 `/video`（480×270）
+- **视频小窗**：`OverlayState.VideoBvid/VideoSound` → `/video` 页用 B 站官方嵌入播放器；默认 `videoSound=true`
+  （视频自带声音、音画同步，音量在 OBS 源上；可切 `VideoAudio=0` 回到应用播放器音量）。
+  播放 B 站视频时 `TrayApp._videoBvid` 置位，停止/下一首自动清空
+- 叠加层两个源共用一个端口：`OverlayServer.Start(preferredPort)` 优先上次端口、占用则 4681-4750 往后找，
+  成功端口写回 `OverlayPort`；托盘可分别「复制叠加层地址 / 复制视频小窗地址」
 - 至此 S5 完成；剩余是 S3 的 Apple Music（酷狗暂缓）
 ## 3. 关键决策与代价
 
 | 决策 | 原因 | 代价 |
 |---|---|---|
-| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **381 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
+| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **393 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
 | **双模式**：纯显示 / 点歌 | 保住 V1「轻量」卖点 | 首次播放时才创建 WebView2（纯显示模式 25–33 MB） |
 | 弹幕用 **getConf** 而不是 getDanmuInfo | 新接口要 wbi 签名 + cookie，未签名直接 -352 | 老接口随时可能下线，届时要做 wbi |
 | 鉴权 **protover=2**（只 zlib） | .NET Framework 4.8 没有 Brotli | 服务器若强制 brotli 就收不到弹幕（会记警告） |

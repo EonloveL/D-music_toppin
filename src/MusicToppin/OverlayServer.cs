@@ -33,6 +33,9 @@ internal sealed class OverlayState
     /// <summary>视频点播：要显示在直播画面小窗里的 B 站视频（空 = 不显示）。</summary>
     public string VideoBvid = "";
 
+    /// <summary>视频声音是否跟随视频（true = iframe 出声、音画同步；false = 静音，声音走应用播放器）。</summary>
+    public bool VideoSound;
+
     /// <summary>手写 JSON（.NET Framework 4.8 没有 System.Text.Json）。</summary>
     public string ToJson()
     {
@@ -49,6 +52,7 @@ internal sealed class OverlayState
         AppendString(builder, "nextArtist", NextArtist);
         AppendString(builder, "toast", Toast);
         AppendString(builder, "videoBvid", VideoBvid);
+        builder.Append(",\"videoSound\":").Append(VideoSound ? "true" : "false");
         builder.Append(",\"queueCount\":").Append(QueueCount);
         builder.Append(",\"toastId\":").Append(ToastId);
         builder.Append(",\"playing\":").Append(Playing ? "true" : "false");
@@ -105,11 +109,19 @@ internal sealed class OverlayServer : IDisposable
         _stateProvider = stateProvider;
     }
 
-    public bool Start()
+    /// <summary>启动本地 HTTP 服务（`/` 和 `/video` 共用同一个端口）；优先上次的端口，被占用就自动往后找。</summary>
+    public bool Start(int preferredPort = 0)
     {
         if (_running) return true;
 
-        for (var port = 4681; port <= 4710; port++)
+        var ports = new List<int>();
+        if (preferredPort >= 1024 && preferredPort <= 65535) ports.Add(preferredPort);
+        for (var port = 4681; port <= 4750; port++)
+        {
+            if (!ports.Contains(port)) ports.Add(port);
+        }
+
+        foreach (var port in ports)
         {
             try
             {
@@ -399,12 +411,14 @@ internal sealed class OverlayServer : IDisposable
   var current='';
   function apply(st){
     var bv=st.videoBvid||'';
-    if(bv===current) return;
-    current=bv;
+    var sound=!!st.videoSound;
+    var key=bv+(sound?'|1':'|0');
+    if(key===current) return;
+    current=key;
     if(!bv){stage.className='';player.removeAttribute('src');return;}
     stage.className='on';
     player.src='https://player.bilibili.com/player.html?bvid='+encodeURIComponent(bv)+
-      '&p=1&autoplay=1&muted=1&danmaku=0&high_quality=1&as_wide=1';
+      '&p=1&autoplay=1&muted='+(sound?'0':'1')+'&danmaku=0&high_quality=1&as_wide=1';
   }
   function tick(){
     fetch('/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});

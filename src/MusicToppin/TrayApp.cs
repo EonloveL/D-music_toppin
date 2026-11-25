@@ -145,6 +145,8 @@ internal sealed class TrayApp : ApplicationContext
         _itemOverlay = new ToolStripMenuItem("直播叠加层（OBS 浏览器源）", null, (_, _) => ToggleOverlay()) { Checked = _settings.Overlay };
         _itemOffscreen = new ToolStripMenuItem("离屏采集（窗口采集用）", null, (_, _) => ToggleOffscreen()) { Checked = _settings.CaptureOffscreen };
         _itemOccluded = new ToolStripMenuItem("遮挡模式（压在其他窗口后面）", null, (_, _) => ToggleOccluded()) { Checked = _settings.CaptureOccluded };
+        _itemCopyOverlay = new ToolStripMenuItem("复制叠加层地址", null, (_, _) => CopyOverlayUrl("")) { Enabled = false };
+        _itemCopyVideo = new ToolStripMenuItem("复制视频小窗地址", null, (_, _) => CopyOverlayUrl("video")) { Enabled = false };
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -167,6 +169,7 @@ internal sealed class TrayApp : ApplicationContext
         controlsMenu.DropDownItems.Add(new ToolStripSeparator());
         _volumeMenu = BuildVolumeMenu();
         controlsMenu.DropDownItems.Add(_volumeMenu);
+        controlsMenu.DropDownItems.Add(BuildVideoAudioMenu());
 
         _itemHotkey = new ToolStripMenuItem("锁定快捷键：…", null, (_, _) => ShowHotkeyDialog());
 
@@ -189,6 +192,8 @@ internal sealed class TrayApp : ApplicationContext
             _itemPlayBv,
             _itemStopPlay,
             _itemOverlay,
+            _itemCopyOverlay,
+            _itemCopyVideo,
             _itemOffscreen,
             _itemOccluded,
             _itemAutoStart,
@@ -457,6 +462,8 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemQueueList;
     private ToolStripMenuItem _itemLiveDiag;
     private ToolStripMenuItem _volumeMenu;
+    private ToolStripMenuItem _itemCopyOverlay;
+    private ToolStripMenuItem _itemCopyVideo;
     private ToolStripMenuItem _itemLiveToast;
     private ToolStripMenuItem _itemNeteaseLogin;
     private ToolStripMenuItem _itemNeteaseLogout;
@@ -478,6 +485,10 @@ internal sealed class TrayApp : ApplicationContext
     private int _toastId;
     private DateTime _toastUntilUtc = DateTime.MinValue;
     private string _videoBvid = "";
+    private System.Windows.Forms.Timer _videoTimer;
+    private DateTime _videoStartedUtc;
+    private TimeSpan _videoDuration;
+    private ResolvedSong _videoSong;
     private ToolStripMenuItem _itemOverlay;
     private ToolStripMenuItem _itemOffscreen;
     private ToolStripMenuItem _itemOccluded;
@@ -834,6 +845,13 @@ internal sealed class TrayApp : ApplicationContext
             }
 
             _videoBvid = bvid;
+
+            if (_settings.VideoAudio == 1)
+            {
+                StartVideoPlayback(song);
+                return;
+            }
+
             await EnsurePlayer().PlayAsync(song);
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
         }
@@ -886,6 +904,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         _playingFromQueue = false;
         _videoBvid = "";
+        StopVideoTimer();
         _queue.ClearCurrent();
         try { if (_player != null) _ = _player.StopAsync(); } catch { }
         if (_service != null) _service.SetOwnPlayback(null);
@@ -959,6 +978,87 @@ internal sealed class TrayApp : ApplicationContext
     {
         ApplyPlayerVolume(percent);
         _settings.Save();
+    }
+
+    // ---- 视频声音模式 ----
+
+    /// <summary>视频自带声音：不在应用内播音频，用计时器推进 HUD 进度并在时长到点后切下一首。</summary>
+    private void StartVideoPlayback(ResolvedSong song)
+    {
+        _videoSong = song;
+        _videoStartedUtc = DateTime.UtcNow;
+        _videoDuration = song.Duration > TimeSpan.Zero ? song.Duration : TimeSpan.Zero;
+
+        if (_videoTimer == null)
+        {
+            _videoTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+            _videoTimer.Tick += (_, _) => VideoTick();
+        }
+        _videoTimer.Start();
+
+        PushOwnState(song, new PlaybackState { Playing = true, Position = TimeSpan.Zero, Duration = _videoDuration });
+        Logger.Write("video play (sound from video): " + song.Title +
+                     (_videoDuration > TimeSpan.Zero ? " / " + (int)_videoDuration.TotalSeconds + "s" : ""));
+    }
+
+    private void VideoTick()
+    {
+        if (_videoSong == null || _videoBvid.Length == 0)
+        {
+            StopVideoTimer();
+            return;
+        }
+
+        var position = DateTime.UtcNow - _videoStartedUtc;
+
+        if (_videoDuration > TimeSpan.Zero && position >= _videoDuration - TimeSpan.FromSeconds(1))
+        {
+            Logger.Write("video ended: " + _videoSong.Title);
+            StopOwnPlayback();
+            StartNextQueuedSong();
+            return;
+        }
+
+        PushOwnState(_videoSong, new PlaybackState { Playing = true, Position = position, Duration = _videoDuration });
+    }
+
+    private void StopVideoTimer()
+    {
+        if (_videoTimer != null && _videoTimer.Enabled) _videoTimer.Stop();
+        _videoSong = null;
+    }
+
+    private ToolStripMenuItem BuildVideoAudioMenu()
+    {
+        var menu = new ToolStripMenuItem("视频声音");
+
+        var follow = new ToolStripMenuItem("跟随视频（音画同步，音量在 OBS 调）", null, (_, _) => SetVideoAudio(1)) { Tag = 1 };
+        var app = new ToolStripMenuItem("走应用播放器（可调音量，可能轻微不同步）", null, (_, _) => SetVideoAudio(0)) { Tag = 0 };
+
+        menu.DropDownItems.Add(follow);
+        menu.DropDownItems.Add(app);
+        menu.DropDownOpening += (_, _) =>
+        {
+            follow.Checked = _settings.VideoAudio == 1;
+            app.Checked = _settings.VideoAudio == 0;
+            menu.Text = _settings.VideoAudio == 1 ? "视频声音：跟随视频" : "视频声音：应用播放器";
+        };
+
+        return menu;
+    }
+
+    private void SetVideoAudio(int mode)
+    {
+        _settings.VideoAudio = mode == 0 ? 0 : 1;
+        _settings.Save();
+        Logger.Write("video audio mode: " + (_settings.VideoAudio == 1 ? "follow video" : "app player"));
+
+        // 正在放视频就停掉，下一首按新模式重新开始
+        if (_playingFromQueue && _videoBvid.Length > 0)
+        {
+            StopOwnPlayback();
+            StartNextQueuedSong();
+        }
     }
 
     private void OnPlayerFailed(string message)
@@ -1497,6 +1597,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _playingFromQueue = true;
         _videoBvid = "";
+        StopVideoTimer();
         UpdateQueueMenu();
 
         ResolvedSong song = null;
@@ -1535,8 +1636,14 @@ internal sealed class TrayApp : ApplicationContext
         item.Duration = song.Duration;
         item.Resolved = true;
 
-        // 视频点播：叠加层 /video 小窗里同步播放（静音，声音仍由应用播放）
+        // 视频点播：叠加层 /video 小窗里同步播放
         _videoBvid = item.Request != null && item.Request.IsVideo ? ExtractVideoBvid(item, song) : "";
+
+        if (_videoBvid.Length > 0 && _settings.VideoAudio == 1)
+        {
+            StartVideoPlayback(song);
+            return;
+        }
 
         try
         {
@@ -1618,6 +1725,7 @@ internal sealed class TrayApp : ApplicationContext
             Toast = DateTime.UtcNow < _toastUntilUtc ? _toastText : "",
             ToastId = _toastId,
             VideoBvid = _videoBvid,
+            VideoSound = _settings.VideoAudio == 1,
             Show = np.HasSession && np.Title.Length > 0 && _hud.Visible || (np.HasSession && np.Title.Length > 0 && _settings.Overlay)
         };
     }
@@ -1644,14 +1752,24 @@ internal sealed class TrayApp : ApplicationContext
             _overlay = new OverlayServer(BuildOverlayState);
         }
 
-        if (!_overlay.Start())
+        if (!_overlay.Start(_settings.OverlayPort))
         {
             _settings.Overlay = false;
             _itemOverlay.Checked = false;
             _settings.Save();
-            _tray.ShowBalloonTip(3000, "Music Toppin", "启动叠加层失败：端口 4681-4710 都被占用", ToolTipIcon.Warning);
+            _tray.ShowBalloonTip(3000, "Music Toppin", "启动叠加层失败：4681-4750 端口都被占用", ToolTipIcon.Warning);
             return;
         }
+
+        if (_settings.OverlayPort != _overlay.Port)
+        {
+            _settings.OverlayPort = _overlay.Port;
+            _settings.Save();
+        }
+
+        _itemCopyOverlay.Enabled = true;
+        _itemCopyVideo.Enabled = true;
+        _itemCopyOverlay.Text = "复制叠加层地址（端口 " + _overlay.Port + "）";
 
         var url = _overlay.Url;
         try { Clipboard.SetText(url); } catch { }
@@ -1671,7 +1789,19 @@ internal sealed class TrayApp : ApplicationContext
         if (_overlay == null) return;
         _overlay.Dispose();
         _overlay = null;
+        _itemCopyOverlay.Enabled = false;
+        _itemCopyVideo.Enabled = false;
+        _itemCopyOverlay.Text = "复制叠加层地址";
         Logger.Write("overlay server stopped");
+    }
+
+    private void CopyOverlayUrl(string suffix)
+    {
+        if (_overlay == null) return;
+
+        var url = _overlay.Url + suffix;
+        try { Clipboard.SetText(url); } catch { }
+        _tray.ShowBalloonTip(2500, "Music Toppin", "已复制：" + url, ToolTipIcon.Info);
     }
     private void ToggleOccluded()
     {
