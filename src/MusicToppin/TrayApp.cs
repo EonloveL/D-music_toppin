@@ -84,6 +84,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemCheckUpdate = new ToolStripMenuItem("检查更新…", null, (_, _) => CheckForUpdates(manual: true));
         _itemOverlay = new ToolStripMenuItem("直播叠加层（OBS 浏览器源）", null, (_, _) => ToggleOverlay()) { Checked = _settings.Overlay };
         _itemOffscreen = new ToolStripMenuItem("离屏采集（窗口采集用）", null, (_, _) => ToggleOffscreen()) { Checked = _settings.CaptureOffscreen };
+        _itemOccluded = new ToolStripMenuItem("遮挡模式（压在其他窗口后面）", null, (_, _) => ToggleOccluded()) { Checked = _settings.CaptureOccluded };
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -122,6 +123,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemCheckUpdate,
             _itemOverlay,
             _itemOffscreen,
+            _itemOccluded,
             _itemAutoStart,
             new ToolStripSeparator(),
             new ToolStripMenuItem("退出", null, (_, _) => ExitApp())
@@ -202,6 +204,10 @@ internal sealed class TrayApp : ApplicationContext
         {
             _hud.SetCaptureOffscreen(true);
         }
+        else if (_settings.CaptureOccluded && _hud.Visible)
+        {
+            _hud.SetCaptureOccluded(true);
+        }
 
         if (_settings.Migrated)
         {
@@ -235,6 +241,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemCheckUpdate;
     private ToolStripMenuItem _itemOverlay;
     private ToolStripMenuItem _itemOffscreen;
+    private ToolStripMenuItem _itemOccluded;
     private ToolStripMenuItem _colorMenu;
     private ToolStripMenuItem _itemAccentColor;
     private ToolStripMenuItem _itemTitleColor;
@@ -608,10 +615,53 @@ internal sealed class TrayApp : ApplicationContext
         _overlay = null;
         Logger.Write("overlay server stopped");
     }
+    private void ToggleOccluded()
+    {
+        _settings.CaptureOccluded = !_settings.CaptureOccluded;
+        _itemOccluded.Checked = _settings.CaptureOccluded;
+
+        // 两种采集模式互斥
+        if (_settings.CaptureOccluded && _settings.CaptureOffscreen)
+        {
+            _settings.CaptureOffscreen = false;
+            _itemOffscreen.Checked = false;
+            _hud.SetCaptureOffscreen(false);
+        }
+
+        _settings.Save();
+
+        if (_settings.CaptureOccluded)
+        {
+            if (!_hud.Visible)
+            {
+                _settings.Visible = true;
+                _itemShow.Checked = true;
+                _settings.Save();
+                ShowHud();
+            }
+
+            _hud.SetCaptureOccluded(true);
+            _tray.ShowBalloonTip(7000, "Music Toppin",
+                "已进入遮挡模式：浮窗压在其它窗口后面。\n全屏/无边框游戏会盖住它；切回桌面时可能露出来。\n直播软件里用「窗口采集」选 Music Toppin。\n想恢复：再点一次这个菜单。",
+                ToolTipIcon.Info);
+            return;
+        }
+
+        _hud.SetCaptureOccluded(false);
+        _tray.ShowBalloonTip(2500, "Music Toppin", "已退出遮挡模式", ToolTipIcon.Info);
+    }
     private void ToggleOffscreen()
     {
         _settings.CaptureOffscreen = !_settings.CaptureOffscreen;
         _itemOffscreen.Checked = _settings.CaptureOffscreen;
+
+        if (_settings.CaptureOffscreen && _settings.CaptureOccluded)
+        {
+            _settings.CaptureOccluded = false;
+            _itemOccluded.Checked = false;
+            _hud.SetCaptureOccluded(false);
+        }
+
         _settings.Save();
 
         if (_settings.CaptureOffscreen)

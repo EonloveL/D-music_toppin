@@ -35,6 +35,9 @@ internal sealed class AppSettings
 
     /// <summary>把浮窗移到屏幕外（配合只能做窗口采集的直播软件）。</summary>
     public bool CaptureOffscreen;
+
+    /// <summary>遮挡模式：浮窗压在其它窗口后面（主播看不到，窗口采集仍可抓到）。</summary>
+    public bool CaptureOccluded;
     public int Schema;
 
     // 颜色（ARGB），默认值与设计稿一致
@@ -78,6 +81,7 @@ internal sealed class AppSettings
                 s.UpdateCheckOnStart = ReadInt(key, "UpdateCheckOnStart", 1) == 1;
                 s.Overlay = ReadInt(key, "Overlay", 0) == 1;
                 s.CaptureOffscreen = ReadInt(key, "CaptureOffscreen", 0) == 1;
+                s.CaptureOccluded = ReadInt(key, "CaptureOccluded", 0) == 1;
                 s.Schema = ReadInt(key, "Schema", 0);
                 s.AccentColor = ReadInt(key, "AccentColor", unchecked((int)0xFFFF3B30));
                 s.TitleColor = ReadInt(key, "TitleColor", unchecked((int)0xFFF5F8FC));
@@ -149,6 +153,7 @@ internal sealed class AppSettings
                 WriteInt(key, "UpdateCheckOnStart", UpdateCheckOnStart ? 1 : 0);
                 WriteInt(key, "Overlay", Overlay ? 1 : 0);
                 WriteInt(key, "CaptureOffscreen", CaptureOffscreen ? 1 : 0);
+                WriteInt(key, "CaptureOccluded", CaptureOccluded ? 1 : 0);
                 try { key.SetValue("UpdateUrl", UpdateUrl ?? "", RegistryValueKind.String); } catch { }
                 WriteInt(key, "Schema", CurrentSchema);
                 WriteInt(key, "AccentColor", AccentColor);
