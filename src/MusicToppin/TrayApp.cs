@@ -83,6 +83,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemWizard = new ToolStripMenuItem("上屏向导…", null, (_, _) => ShowWizard());
         _itemCheckUpdate = new ToolStripMenuItem("检查更新…", null, (_, _) => CheckForUpdates(manual: true));
         _itemOverlay = new ToolStripMenuItem("直播叠加层（OBS 浏览器源）", null, (_, _) => ToggleOverlay()) { Checked = _settings.Overlay };
+        _itemOffscreen = new ToolStripMenuItem("离屏采集（窗口采集用）", null, (_, _) => ToggleOffscreen()) { Checked = _settings.CaptureOffscreen };
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -120,6 +121,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemWizard,
             _itemCheckUpdate,
             _itemOverlay,
+            _itemOffscreen,
             _itemAutoStart,
             new ToolStripSeparator(),
             new ToolStripMenuItem("退出", null, (_, _) => ExitApp())
@@ -175,7 +177,7 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         // 启动时按保存的锚点重新贴边（屏幕分辨率/缩放变化后也能回到正确位置）
-        if (!string.IsNullOrEmpty(_settings.Anchor)) MoveHudTo(_settings.Anchor);
+        if (!string.IsNullOrEmpty(_settings.Anchor) && !_settings.CaptureOffscreen) MoveHudTo(_settings.Anchor);
         if (_settings.Overlay)
         {
             StartOverlay();
@@ -194,7 +196,12 @@ internal sealed class TrayApp : ApplicationContext
 
         // 调试/自动化用：MUSICTOPPIN_ANCHOR=tl|tr|bl|br|center
         var anchor = Environment.GetEnvironmentVariable("MUSICTOPPIN_ANCHOR");
-        if (!string.IsNullOrEmpty(anchor)) MoveHudTo(anchor);
+        if (!string.IsNullOrEmpty(anchor) && !_settings.CaptureOffscreen) MoveHudTo(anchor);
+
+        if (_settings.CaptureOffscreen && _hud.Visible)
+        {
+            _hud.SetCaptureOffscreen(true);
+        }
 
         if (_settings.Migrated)
         {
@@ -227,6 +234,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemWizard;
     private ToolStripMenuItem _itemCheckUpdate;
     private ToolStripMenuItem _itemOverlay;
+    private ToolStripMenuItem _itemOffscreen;
     private ToolStripMenuItem _colorMenu;
     private ToolStripMenuItem _itemAccentColor;
     private ToolStripMenuItem _itemTitleColor;
@@ -406,6 +414,14 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (!_hud.IsHandleCreated) return;
         if (_reanchoring) return;
+
+        if (_settings.CaptureOffscreen)
+        {
+            _settings.CaptureOffscreen = false;
+            _itemOffscreen.Checked = false;
+            _settings.Save();
+            _hud.SetCaptureOffscreen(false);
+        }
 
         if (!string.IsNullOrEmpty(anchor))
         {
@@ -591,6 +607,33 @@ internal sealed class TrayApp : ApplicationContext
         _overlay.Dispose();
         _overlay = null;
         Logger.Write("overlay server stopped");
+    }
+    private void ToggleOffscreen()
+    {
+        _settings.CaptureOffscreen = !_settings.CaptureOffscreen;
+        _itemOffscreen.Checked = _settings.CaptureOffscreen;
+        _settings.Save();
+
+        if (_settings.CaptureOffscreen)
+        {
+            if (!_hud.Visible)
+            {
+                _settings.Visible = true;
+                _itemShow.Checked = true;
+                _settings.Save();
+                ShowHud();
+            }
+
+            _hud.SetCaptureOffscreen(true);
+
+            _tray.ShowBalloonTip(7000, "Music Toppin",
+                "浮窗已移到屏幕外。\n在直播姬/直播伴侣里添加「窗口采集」，选择窗口「Music Toppin」。\n想恢复：再点一次这个菜单。",
+                ToolTipIcon.Info);
+            return;
+        }
+
+        _hud.SetCaptureOffscreen(false);
+        _tray.ShowBalloonTip(2500, "Music Toppin", "浮窗已回到屏幕", ToolTipIcon.Info);
     }
     private void ShowWizard()
     {

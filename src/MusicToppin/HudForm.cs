@@ -219,6 +219,40 @@ internal sealed class HudForm : Form
     public DateTime LastInteractionUtc { get; private set; } = DateTime.UtcNow;
 
     /// <summary>取消进行中的拖动（锁定/隐藏/弹菜单时调用，避免鼠标状态残留）。</summary>
+    private Point _offscreenBackup = Point.Empty;
+
+    /// <summary>是否处于"移到屏幕外"的采集模式。</summary>
+    public bool IsOffscreen { get; private set; }
+
+    /// <summary>
+    /// 把浮窗挪到所有显示器之外：主播看不到，但窗口仍然可见（IsWindowVisible），
+    /// 直播姬/直播伴侣这类"窗口采集"仍能选到它。
+    /// </summary>
+    public void SetCaptureOffscreen(bool offscreen)
+    {
+        if (offscreen)
+        {
+            if (!IsOffscreen) _offscreenBackup = Location;
+
+            IsOffscreen = true;
+
+            var screen = SystemInformation.VirtualScreen;
+            Location = new Point(screen.Left - Width - 320, screen.Top + 40);
+            Logger.Write("capture offscreen: " + Location.X + "," + Location.Y);
+            Render();
+            return;
+        }
+
+        if (!IsOffscreen) return;
+
+        IsOffscreen = false;
+        if (_offscreenBackup != Point.Empty)
+        {
+            Location = _offscreenBackup;
+        }
+        Logger.Write("capture offscreen: restored");
+        Render();
+    }
     public void CancelDrag()
     {
         _dragging = false;
