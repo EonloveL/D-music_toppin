@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Now Playing HUD — killfeed</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1280px; height:720px; overflow:hidden; }
+  body {
+    font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;
+    background:#0a0c10;
+    position:relative;
+    -webkit-font-smoothing:antialiased;
+  }
+  body.mode-green { background:#00ff00; }
+
+  /* ---------- 伪造的游戏画面（仅用于演示浮窗在画面里的观感） ---------- */
+  .scene, .vignette, .game-hud { display:block; }
+  body.mode-green .scene, body.mode-green .vignette, body.mode-green .game-hud { display:none; }
+
+  .scene {
+    position:absolute; inset:0;
+    background:
+      radial-gradient(1200px 600px at 68% 38%, rgba(96,130,180,.28), transparent 60%),
+      radial-gradient(800px 500px at 20% 75%, rgba(40,60,90,.45), transparent 65%),
+      linear-gradient(160deg,#11161f 0%,#0b0f16 45%,#05070a 100%);
+    filter:saturate(.9);
+  }
+  .blob { position:absolute; border-radius:50%; filter:blur(38px); opacity:.5; }
+  .b1 { width:520px; height:380px; left:12%; top:22%; background:#2b4a6b; }
+  .b2 { width:460px; height:420px; left:58%; top:8%;  background:#3a2f4a; }
+  .b3 { width:700px; height:260px; left:30%; top:66%; background:#1b2733; }
+  .grid {
+    position:absolute; inset:0; opacity:.16;
+    background-image:linear-gradient(rgba(120,160,210,.35) 1px, transparent 1px),
+                     linear-gradient(90deg, rgba(120,160,210,.35) 1px, transparent 1px);
+    background-size:64px 64px;
+    transform:perspective(600px) rotateX(62deg) translateY(120px) scale(1.9);
+    transform-origin:bottom;
+    mask-image:linear-gradient(to top, #000 0%, transparent 62%);
+  }
+  .vignette {
+    position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(ellipse at 50% 45%, transparent 45%, rgba(0,0,0,.55) 100%);
+  }
+  .game-hud { position:absolute; inset:0; pointer-events:none; color:rgba(255,255,255,.5); font-size:12px; letter-spacing:.08em; }
+  .hp { position:absolute; left:40px; bottom:38px; width:260px; }
+  .hp .bar { height:5px; border-radius:3px; background:rgba(255,255,255,.14); overflow:hidden; margin-top:8px; }
+  .hp .bar i { display:block; height:100%; width:72%; background:linear-gradient(90deg,#9fe8b0,#6cd28a); }
+  .ammo { position:absolute; right:44px; bottom:34px; text-align:right; font-family:Consolas,monospace; }
+  .ammo b { font-size:34px; font-weight:600; color:rgba(255,255,255,.72); letter-spacing:0; }
+  .ammo span { font-size:14px; color:rgba(255,255,255,.35); }
+  .compass { position:absolute; top:26px; left:50%; transform:translateX(-50%); font-family:Consolas,monospace; color:rgba(255,255,255,.32); }
+
+  /* ---------- 击杀播报浮窗 ---------- */
+  .feed {
+    position:absolute; right:34px; top:96px;
+    width:392px;
+    display:flex; flex-direction:column; gap:10px;
+    align-items:flex-end;
+  }
+
+  .item {
+    width:100%;
+    background:linear-gradient(180deg, rgba(16,19,25,.86), rgba(9,11,15,.82));
+    border:1px solid rgba(255,255,255,.09);
+    border-radius:10px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05);
+    backdrop-filter:blur(14px) saturate(120%);
+    padding:12px 14px 17px 16px;
+    position:relative;
+    overflow:hidden;
+  }
+  .item::before {
+    content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
+    background:var(--accent,#ff3b30);
+  }
+  .item.dim { opacity:.42; filter:saturate(.6); transform:scale(.972); transform-origin:right center; }
+  .item.dim::before { background:#5b6472; }
+
+  .row1 { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .dot {
+    width:7px; height:7px; border-radius:50%; background:var(--accent,#ff3b30);
+    box-shadow:0 0 0 3px rgba(255,59,48,.16), 0 0 10px rgba(255,59,48,.8);
+  }
+  .tag { font-size:11px; letter-spacing:.14em; color:#ff6b62; font-weight:700; }
+  .streak {
+    margin-left:auto; font-size:11px; color:#c8d2e0;
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.09);
+    padding:2px 7px; border-radius:999px; letter-spacing:.04em;
+  }
+  .time { font-family:Consolas,monospace; font-size:11px; color:#7d8797; letter-spacing:0; }
+
+  .title {
+    font-size:19px; line-height:1.36; font-weight:600; color:#f5f8fc;
+    letter-spacing:.01em;
+    word-break:break-word;
+    text-shadow:0 2px 10px rgba(0,0,0,.6);
+  }
+  .artist {
+    margin-top:5px; font-size:14px; line-height:1.4; color:#9fb0c6; font-weight:500;
+    word-break:break-word;
+  }
+  .divider { height:1px; background:rgba(255,255,255,.07); margin:11px 0 9px; }
+
+  .nav { display:flex; flex-direction:column; gap:5px; }
+  .nav .line { display:flex; align-items:baseline; gap:7px; min-width:0; }
+  .nav .k { flex:0 0 auto; font-size:10px; letter-spacing:.1em; color:#6f7b8c; }
+  .nav .arr { flex:0 0 auto; font-size:11px; color:#8fa4bd; }
+  .nav .v { font-size:12.5px; color:#c2ccdb; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .nav .v em { font-style:normal; color:#7f8b9c; }
+
+  .progress { position:absolute; left:0; right:0; bottom:0; height:2px; background:rgba(255,255,255,.06); }
+  .progress i { display:block; height:100%; width:61%; background:linear-gradient(90deg,#ff3b30,#ff7a45); box-shadow:0 0 12px rgba(255,59,48,.7); }
+
+  /* 绿幕模式：卡片必须改成不透明，否则绿底会透过半透明卡片，抠像时把卡片一起抠掉 */
+  body.mode-green .item {
+    background:#141821; backdrop-filter:none;
+    border-color:rgba(255,255,255,.14);
+  }
+  body.mode-green .item.dim { opacity:1; background:#1b2029; filter:none; }
+  body.mode-green .item.dim .title { color:#8c98aa; }
+  body.mode-green .item.dim .artist { color:#6d7787; }
+
+  /* 绿幕模式下的说明 */
+  .note { display:none; }
+  body.mode-green .note {
+    display:block; position:absolute; left:34px; bottom:30px;
+    font-size:13px; color:rgba(0,0,0,.62); letter-spacing:.02em;
+    background:rgba(255,255,255,.82); padding:10px 14px; border-radius:8px; max-width:520px; line-height:1.6;
+  }
+</style>
+</head>
+<body class="mode-game" id="body">
+
+  <div class="scene">
+    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+    <div class="grid"></div>
+  </div>
+  <div class="vignette"></div>
+
+  <div class="game-hud">
+    <div class="compass">N · 342</div>
+    <div class="hp"><div>HP 100</div><div class="bar"><i></i></div></div>
+    <div class="ammo"><b>27</b><span>/ 120</span></div>
+  </div>
+
+  <div class="feed">
+    <!-- 当前播放 -->
+    <article class="item">
+      <div class="row1">
+        <span class="dot"></span>
+        <span class="tag">正在播放</span>
+        <span class="time">02:41 / 03:18</span>
+      </div>
+      <div class="title">夜に駆ける（向夜晚奔去／Yoru ni Kakeru）</div>
+      <div class="artist">YOASOBI · Ayase / 幾田りら</div>
+      <div class="divider"></div>
+      <div class="nav">
+        <div class="line"><span class="k">上一首</span><span class="arr">↑</span><span class="v">起风了 <em>— 买辣椒也用券</em></span></div>
+        <div class="line"><span class="k">下一首</span><span class="arr">↓</span><span class="v">Lemon <em>— 米津玄師</em></span></div>
+      </div>
+      <div class="progress"><i></i></div>
+    </article>
+
+    <!-- 刚播完的上一首（渐隐，连播感） -->
+    <article class="item dim">
+      <div class="row1">
+        <span class="dot"></span>
+        <span class="tag" style="color:#8b95a5">播放完毕</span>
+        <span class="streak">连播 3 首</span>
+      </div>
+      <div class="title" style="font-size:16px">群青</div>
+      <div class="artist">YOASOBI</div>
+    </article>
+  </div>
+
+  <div class="note">纯绿背景 = 供直播软件「窗口捕获 + 绿幕抠像」，抠掉后观众看到的就是透明浮窗</div>
+
+<script>
+  const mode = new URLSearchParams(location.search).get('mode') || 'game';
+  if (mode === 'green') document.body.classList.add('mode-green');
+</script>
+</body>
+</html>

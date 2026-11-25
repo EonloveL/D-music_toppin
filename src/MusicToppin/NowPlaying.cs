@@ -1,0 +1,49 @@
+namespace MusicToppin;
+
+/// <summary>当前正在播放的曲目快照 + 已播完的最近几首（用于下方灰卡堆叠）。</summary>
+internal struct NowPlaying
+{
+    public const int HistorySlots = 3;
+
+    public bool HasSession;
+    public string Title;
+    public string Artist;
+    public TimeSpan Position;
+    public TimeSpan Duration;
+    public bool Playing;
+
+    /// <summary>是否知道进度/时长。窗口标题通道读不到时长，为 false。</summary>
+    public bool HasTimeline;
+
+    /// <summary>已播完的曲目，索引 0 = 最近一首。</summary>
+    public string[] PrevTitles;
+    public string[] PrevArtists;
+    public int PrevCount;
+
+    public int PlayedCount;
+
+    public NowPlaying(bool hasSession, string title, string artist, TimeSpan position, TimeSpan duration,
+        bool playing, bool hasTimeline, string[] prevTitles, string[] prevArtists, int prevCount, int playedCount)
+    {
+        HasSession = hasSession;
+        Title = title;
+        Artist = artist;
+        Position = position;
+        Duration = duration;
+        Playing = playing;
+        HasTimeline = hasTimeline;
+        PrevTitles = prevTitles ?? new string[HistorySlots];
+        PrevArtists = prevArtists ?? new string[HistorySlots];
+        PrevCount = prevCount;
+        PlayedCount = playedCount;
+    }
+
+    public static NowPlaying Empty
+    {
+        get
+        {
+            return new NowPlaying(false, "", "", TimeSpan.Zero, TimeSpan.Zero, false, false,
+                new string[HistorySlots], new string[HistorySlots], 0, 0);
+        }
+    }
+}

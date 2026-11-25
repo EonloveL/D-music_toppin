@@ -1,0 +1,15 @@
+# 构建产物
+build/
+*.exe
+*.pdb
+
+# 本地工具链缓存（build.ps1 会自动下载）
+.cache/
+
+# 文档里保留截图，其他临时文件忽略
+docs/**/*.tmp
+
+# IDE
+.vs/
+*.user
+*.suo

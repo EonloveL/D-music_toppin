@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+
+    <AssemblyName>MusicToppin</AssemblyName>
+    <RootNamespace>MusicToppin</RootNamespace>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <Product>Music Toppin</Product>
+    <Company>Music Toppin</Company>
+    <Description>系统正在播放 · 击杀播报风格悬浮窗</Description>
+
+    <!-- 低占用：不做 ReadyToRun、不做单文件自解压，启动即映射原生 DLL -->
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishSingleFile>false</PublishSingleFile>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,187 @@
+using Microsoft.Win32;
+
+namespace MusicToppin;
+
+/// <summary>
+/// 设置存注册表（HKCU），避免额外 JSON 依赖，也让产物保持几十 KB。
+/// 默认「锁定」= 鼠标穿透：打游戏时准星扫过浮窗不会吞掉点击。
+/// </summary>
+internal sealed class AppSettings
+{
+    private const string KeyPath = @"Software\MusicToppin";
+    private const int CurrentSchema = 2;
+
+    public int X = -1;
+    public int Y = -1;
+    public bool Green;
+    public bool Locked = true;
+    public bool Compact;
+    public bool AutoStart;
+    public bool Visible = true;
+    public bool Hotkeys = true;
+
+    /// <summary>自定义的锁定/解锁快捷键（如 "Ctrl+Alt+F9"）；空 = 自动挑选。</summary>
+    public string Hotkey = "";
+    public bool WizardShown;
+
+    /// <summary>更新清单地址（留空则用编译期默认值）。</summary>
+    public string UpdateUrl = "";
+
+    /// <summary>启动时是否自动检查更新。</summary>
+    public bool UpdateCheckOnStart = true;
+    public int Schema;
+
+    // 颜色（ARGB），默认值与设计稿一致
+    public int AccentColor = unchecked((int)0xFFFF3B30);
+    public int TitleColor = unchecked((int)0xFFF5F8FC);
+    public int ArtistColor = unchecked((int)0xFF9FB0C6);
+    public int CardColor = unchecked((int)0xF60E1117);
+
+    /// <summary>背景不透明度（10~100），默认 96 接近不透明。</summary>
+    public int CardOpacity = 96;
+
+    /// <summary>位置锚点：空=自由拖动；tl/tr/bl/br/center=自动贴边。</summary>
+    public string Anchor = "";
+    public bool Migrated;
+
+    /// <summary>一套默认值（用于「恢复默认颜色」）。</summary>
+    public static AppSettings Default()
+    {
+        return new AppSettings();
+    }
+
+    public static AppSettings Load()
+    {
+        var s = new AppSettings();
+        try
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(KeyPath))
+            {
+                if (key == null) return s;
+                s.X = ReadInt(key, "X", -1);
+                s.Y = ReadInt(key, "Y", -1);
+                s.Green = ReadInt(key, "Green", 0) == 1;
+                s.Locked = ReadInt(key, "Locked", 1) == 1;
+                s.Compact = ReadInt(key, "Compact", 0) == 1;
+                s.AutoStart = ReadInt(key, "AutoStart", 0) == 1;
+                s.Visible = ReadInt(key, "Visible", 1) == 1;
+                s.Hotkeys = ReadInt(key, "Hotkeys", 1) == 1;
+                s.Hotkey = ReadString(key, "Hotkey", "");
+                s.WizardShown = ReadInt(key, "WizardShown", 0) == 1;
+                s.UpdateUrl = ReadString(key, "UpdateUrl", "");
+                s.UpdateCheckOnStart = ReadInt(key, "UpdateCheckOnStart", 1) == 1;
+                s.Schema = ReadInt(key, "Schema", 0);
+                s.AccentColor = ReadInt(key, "AccentColor", unchecked((int)0xFFFF3B30));
+                s.TitleColor = ReadInt(key, "TitleColor", unchecked((int)0xFFF5F8FC));
+                s.ArtistColor = ReadInt(key, "ArtistColor", unchecked((int)0xFF9FB0C6));
+                s.CardColor = ReadInt(key, "CardColor", unchecked((int)0xF60E1117));
+                s.CardOpacity = ReadInt(key, "CardOpacity", 96);
+                var anchorValue = key.GetValue("Anchor") as string;
+                s.Anchor = anchorValue ?? "";
+            }
+        }
+        catch { }
+
+        // 旧版本默认是可交互的，升级后统一改成穿透，避免打游戏被吞点击
+        if (s.Schema < CurrentSchema)
+        {
+            s.Locked = true;
+            s.Hotkeys = true;
+            s.Migrated = true;
+            s.Save();
+        }
+
+        return s;
+    }
+
+    private static int ReadInt(RegistryKey key, string name, int fallback)
+    {
+        try
+        {
+            var v = key.GetValue(name);
+            if (v is int) return (int)v;
+        }
+        catch { }
+        return fallback;
+    }
+
+    private static string ReadString(RegistryKey key, string name, string fallback)
+    {
+        try
+        {
+            var value = key.GetValue(name) as string;
+            if (value != null) return value;
+        }
+        catch { }
+        return fallback;
+    }
+
+    private static void WriteInt(RegistryKey key, string name, int value)
+    {
+        try { key.SetValue(name, value, RegistryValueKind.DWord); } catch { }
+    }
+
+    public void Save()
+    {
+        try
+        {
+            using (var key = Registry.CurrentUser.CreateSubKey(KeyPath))
+            {
+                if (key == null) return;
+                WriteInt(key, "X", X);
+                WriteInt(key, "Y", Y);
+                WriteInt(key, "Green", Green ? 1 : 0);
+                WriteInt(key, "Locked", Locked ? 1 : 0);
+                WriteInt(key, "Compact", Compact ? 1 : 0);
+                WriteInt(key, "AutoStart", AutoStart ? 1 : 0);
+                WriteInt(key, "Visible", Visible ? 1 : 0);
+                WriteInt(key, "Hotkeys", Hotkeys ? 1 : 0);
+                try { key.SetValue("Hotkey", Hotkey ?? "", RegistryValueKind.String); } catch { }
+                WriteInt(key, "WizardShown", WizardShown ? 1 : 0);
+                WriteInt(key, "UpdateCheckOnStart", UpdateCheckOnStart ? 1 : 0);
+                try { key.SetValue("UpdateUrl", UpdateUrl ?? "", RegistryValueKind.String); } catch { }
+                WriteInt(key, "Schema", CurrentSchema);
+                WriteInt(key, "AccentColor", AccentColor);
+                WriteInt(key, "TitleColor", TitleColor);
+                WriteInt(key, "ArtistColor", ArtistColor);
+                WriteInt(key, "CardColor", CardColor);
+                WriteInt(key, "CardOpacity", CardOpacity);
+                try { key.SetValue("Anchor", Anchor ?? "", RegistryValueKind.String); } catch { }
+            }
+        }
+        catch { }
+    }
+
+    public void ApplyAutoStart(bool enabled)
+    {
+        AutoStart = enabled;
+        try
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Run", true))
+            {
+                if (key == null) return;
+                if (enabled) key.SetValue("MusicToppin", "\"" + AppPaths.ExePath + "\"");
+                else key.DeleteValue("MusicToppin", false);
+            }
+        }
+        catch { }
+    }
+}
+
+internal static class AppPaths
+{
+    public static string ExePath
+    {
+        get
+        {
+            try
+            {
+                var path = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                if (!string.IsNullOrEmpty(path)) return path;
+            }
+            catch { }
+            return System.Windows.Forms.Application.ExecutablePath;
+        }
+    }
+}
