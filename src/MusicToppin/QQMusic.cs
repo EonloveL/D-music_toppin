@@ -37,6 +37,15 @@ internal static class QQMusic
         get { return !string.IsNullOrWhiteSpace(Cookie) && !string.IsNullOrWhiteSpace(Uin) && Uin != "0"; }
     }
 
+    /// <summary>只登录了 QQ 音乐客户端（取流 key 不在应用内，但路由可以优先走 QQ）。</summary>
+    public static bool ClientLoggedIn;
+
+    /// <summary>自动路由认为「QQ 可用」：应用内登录或客户端已登录。</summary>
+    public static bool Available
+    {
+        get { return IsLoggedIn || ClientLoggedIn; }
+    }
+
     public static ResolvedSong Resolve(SongRequest request)
     {
         if (request == null || string.IsNullOrWhiteSpace(request.Query)) return null;

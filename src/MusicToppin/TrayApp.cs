@@ -55,6 +55,7 @@ internal sealed class TrayApp : ApplicationContext
         Netease.Cookie = _settings.NeteaseCookie ?? "";
         QQMusic.Cookie = _settings.QQMusicCookie ?? "";
         QQMusic.Uin = _settings.QQMusicUin ?? "";
+        QQMusic.ClientLoggedIn = SourceCheck.IsQQMusicClientLoggedIn();
         Logger.Write("sources: netease=" + (Netease.IsLoggedIn ? "logged in" : "guest") +
                      ", qq=" + (QQMusic.IsLoggedIn ? "logged in" : "guest"));
 

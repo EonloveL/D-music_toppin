@@ -53,7 +53,7 @@ internal static class SongResolvers
 
     private static ResolvedSong ResolveAuto(SongRequest request)
     {
-        var order = AutoOrder(Netease.IsLoggedIn, QQMusic.IsLoggedIn);
+        var order = AutoOrder(Netease.IsLoggedIn, QQMusic.Available);
 
         foreach (var source in order)
         {

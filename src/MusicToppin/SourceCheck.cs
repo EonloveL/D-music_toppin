@@ -31,6 +31,13 @@ internal static class SourceCheck
         };
     }
 
+    /// <summary>QQ 音乐客户端是否已登录（读本地 cookie 库，用于自动路由）。</summary>
+    public static bool IsQQMusicClientLoggedIn()
+    {
+        try { return CheckQQMusic().LoginText.StartsWith("已登录", StringComparison.Ordinal); }
+        catch { return false; }
+    }
+
     public static string Describe()
     {
         var lines = new List<string>();
