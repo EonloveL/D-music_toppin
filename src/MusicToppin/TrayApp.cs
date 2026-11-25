@@ -226,8 +226,19 @@ internal sealed class TrayApp : ApplicationContext
         ApplyTheme();
         RefreshSourceStatus();
 
-        // 有网易云 cookie 就后台校验一次，失效了在菜单里标出来
-        if (!string.IsNullOrWhiteSpace(Netease.Cookie))
+        // 装了官方客户端就每次启动都同步一次（客户端换账号也能跟上）；没装才用已保存的 cookie
+        if (NeteaseClient.IsInstalled)
+        {
+            var importTimer = new System.Windows.Forms.Timer { Interval = 2200 };
+            importTimer.Tick += (_, _) =>
+            {
+                importTimer.Stop();
+                importTimer.Dispose();
+                _ = ImportNeteaseFromClientAsync(report: false);
+            };
+            importTimer.Start();
+        }
+        else if (!string.IsNullOrWhiteSpace(Netease.Cookie))
         {
             var sourceTimer = new System.Windows.Forms.Timer { Interval = 2800 };
             sourceTimer.Tick += (_, _) =>
@@ -237,18 +248,6 @@ internal sealed class TrayApp : ApplicationContext
                 _ = ValidateNeteaseAsync();
             };
             sourceTimer.Start();
-        }
-        else if (NeteaseClient.IsInstalled)
-        {
-            // 没手动登录过，但本机装了官方客户端：自动同步一次（开箱即用）
-            var importTimer = new System.Windows.Forms.Timer { Interval = 2200 };
-            importTimer.Tick += (_, _) =>
-            {
-                importTimer.Stop();
-                importTimer.Dispose();
-                _ = ImportNeteaseFromClientAsync(report: false);
-            };
-            importTimer.Start();
         }
 
         var playBv = Environment.GetCommandLineArgs()
@@ -1050,7 +1049,10 @@ internal sealed class TrayApp : ApplicationContext
                         "没读到网易云客户端的登录状态。请确认客户端已安装并登录，或用「应用内登录」。",
                         ToolTipIcon.Warning);
                 }
-                RefreshSourceStatus();
+
+                // 同步失败时，已保存的 cookie 还能继续用，顺便校验一下
+                if (!string.IsNullOrWhiteSpace(_settings.NeteaseCookie)) _ = ValidateNeteaseAsync();
+                else RefreshSourceStatus();
                 return;
             }
 
