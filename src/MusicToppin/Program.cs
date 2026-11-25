@@ -12,6 +12,11 @@ internal static class Program
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // 全局异常兜底：直播中宁可记日志继续跑，也不要弹崩溃对话框抢焦点
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (_, e) => Logger.Write("ui exception: " + e.Exception);
+            AppDomain.CurrentDomain.UnhandledException += (_, e) => Logger.Write("fatal: " + e.ExceptionObject);
+
             var demo = false;
             var demoFast = false;
             foreach (var a in args)

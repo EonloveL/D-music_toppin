@@ -56,9 +56,23 @@ internal static class Sqlite
 
                     for (var i = 0; i < count; i++)
                     {
-                        row.Text[i] = sqlite3_column_text(stmt, i) == IntPtr.Zero
-                            ? null
-                            : Marshal.PtrToStringAnsi(sqlite3_column_text(stmt, i));
+                        var pointer = sqlite3_column_text(stmt, i);
+                        if (pointer == IntPtr.Zero)
+                        {
+                            row.Text[i] = null;
+                            continue;
+                        }
+
+                        var length = sqlite3_column_bytes(stmt, i);
+                        if (length <= 0)
+                        {
+                            row.Text[i] = "";
+                            continue;
+                        }
+
+                        var bytes = new byte[length];
+                        Marshal.Copy(pointer, bytes, 0, length);
+                        row.Text[i] = Encoding.UTF8.GetString(bytes);
                     }
 
                     if (blobColumn >= 0 && blobColumn < count)

@@ -155,6 +155,7 @@ internal static class Netease
             request.Headers["Cookie"] = CookieHeader();
             request.AllowAutoRedirect = true;
             request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
 
             using (var response = (HttpWebResponse)request.GetResponse())
             {
@@ -286,6 +287,7 @@ internal static class Netease
             request.Headers["Cookie"] = CookieHeader(cookie);
             request.Accept = "*/*";
             request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
 
             using (var response = (HttpWebResponse)request.GetResponse())

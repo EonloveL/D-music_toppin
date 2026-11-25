@@ -179,12 +179,24 @@ internal sealed class OverlayServer : IDisposable
             using (var stream = client.GetStream())
             {
                 stream.ReadTimeout = 3000;
-                var requestLine = ReadRequest(stream);
-                if (requestLine == null) return;
+                var request = ReadRequest(stream);
+                if (request == null) return;
 
-                var path = "/";
-                var parts = requestLine.Split(' ');
-                if (parts.Length >= 2) path = parts[1];
+                // 只接受本机回环 Host，挡住 DNS rebinding（外部页面把域名解析到 127.0.0.1 来读 /state）
+                if (!IsAllowedHost(request.Host))
+                {
+                    WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", "forbidden");
+                    return;
+                }
+
+                if (!string.Equals(request.Method, "GET", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteResponse(stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "method not allowed");
+                    return;
+                }
+
+                var path = request.Path;
                 var queryIndex = path.IndexOf('?');
                 if (queryIndex >= 0) path = path.Substring(0, queryIndex);
 
@@ -208,27 +220,44 @@ internal sealed class OverlayServer : IDisposable
                 }
                 else
                 {
-                    body = "not found";
-                    contentType = "text/plain; charset=utf-8";
+                    WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", "not found");
+                    return;
                 }
 
-                var bytes = Encoding.UTF8.GetBytes(body);
-                var header =
-                    "HTTP/1.1 200 OK\r\n" +
-                    "Content-Type: " + contentType + "\r\n" +
-                    "Content-Length: " + bytes.Length + "\r\n" +
-                    "Cache-Control: no-store\r\n" +
-                    "Connection: close\r\n\r\n";
-                var headerBytes = Encoding.ASCII.GetBytes(header);
-                stream.Write(headerBytes, 0, headerBytes.Length);
-                stream.Write(bytes, 0, bytes.Length);
-                stream.Flush();
+                WriteResponse(stream, "200 OK", contentType, body);
             }
         }
         catch
         {
             try { client?.Close(); } catch { }
         }
+    }
+
+    private static void WriteResponse(Stream stream, string status, string contentType, string body)
+    {
+        var bytes = Encoding.UTF8.GetBytes(body ?? "");
+        var header =
+            "HTTP/1.1 " + status + "\r\n" +
+            "Content-Type: " + contentType + "\r\n" +
+            "Content-Length: " + bytes.Length + "\r\n" +
+            "Cache-Control: no-store\r\n" +
+            "X-Content-Type-Options: nosniff\r\n" +
+            "Connection: close\r\n\r\n";
+        var headerBytes = Encoding.ASCII.GetBytes(header);
+        stream.Write(headerBytes, 0, headerBytes.Length);
+        stream.Write(bytes, 0, bytes.Length);
+        stream.Flush();
+    }
+
+    private static bool IsAllowedHost(string host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return true;   // HTTP/1.0 不带 Host
+
+        var value = host.Trim().ToLowerInvariant();
+        var colon = value.LastIndexOf(':');
+        var name = colon > 0 ? value.Substring(0, colon) : value;
+
+        return name == "127.0.0.1" || name == "localhost" || name == "[::1]";
     }
 
     private string CurrentStateJson()
@@ -246,11 +275,18 @@ internal sealed class OverlayServer : IDisposable
         }
     }
 
+    private sealed class HttpRequestInfo
+    {
+        public string Method = "GET";
+        public string Path = "/";
+        public string Host = "";
+    }
+
     /// <summary>
     /// 读完整个请求头再回包：只读第一行就关闭连接，内核会发 RST，
     /// 客户端报 "connection was forcibly closed"。
     /// </summary>
-    private static string ReadRequest(Stream stream)
+    private static HttpRequestInfo ReadRequest(Stream stream)
     {
         var buffer = new byte[8192];
         var length = 0;
@@ -268,9 +304,29 @@ internal sealed class OverlayServer : IDisposable
         }
 
         if (length == 0) return null;
+
         var text = Encoding.ASCII.GetString(buffer, 0, length);
-        var lineEnd = text.IndexOf('\r');
-        return lineEnd > 0 ? text.Substring(0, lineEnd) : text.Trim();
+        var lines = text.Split(new[] { "\r\n" }, StringSplitOptions.None);
+        if (lines.Length == 0 || lines[0].Length == 0) return null;
+
+        var info = new HttpRequestInfo();
+        var parts = lines[0].Split(' ');
+        if (parts.Length >= 2)
+        {
+            info.Method = parts[0];
+            info.Path = parts[1];
+        }
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))
+            {
+                info.Host = line.Substring(5).Trim();
+                break;
+            }
+        }
+
+        return info;
     }
 
     /// <summary>叠加层页面：透明背景 + 和桌面浮窗一致的卡片刻法。</summary>

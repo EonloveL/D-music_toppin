@@ -99,6 +99,7 @@ internal sealed class TrayApp : ApplicationContext
         _liveStatus = new ToolStripMenuItem("未连接直播间") { Enabled = false };
         _itemLiveDiag = new ToolStripMenuItem("直播间状态…", null, (_, _) => ShowLiveStatus());
         _itemSkipPolicy = BuildSkipPolicyMenu();
+        _itemRemovePolicy = BuildRemovePolicyMenu();
         _itemLiveConnect = new ToolStripMenuItem("连接直播间…", null, (_, _) => PromptLiveRoom());
         _itemLiveDisconnect = new ToolStripMenuItem("断开直播间", null, (_, _) => DisconnectLive()) { Enabled = false };
         _itemQueueNext = new ToolStripMenuItem("队列：空", null, (_, _) => StartNextQueuedSong()) { Enabled = false };
@@ -117,6 +118,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemLiveDiag,
             _itemQueueList,
             _itemSkipPolicy,
+            _itemRemovePolicy,
             new ToolStripSeparator(),
             _itemLiveToast
         });
@@ -486,6 +488,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemCopyOverlay;
     private ToolStripMenuItem _itemCopyVideo;
     private ToolStripMenuItem _itemSkipPolicy;
+    private ToolStripMenuItem _itemRemovePolicy;
     private ToolStripMenuItem _itemLiveToast;
     private ToolStripMenuItem _itemNeteaseLogin;
     private ToolStripMenuItem _itemNeteaseLogout;
@@ -512,7 +515,10 @@ internal sealed class TrayApp : ApplicationContext
     private TimeSpan _videoDuration;
     private ResolvedSong _videoSong;
     private int _videoNonce;
+    private int _playGeneration;
+    private ResolvedSong _activeSong;
     private DateTime _lastSkipCommandUtc;
+    private DateTime _lastRemoveCommandUtc;
     private ToolStripMenuItem _itemOverlay;
     private ToolStripMenuItem _itemOffscreen;
     private ToolStripMenuItem _itemOccluded;
@@ -868,6 +874,7 @@ internal sealed class TrayApp : ApplicationContext
                 return;
             }
 
+            _activeSong = song;
             _videoBvid = bvid;
 
             if (_settings.VideoAudio == 1)
@@ -892,6 +899,9 @@ internal sealed class TrayApp : ApplicationContext
 
         if (state.Ended)
         {
+            // 只处理「当前这首」的结束，避免重复 Ended 把下一首也切掉
+            if (song == null || song != _activeSong) return;
+
             // 一首放完：清掉当前项，队列里还有就接着放
             StopOwnPlayback();
             StartNextQueuedSong();
@@ -927,6 +937,8 @@ internal sealed class TrayApp : ApplicationContext
     private void StopOwnPlayback()
     {
         _playingFromQueue = false;
+        _playGeneration++;
+        _activeSong = null;
         _videoBvid = "";
         StopVideoTimer();
         _queue.ClearCurrent();
@@ -1038,15 +1050,53 @@ internal sealed class TrayApp : ApplicationContext
         Logger.Write("skip policy: " + _settings.SkipPolicy);
     }
 
+    private ToolStripMenuItem BuildRemovePolicyMenu()
+    {
+        var menu = new ToolStripMenuItem("弹幕撤回");
+
+        var everyone = new ToolStripMenuItem("所有人（可按序号删）", null, (_, _) => SetRemovePolicy(0)) { Tag = 0 };
+        var owner = new ToolStripMenuItem("仅本人（只能撤自己的）", null, (_, _) => SetRemovePolicy(1)) { Tag = 1 };
+        var off = new ToolStripMenuItem("关闭", null, (_, _) => SetRemovePolicy(2)) { Tag = 2 };
+
+        menu.DropDownItems.Add(everyone);
+        menu.DropDownItems.Add(owner);
+        menu.DropDownItems.Add(off);
+
+        menu.DropDownOpening += (_, _) =>
+        {
+            everyone.Checked = _settings.RemovePolicy == 0;
+            owner.Checked = _settings.RemovePolicy == 1;
+            off.Checked = _settings.RemovePolicy == 2;
+
+            menu.Text = "弹幕撤回：" + (_settings.RemovePolicy == 0 ? "所有人"
+                : _settings.RemovePolicy == 1 ? "仅本人" : "关闭");
+        };
+
+        return menu;
+    }
+
+    private void SetRemovePolicy(int policy)
+    {
+        _settings.RemovePolicy = policy < 0 || policy > 2 ? 0 : policy;
+        _settings.Save();
+        Logger.Write("remove policy: " + _settings.RemovePolicy);
+    }
+
     // ---- 视频声音模式 ----
 
     /// <summary>视频自带声音：不在应用内播音频，用计时器推进 HUD 进度并在时长到点后切下一首。</summary>
     private void StartVideoPlayback(ResolvedSong song)
     {
         _videoSong = song;
+        _activeSong = song;
         _videoNonce++;
         _videoStartedUtc = DateTime.UtcNow;
-        _videoDuration = song.Duration > TimeSpan.Zero ? song.Duration : TimeSpan.Zero;
+        _videoDuration = song.Duration > TimeSpan.Zero ? song.Duration : TimeSpan.FromMinutes(10);
+
+        if (song.Duration <= TimeSpan.Zero)
+        {
+            Logger.Write("video: 没有时长信息，按 10 分钟兜底（可手动切歌）");
+        }
 
         if (_videoTimer == null)
         {
@@ -1112,12 +1162,7 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Save();
         Logger.Write("video audio mode: " + (_settings.VideoAudio == 1 ? "follow video" : "app player"));
 
-        // 正在放视频就停掉，下一首按新模式重新开始
-        if (_playingFromQueue && _videoBvid.Length > 0)
-        {
-            StopOwnPlayback();
-            StartNextQueuedSong();
-        }
+        // 正在播的这一首保持不变（避免丢歌），下一首按新模式走
     }
 
     private void OnPlayerFailed(string message)
@@ -1128,7 +1173,13 @@ internal sealed class TrayApp : ApplicationContext
         if (_playingFromQueue) LiveNotify("Music Toppin", message, ToolTipIcon.Warning);
         else _tray.ShowBalloonTip(4000, "Music Toppin", message, ToolTipIcon.Warning);
 
-        if (!_playingFromQueue) return;
+        if (!_playingFromQueue)
+        {
+            // 手动点播失败：必须把 Current 清掉，否则后续队列会一直以为有歌在放
+            _activeSong = null;
+            try { if (_player != null) _ = _player.StopAsync(); } catch { }
+            return;
+        }
 
         // 点歌播放失败：清掉当前项，接着放下面的，别卡住
         StopOwnPlayback();
@@ -1555,6 +1606,9 @@ internal sealed class TrayApp : ApplicationContext
             {
                 _lastRequestResult = "格式没认出来（必须以「点歌 」开头）：" + text;
                 Logger.Write("danmaku parse miss: " + message.UserName + ": " + text);
+
+                var hint = text.Length > 24 ? text.Substring(0, 24) + "…" : text;
+                ShowOverlayToast("没听懂这条点歌：" + hint + "（格式：点歌 + 空格 + 歌名）");
             }
             return;
         }
@@ -1671,6 +1725,19 @@ internal sealed class TrayApp : ApplicationContext
 
         var arg = match.Groups[1].Success ? match.Groups[1].Value.Trim() : "";
 
+        if (_settings.RemovePolicy == 2)
+        {
+            Logger.Write("danmaku remove: disabled | " + message.UserName);
+            return true;
+        }
+
+        if ((DateTime.UtcNow - _lastRemoveCommandUtc).TotalSeconds < 2)
+        {
+            Logger.Write("danmaku remove: throttled | " + message.UserName);
+            return true;
+        }
+        _lastRemoveCommandUtc = DateTime.UtcNow;
+
         QueueItem removed = null;
         string error = null;
 
@@ -1681,14 +1748,33 @@ internal sealed class TrayApp : ApplicationContext
         }
         else if (int.TryParse(arg, out var position))
         {
-            removed = _queue.RemoveAt(position);
-            if (removed == null) error = "队列里没有第 " + position + " 首";
+            var target = position >= 1 && position <= _queue.Items.Count ? _queue.Items[position - 1] : null;
+
+            if (_settings.RemovePolicy == 1 && !IsOwnedBy(target, message))
+            {
+                error = "只能撤回自己的歌（「撤回」不带序号）";
+            }
+            else
+            {
+                removed = _queue.RemoveAt(position);
+                if (removed == null) error = "队列里没有第 " + position + " 首";
+            }
         }
         else
         {
             int matches;
-            removed = _queue.RemoveByKeyword(arg, out matches);
-            if (removed == null)
+            var target = _queue.FindByKeyword(arg, out matches);
+
+            if (target != null && _settings.RemovePolicy == 1 && !IsOwnedBy(target, message))
+            {
+                error = "只能撤回自己的歌（「撤回」不带序号）";
+            }
+            else if (target != null)
+            {
+                _queue.Remove(target.Id);
+                removed = target;
+            }
+            else
             {
                 error = matches > 1
                     ? "有多首匹配「" + arg + "」，请用「撤回 序号」"
@@ -1709,6 +1795,13 @@ internal sealed class TrayApp : ApplicationContext
         ShowOverlayToast("已移除：" + removed.DisplayName);
         UpdateQueueMenu();
         return true;
+    }
+
+    private static bool IsOwnedBy(QueueItem item, DanmakuMessage message)
+    {
+        return item != null && item.Request != null &&
+               item.Request.RequesterUid > 0 &&
+               item.Request.RequesterUid == message.Uid;
     }
 
     private void UpdateQueueMenu()
@@ -1780,6 +1873,8 @@ internal sealed class TrayApp : ApplicationContext
         StopVideoTimer();
         UpdateQueueMenu();
 
+        var generation = ++_playGeneration;
+
         ResolvedSong song = null;
         try
         {
@@ -1788,6 +1883,13 @@ internal sealed class TrayApp : ApplicationContext
         catch (Exception ex)
         {
             Logger.Write("queue resolve: " + ex.Message);
+        }
+
+        // 解析期间可能已经被切歌/停止/又开始了新的一首：旧流程必须作废
+        if (generation != _playGeneration)
+        {
+            Logger.Write("queue resolve: stale (generation " + generation + " != " + _playGeneration + "), discard");
+            return;
         }
 
         if (song == null)
@@ -1825,6 +1927,8 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
+        _activeSong = song;
+
         try
         {
             await EnsurePlayer().PlayAsync(song);
@@ -1840,9 +1944,7 @@ internal sealed class TrayApp : ApplicationContext
             _lastRequestResult = "播放失败：" + song.Title + "（" + ex.Message + "）";
             LiveNotify("Music Toppin", ex.Message, ToolTipIcon.Warning);
 
-            _queue.ClearCurrent();
-            _playingFromQueue = false;
-            UpdateQueueMenu();
+            StopOwnPlayback();
             StartNextQueuedSong();
         }
     }
@@ -2558,6 +2660,12 @@ internal sealed class TrayApp : ApplicationContext
             _relockTimer.Dispose();
             _demoTimer?.Stop();
             _demoTimer?.Dispose();
+            StopVideoTimer();
+            if (_videoTimer != null)
+            {
+                _videoTimer.Dispose();
+                _videoTimer = null;
+            }
             ReleaseHotkeys();
             try { _danmaku?.Dispose(); } catch { }
             try { _player?.Dispose(); } catch { }

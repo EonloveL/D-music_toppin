@@ -5,6 +5,7 @@ internal sealed class UpdateDialog : Form
 {
     private readonly UpdateInfo _info;
     private readonly Action _onInstall;
+    private volatile bool _closed;
     private readonly Label _status;
     private readonly ProgressBar _bar;
     private readonly Button _primary;
@@ -96,6 +97,7 @@ internal sealed class UpdateDialog : Form
 
         Controls.AddRange(new Control[] { title, subtitle, notes, _bar, _status, _primary, _secondary });
 
+        FormClosing += (_, _) => _closed = true;
     }
 
     private void StartInstall()
@@ -120,7 +122,28 @@ internal sealed class UpdateDialog : Form
 
                 var path = Updater.Download(_info, progress);
 
+                if (_closed)
+                {
+                    try { File.Delete(path); } catch { }
+                    return;
+                }
+
                 Post(() => _status.Text = "正在校验安装包…");
+
+                if (string.IsNullOrWhiteSpace(_info.Sha256))
+                {
+                    try { File.Delete(path); } catch { }
+                    Post(() =>
+                    {
+                        _busy = false;
+                        _bar.Visible = false;
+                        _primary.Enabled = true;
+                        _secondary.Enabled = true;
+                        _status.Text = "更新包没有校验值，已取消自动安装；请到 Releases 手动下载。";
+                    });
+                    return;
+                }
+
                 if (!Updater.VerifySha256(path, _info.Sha256))
                 {
                     try { File.Delete(path); } catch { }
@@ -140,6 +163,12 @@ internal sealed class UpdateDialog : Form
                     _status.Text = "正在安装，程序会自动重启…";
                     _bar.Value = 100;
                 });
+
+                if (_closed)
+                {
+                    try { File.Delete(path); } catch { }
+                    return;
+                }
 
                 // 交给延迟批处理：等本进程退出 → /S 安装 → 重新拉起
                 Updater.ApplyAndRestart(path);

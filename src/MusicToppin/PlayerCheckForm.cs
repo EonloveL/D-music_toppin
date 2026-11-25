@@ -8,6 +8,8 @@ internal sealed class PlayerCheckForm : Form
 {
     private const int Rows = 2;
 
+    private bool _refreshing;
+    private readonly System.Windows.Forms.Timer _delay = new System.Windows.Forms.Timer { Interval = 3000 };
     private readonly Label[] _names = new Label[Rows];
     private readonly Label[] _status = new Label[Rows];
     private readonly Button[] _start = new Button[Rows];
@@ -102,19 +104,50 @@ internal sealed class PlayerCheckForm : Form
         Controls.Add(refresh);
         Controls.Add(close);
 
+        _delay.Tick += (_, _) =>
+        {
+            _delay.Stop();
+            RefreshStatus();
+        };
+
         RefreshStatus();
     }
 
-    private void RefreshStatus()
+    protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        _clients = SourceCheck.CheckAll();
+        _delay.Stop();
+        _delay.Dispose();
+        base.OnFormClosing(e);
+    }
 
-        for (var i = 0; i < Rows && i < _clients.Count; i++)
+    private async void RefreshStatus()
+    {
+        if (_refreshing || IsDisposed) return;
+        _refreshing = true;
+
+        try
         {
-            var client = _clients[i];
-            _names[i].Text = client.Name;
-            _status[i].Text = SourceCheck.StateText(client) + Environment.NewLine + "登录：" + client.LoginText;
-            _start[i].Enabled = client.Installed && !client.Running && !string.IsNullOrEmpty(client.ExePath);
+            // 读 cookie 库/联网检查会慢，别卡住 UI 线程
+            var clients = await Task.Run(() => SourceCheck.CheckAll());
+            if (IsDisposed) return;
+
+            _clients = clients;
+
+            for (var i = 0; i < Rows && i < _clients.Count; i++)
+            {
+                var client = _clients[i];
+                _names[i].Text = client.Name;
+                _status[i].Text = SourceCheck.StateText(client) + Environment.NewLine + "登录：" + client.LoginText;
+                _start[i].Enabled = client.Installed && !client.Running && !string.IsNullOrEmpty(client.ExePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("playercheck: " + ex.Message);
+        }
+        finally
+        {
+            _refreshing = false;
         }
     }
 
@@ -138,13 +171,7 @@ internal sealed class PlayerCheckForm : Form
         }
 
         // 客户端启动要几秒，稍等再刷新一次状态
-        var timer = new System.Windows.Forms.Timer { Interval = 3000 };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            timer.Dispose();
-            RefreshStatus();
-        };
-        timer.Start();
+        _delay.Stop();
+        _delay.Start();
     }
 }

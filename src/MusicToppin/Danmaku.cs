@@ -369,6 +369,8 @@ internal sealed class DanmakuClient : IDisposable
     public DateTime LastMessageUtc { get; private set; }
     public bool IsConnected { get { return _connected; } }
     public int MessageCount { get { return Volatile.Read(ref _messageCount); } }
+    private int _generation;
+
     public int ReconnectCount { get; private set; }
     public string LastError { get; private set; } = "";
     public bool IsRunning { get { return _loop != null && !_loop.IsCompleted; } }
@@ -378,13 +380,16 @@ internal sealed class DanmakuClient : IDisposable
         Stop();
 
         ShortId = roomInput;
+        LiveStatus = -1;
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
-        _loop = Task.Run(() => RunAsync(roomInput, token));
+        var generation = ++_generation;
+        _loop = Task.Run(() => RunAsync(roomInput, token, generation));
     }
 
     public void Stop()
     {
+        _generation++;
         var cts = _cts;
         _cts = null;
 
@@ -393,10 +398,17 @@ internal sealed class DanmakuClient : IDisposable
             try { cts.Cancel(); } catch { }
         }
 
+        // 给旧循环一点时间收尾，避免它把新会话的状态覆盖掉
+        var loop = _loop;
+        if (loop != null && !loop.IsCompleted)
+        {
+            try { loop.Wait(1500); } catch { }
+        }
+
         SetConnected(false);
     }
 
-    private async Task RunAsync(long roomInput, CancellationToken ct)
+    private async Task RunAsync(long roomInput, CancellationToken ct, int generation)
     {
         LiveRoomInfo room = null;
         try
@@ -405,6 +417,8 @@ internal sealed class DanmakuClient : IDisposable
         }
         catch (OperationCanceledException) { return; }
         catch (Exception ex) { LastError = ex.Message; }
+
+        if (generation != _generation) return;
 
         if (room != null && room.RoomId > 0)
         {
@@ -469,8 +483,11 @@ internal sealed class DanmakuClient : IDisposable
             backoff = Math.Min(backoff * 2, 30);
         }
 
-        SetConnected(false);
-        ReportStatus("已断开");
+        if (generation == _generation)
+        {
+            SetConnected(false);
+            ReportStatus("已断开");
+        }
     }
 
     private async Task PumpAsync(DanmakuEndpoint endpoint, CancellationToken ct)

@@ -84,8 +84,15 @@ internal static class NeteaseClient
             var tempDb = Path.Combine(Path.GetTempPath(), "musictoppin-netease-cookies.db");
             File.Copy(cookiesPath, tempDb, true);
 
-            var cookies = ReadCookies(tempDb, key);
-            try { File.Delete(tempDb); } catch { }
+            Dictionary<string, string> cookies;
+            try
+            {
+                cookies = ReadCookies(tempDb, key);
+            }
+            finally
+            {
+                try { File.Delete(tempDb); } catch { }
+            }
 
             if (cookies == null || !cookies.ContainsKey("MUSIC_U"))
             {

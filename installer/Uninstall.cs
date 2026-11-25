@@ -100,8 +100,21 @@ internal static class UninstallProgram
         }
 
         // 自删除：cmd 等本进程退出后清目录（提权运行时 cmd 也继承管理员权限）
+        // 只在「确实是安装目录」时执行，避免卸载器被挪到别处运行时删掉那个目录
         try
         {
+            var isInstallDir = File.Exists(Path.Combine(dir, "MusicToppin.exe")) ||
+                               File.Exists(Path.Combine(dir, "Uninstall.exe"));
+            var root = Path.GetPathRoot(dir);
+            var isRoot = !string.IsNullOrEmpty(root) &&
+                         string.Equals(dir.TrimEnd('\\'), root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+
+            if (!isInstallDir || isRoot)
+            {
+                WriteLog("跳过删除目录（不是安装目录或磁盘根）：" + dir);
+                return;
+            }
+
             var command = "/c ping -n 3 127.0.0.1 >nul & rmdir /s /q \"" + dir + "\"";
             Process.Start(new ProcessStartInfo("cmd.exe", command)
             {

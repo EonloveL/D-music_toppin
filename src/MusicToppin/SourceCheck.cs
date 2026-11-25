@@ -152,8 +152,15 @@ internal static class SourceCheck
                 try { File.Copy(cookiesPath, temp, true); }
                 catch { continue; }
 
-                var rows = Sqlite.Query(temp, "SELECT name, value FROM cookies");
-                try { File.Delete(temp); } catch { }
+                List<SqliteRow> rows;
+                try
+                {
+                    rows = Sqlite.Query(temp, "SELECT name, value FROM cookies");
+                }
+                finally
+                {
+                    try { File.Delete(temp); } catch { }
+                }
 
                 var uin = "";
                 var hasKey = false;

@@ -59,7 +59,7 @@ internal sealed class SongRequest
 internal static class SongRequestParser
 {
     private static readonly Regex BvPattern = new Regex(@"^bv[0-9a-z]{10}$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ShortLinkPattern = new Regex(@"^https?://b23\.tv/\S+$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ShortLinkPattern = new Regex(@"^(?:https?://)?b23\.tv/\S+$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex IdPattern = new Regex(@"^id[:：](\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly char[] Separators = { ' ', '\t', '\u3000' };
 
@@ -85,9 +85,9 @@ internal static class SongRequestParser
                     // 「点歌：起风了」「点歌,起风了」
                     rest = rest.Substring(1);
                 }
-                else if (!LooksLikePlatformHead(rest))
+                else if (!LooksLikePlatformHead(rest) && !BvPattern.IsMatch(rest))
                 {
-                    // 「点歌姬 你好」这类不能误判
+                    // 「点歌姬 你好」这类不能误判；「点歌BV…」（少空格）放行
                     return false;
                 }
             }
@@ -115,6 +115,9 @@ internal static class SongRequestParser
 
         SongSource source;
         if (!TryMapPrefix(head.ToLowerInvariant(), out source)) return false;
+
+        // 「am 歌名」会和英文闲聊（am I right?）撞车：只允许「点歌 am …」这种写法
+        if (source == SongSource.AppleMusic) return false;
 
         return TryBuild(trimmed, tail, source, requester, uid, out request);
     }
@@ -153,6 +156,20 @@ internal static class SongRequestParser
             return true;
         }
 
+        // 完整 bilibili 链接 / 带不带 scheme 的 b23 / 任何含 BV 号的文本
+        string bvid;
+        if (Bilibili.TryExtractBvid(rest, out bvid) || Bilibili.TryExtractBvid(query, out bvid))
+        {
+            request = Build(raw, SongSource.Bilibili, bvid, requester, uid, isId: false, isVideo: true);
+            return true;
+        }
+
+        if (ShortLinkPattern.IsMatch(rest))
+        {
+            request = Build(raw, SongSource.Bilibili, rest, requester, uid, isId: false, isVideo: true);
+            return true;
+        }
+
         // id:123456
         var idMatch = IdPattern.Match(query);
         if (idMatch.Success)
@@ -161,6 +178,9 @@ internal static class SongRequestParser
             query = idMatch.Groups[1].Value;
             isId = true;
         }
+
+        // QQ 音乐没有数字 id（songmid 是字符串），别把 999 当歌名搜
+        if (isId && source == SongSource.QQ) return false;
 
         if (query.Length == 0) return false;
         if (query.Length > 120) query = query.Substring(0, 120);

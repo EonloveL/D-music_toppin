@@ -74,6 +74,11 @@ internal static class SongResolvers
         if (string.IsNullOrWhiteSpace(query)) return null;
 
         var text = query.Trim();
+        if (text.StartsWith("b23.tv/", StringComparison.OrdinalIgnoreCase))
+        {
+            text = "https://" + text;
+        }
+
         if (text.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
             text = Bilibili.ResolveShortLink(text);

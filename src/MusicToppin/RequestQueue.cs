@@ -196,8 +196,8 @@ internal sealed class RequestQueue
         return null;
     }
 
-    /// <summary>按歌名/关键词找唯一匹配的待播项并移除；matches 告诉你命中了几首。</summary>
-    public QueueItem RemoveByKeyword(string keyword, out int matches)
+    /// <summary>按歌名/关键词找唯一匹配的待播项（不删除）；matches 告诉你命中了几首。</summary>
+    public QueueItem FindByKeyword(string keyword, out int matches)
     {
         matches = 0;
         QueueItem found = null;
@@ -218,7 +218,14 @@ internal sealed class RequestQueue
             }
         }
 
-        if (matches != 1) return null;
+        return matches == 1 ? found : null;
+    }
+
+    /// <summary>按歌名/关键词找唯一匹配的待播项并移除；matches 告诉你命中了几首。</summary>
+    public QueueItem RemoveByKeyword(string keyword, out int matches)
+    {
+        var found = FindByKeyword(keyword, out matches);
+        if (found == null) return null;
 
         _items.Remove(found);
         RaiseChanged();

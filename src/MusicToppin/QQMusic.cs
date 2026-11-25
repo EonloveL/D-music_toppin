@@ -227,6 +227,7 @@ internal static class QQMusic
             request.Referer = Referer;
             request.Accept = "*/*";
             request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
             request.AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate;
 
             using (var response = (System.Net.HttpWebResponse)request.GetResponse())
@@ -255,6 +256,7 @@ internal static class QQMusic
             request.ContentType = "application/json";
             request.Accept = "*/*";
             request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
             if (!string.IsNullOrWhiteSpace(Cookie)) request.Headers["Cookie"] = Cookie;
 
             var payload = Encoding.UTF8.GetBytes(body);

@@ -51,6 +51,9 @@ internal sealed class AppSettings
     /// <summary>弹幕切歌权限：0 = 所有人，1 = 仅当前点歌人，2 = 关闭。</summary>
     public int SkipPolicy;
 
+    /// <summary>弹幕撤回队列权限：0 = 所有人，1 = 仅本人，2 = 关闭。</summary>
+    public int RemovePolicy;
+
     /// <summary>网易云登录 cookie（MUSIC_U 等；空 = 游客）。</summary>
     public string NeteaseCookie = "";
     public string NeteaseNick = "";
@@ -116,9 +119,10 @@ internal sealed class AppSettings
                 s.VideoAudio = ReadInt(key, "VideoAudio", 1);
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 0);
-                s.NeteaseCookie = ReadString(key, "NeteaseCookie", "");
+                s.RemovePolicy = ReadInt(key, "RemovePolicy", 0);
+                s.NeteaseCookie = Secrets.Unprotect(ReadString(key, "NeteaseCookie", ""));
                 s.NeteaseNick = ReadString(key, "NeteaseNick", "");
-                s.QQMusicCookie = ReadString(key, "QQMusicCookie", "");
+                s.QQMusicCookie = Secrets.Unprotect(ReadString(key, "QQMusicCookie", ""));
                 s.QQMusicUin = ReadString(key, "QQMusicUin", "");
                 s.QQMusicNick = ReadString(key, "QQMusicNick", "");
                 s.Overlay = ReadInt(key, "Overlay", 0) == 1;
@@ -200,9 +204,10 @@ internal sealed class AppSettings
                 WriteInt(key, "VideoAudio", VideoAudio);
                 WriteInt(key, "OverlayPort", OverlayPort);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
-                try { key.SetValue("NeteaseCookie", NeteaseCookie ?? "", RegistryValueKind.String); } catch { }
+                WriteInt(key, "RemovePolicy", RemovePolicy);
+                try { key.SetValue("NeteaseCookie", Secrets.Protect(NeteaseCookie ?? ""), RegistryValueKind.String); } catch { }
                 try { key.SetValue("NeteaseNick", NeteaseNick ?? "", RegistryValueKind.String); } catch { }
-                try { key.SetValue("QQMusicCookie", QQMusicCookie ?? "", RegistryValueKind.String); } catch { }
+                try { key.SetValue("QQMusicCookie", Secrets.Protect(QQMusicCookie ?? ""), RegistryValueKind.String); } catch { }
                 try { key.SetValue("QQMusicUin", QQMusicUin ?? "", RegistryValueKind.String); } catch { }
                 try { key.SetValue("QQMusicNick", QQMusicNick ?? "", RegistryValueKind.String); } catch { }
                 WriteInt(key, "Overlay", Overlay ? 1 : 0);

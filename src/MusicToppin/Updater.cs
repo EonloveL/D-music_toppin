@@ -97,7 +97,15 @@ internal static class Updater
         if (!map.TryGetValue("browser_download_url", out url)) map.TryGetValue("url", out url);
 
         string sha256;
-        map.TryGetValue("sha256", out sha256);
+        if (!map.TryGetValue("sha256", out sha256) && map.TryGetValue("digest", out sha256))
+        {
+            // GitHub Releases API 的 asset digest 形如 "sha256:abcd…"
+            if (!string.IsNullOrWhiteSpace(sha256) &&
+                sha256.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+            {
+                sha256 = sha256.Substring("sha256:".Length);
+            }
+        }
         string notes;
         if (!map.TryGetValue("notes", out notes)) map.TryGetValue("body", out notes);
 
@@ -146,6 +154,13 @@ internal static class Updater
     /// <summary>下载安装包，返回本地路径。</summary>
     public static string Download(UpdateInfo info, IProgress<int> progress)
     {
+        Uri uri;
+        if (info == null || string.IsNullOrWhiteSpace(info.Url) ||
+            !Uri.TryCreate(info.Url, UriKind.Absolute, out uri) ||
+            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            throw new InvalidOperationException("更新地址无效");
+        }
         var fileName = "MusicToppin-Setup-" + info.VersionText + ".exe";
         var path = Path.Combine(Path.GetTempPath(), fileName);
 
@@ -181,7 +196,12 @@ internal static class Updater
 
     public static bool VerifySha256(string filePath, string expected)
     {
-        if (string.IsNullOrWhiteSpace(expected)) return true;   // 清单没给就不校验
+        // 失败即拒绝：清单没给校验值就不自动安装（GitHub API 的 digest 字段会在 ParseManifest 里补上）
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            Logger.Write("update: 清单没有 sha256，拒绝自动安装");
+            return false;
+        }
 
         try
         {

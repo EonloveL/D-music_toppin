@@ -31,7 +31,7 @@ namespace MusicToppin.Tests
             request = Parse("點歌 起风了");
             TestRun.Check(request != null && request.Query == "起风了", "繁体點歌");
 
-            TestRun.Check(Parse("点歌BV1xx411c7mD") == null, "缺少空格不解析");
+            TestRun.Check(Parse("点歌姬 你好") == null, "点歌姬不误判");
             TestRun.Check(Parse("点歌姬 你好") == null, "点歌姬不误判");
             TestRun.Check(Parse("点歌   ") == null, "空内容");
 
@@ -44,8 +44,7 @@ namespace MusicToppin.Tests
             request = Parse("点歌 id:123456");
             TestRun.Check(request != null && request.IsId && request.Source == SongSource.Netease && request.Query == "123456", "id 点歌");
 
-            request = Parse("点歌 qq id:999");
-            TestRun.Check(request != null && request.IsId && request.Source == SongSource.QQ && request.Query == "999", "qq + id");
+            TestRun.Check(Parse("点歌 qq id:999") == null, "qq 不支持数字 id（songmid 是字符串）");
 
             request = Parse("点歌 https://b23.tv/abcd");
             TestRun.Check(request != null && request.IsVideo && request.Source == SongSource.Bilibili, "b23 短链");
@@ -66,6 +65,19 @@ namespace MusicToppin.Tests
             TestRun.Check(request != null && request.Source == SongSource.QQ && request.Query == "起风了", "点歌紧跟平台前缀");
 
             TestRun.Check(Parse("qq") == null, "只有平台前缀不解析");
+
+            request = Parse("点歌BV1xx411c7mD");
+            TestRun.Check(request != null && request.IsVideo && request.Source == SongSource.Bilibili, "点歌紧跟 BV 号（少空格）");
+
+            request = Parse("点歌 b23.tv/abcd");
+            TestRun.Check(request != null && request.IsVideo && request.Query == "b23.tv/abcd", "b23 短链（无 scheme）");
+
+            request = Parse("点歌 https://www.bilibili.com/video/BV1xx411c7mD?p=1");
+            TestRun.Check(request != null && request.IsVideo && request.Query == "BV1xx411c7mD", "完整 B 站视频链接");
+
+            TestRun.Check(Parse("am I right?") == null, "am 闲聊不误判");
+            request = Parse("点歌 am Lemon");
+            TestRun.Check(request != null && request.Source == SongSource.AppleMusic, "点歌 am 前缀保留");
 
             TestRun.Section("队列");
 

@@ -20,9 +20,22 @@ internal static class Logger
                 var info = new FileInfo(path);
                 if (info.Exists && info.Length > 512 * 1024)
                 {
-                    File.Delete(path);
+                    // 轮转一份历史，别把证据直接删掉
+                    try
+                    {
+                        var previous = path + ".1";
+                        if (File.Exists(previous)) File.Delete(previous);
+                        File.Move(path, previous);
+                    }
+                    catch { try { File.Delete(path); } catch { } }
                 }
-                File.AppendAllText(path, DateTime.Now.ToString("HH:mm:ss") + "  " + message + Environment.NewLine);
+
+                // 弹幕原文可能带换行：转义掉，避免伪造日志行
+                var text = (message ?? "")
+                    .Replace("\r", "\\r")
+                    .Replace("\n", "\\n");
+
+                File.AppendAllText(path, DateTime.Now.ToString("HH:mm:ss") + "  " + text + Environment.NewLine);
             }
         }
         catch { }

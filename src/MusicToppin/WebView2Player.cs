@@ -120,6 +120,14 @@ internal sealed class WebView2Player : IDisposable
         catch (Exception ex)
         {
             Logger.Write("webview2 init: " + ex.Message);
+
+            // 初始化失败要把已创建的隐藏窗口/控件清掉，否则每次重试都会多一个
+            try { _web?.Dispose(); } catch { }
+            try { if (_host != null) { _host.Close(); _host.Dispose(); } } catch { }
+            _web = null;
+            _host = null;
+            _ready = false;
+
             throw new InvalidOperationException(
                 "需要 WebView2 运行时（Windows 11 自带；Windows 10 请安装 Edge WebView2 Runtime）。\n" + ex.Message, ex);
         }
@@ -266,7 +274,8 @@ internal sealed class WebView2Player : IDisposable
 
     private static string ToJsString(string value)
     {
-        return "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
+        // 用 JSON 字符串字面量（合法 JS），避免手写转义漏掉换行 / U+2028
+        return "\"" + Json.Escape(value ?? "") + "\"";
     }
 
     public void Dispose()

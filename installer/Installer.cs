@@ -54,12 +54,120 @@ internal static class Program
         return null;
     }
 
+    /// <summary>
+    /// 安装目录安全校验：静默安装和 GUI 都必须过这一关。
+    /// 拒绝磁盘根、系统目录、用户目录本身；已存在且非空的目录必须是本程序自己的安装目录
+    /// （含 MusicToppin.exe 或 Uninstall.exe），避免 /S /DIR 把别的目录整删。
+    /// </summary>
+    internal static bool ValidateInstallDir(string dir, out string error)
+    {
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            error = "安装目录为空";
+            return false;
+        }
+
+        string full;
+        try
+        {
+            full = Path.GetFullPath(dir.Trim().Trim('"'))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception ex)
+        {
+            error = "安装路径无效：" + ex.Message;
+            return false;
+        }
+
+        var root = Path.GetPathRoot(full);
+        if (!string.IsNullOrEmpty(root))
+        {
+            root = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+
+        if (string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "不能直接装到磁盘根目录：" + full;
+            return false;
+        }
+
+        var protectedRoots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            Path.GetTempPath()
+        };
+
+        foreach (var protectedRoot in protectedRoots)
+        {
+            if (string.IsNullOrWhiteSpace(protectedRoot)) continue;
+
+            var normalized = protectedRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(full, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                error = "不能装到系统/用户目录本身：" + full;
+                return false;
+            }
+
+            // Windows / Program Files 下面不允许随便建；用户目录只拦「本身」，默认装到 LocalAppData\Programs 是允许的
+            var systemLike = string.Equals(protectedRoot, Environment.GetFolderPath(Environment.SpecialFolder.Windows), StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(protectedRoot, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(protectedRoot, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), StringComparison.OrdinalIgnoreCase);
+
+            if (systemLike && full.StartsWith(normalized + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                error = "不能装到系统目录里：" + full;
+                return false;
+            }
+        }
+
+        if (Directory.Exists(full))
+        {
+            var isOurs = File.Exists(Path.Combine(full, AppExe)) ||
+                         File.Exists(Path.Combine(full, "Uninstall.exe"));
+
+            if (!isOurs)
+            {
+                var entries = Directory.GetFileSystemEntries(full);
+                if (entries.Length > 0)
+                {
+                    error = "目标目录不是空的，而且不像 MusicToppin 的安装目录，已拒绝安装：" + full;
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    internal static bool IsEmptyOrOurInstallDir(string dir)
+    {
+        if (!Directory.Exists(dir)) return true;
+        if (File.Exists(Path.Combine(dir, AppExe)) || File.Exists(Path.Combine(dir, "Uninstall.exe"))) return true;
+        return Directory.GetFileSystemEntries(dir).Length == 0;
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
         bool silent = Array.Exists(args, a => a.Equals("/S", StringComparison.OrdinalIgnoreCase));
         var dirArgument = ParseDirArgument(args);
         var targetDir = string.IsNullOrWhiteSpace(dirArgument) ? SuggestInstallDir() : dirArgument;
+
+        string dirError;
+        if (!ValidateInstallDir(targetDir, out dirError))
+        {
+            Fail(new InvalidOperationException(dirError), silent);
+            return 2;
+        }
 
         if (silent)
         {
@@ -184,6 +292,12 @@ internal static class Program
 
     private static void CleanDirectory(string dir)
     {
+        // 双保险：只清理空目录或本程序自己的安装目录，绝不整删任意目录
+        if (!IsEmptyOrOurInstallDir(dir))
+        {
+            throw new InvalidOperationException("拒绝清理非 MusicToppin 目录：" + dir);
+        }
+
         try
         {
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
@@ -431,9 +545,10 @@ internal sealed class InstallForm : Form
             return;
         }
 
-        if (target.Length < 4 || target == Path.GetPathRoot(target))
+        string dirError;
+        if (!Program.ValidateInstallDir(target, out dirError))
         {
-            MessageBox.Show("请不要直接装到磁盘根目录，选一个文件夹。", Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(dirError, Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 

@@ -38,6 +38,7 @@ internal static class Bilibili
             request.UserAgent = UserAgent;
             request.AllowAutoRedirect = true;
             request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
             using (var response = (HttpWebResponse)request.GetResponse())
             {
                 string bvid;
@@ -177,6 +178,7 @@ internal static class Bilibili
             request.UserAgent = UserAgent;
             request.Referer = "https://www.bilibili.com";
             request.Timeout = 15000;
+            request.ReadWriteTimeout = 12000;
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
 
             using (var response = (HttpWebResponse)request.GetResponse())

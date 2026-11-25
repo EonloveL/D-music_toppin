@@ -15,8 +15,8 @@ S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「�
 | 分支 | `main` 是唯一开发线（V2 + v1.1.1 已合并）；`fix/v1` 保留为 v1.1.1 发布点 |
 | 最新提交 | 见 `git log -1` |
 | 构建 | `powershell -ExecutionPolicy Bypass -File .\build.ps1`（**不需要 .NET SDK**，首次自动下载工具链到 `.cache\nuget`） |
-| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（140 项，退出码 0 = 全过） |
-| 产物 | `build\MusicToppin-Setup.exe`（约 367 KB）、`build\app\`（主程序 182 KB） |
+| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（145 项，退出码 0 = 全过） |
+| 产物 | `build\MusicToppin-Setup.exe`（约 399 KB）、`build\app\`（主程序 257 KB） |
 | 运行 | 装好后从托盘启动；调试直接跑 `build\app\MusicToppin.exe` |
 
 **重要**：项目是 `.NET Framework 4.8` + 直接调 Roslyn `csc`（**不是** `dotnet build`，仓库里的 `MusicToppin.csproj` 是历史遗留，不要用它构建）。
@@ -45,7 +45,7 @@ S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「�
 | `src/MusicToppin/Json.cs` | 零依赖只读 JSON（对象→Dictionary / 数组→List） |
 | `src/MusicToppin/TrayApp.cs` | 「弹幕点歌」菜单：连接/断开、队列状态、自动播放、放不了就跳下一首 |
 | `src/MusicToppin/Settings.cs` | `LiveRoomId`、`LiveAutoConnect`（记住直播间，启动自动重连） |
-| `tests/` | 124 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
+| `tests/` | 145 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
 
 行为要点：
 
@@ -118,6 +118,8 @@ QQ 音乐：点歌 qq 起风了
 - **自动选平台**：`点歌 歌名` 只看「应用内可播」的登录态 —— 只登录一个就用它，都登录网易云优先、QQ 兜底；
   `wy` / `qq` 前缀强制指定；`BV` 永远走 B 站（`SongResolvers.AutoOrder` 有单元测试）
 - **单队列播放**：同一时间只放一首（`_playingFromQueue` + 手动点播先 `StopOwnPlayback`）
+- **弹幕切歌/撤回权限**：`SkipPolicy` / `RemovePolicy`（0 所有人、1 仅点歌人/本人、2 关闭），菜单在「弹幕点歌」下
+- **登录凭据**：`Secrets` 用 DPAPI（CurrentUser）加密 `NeteaseCookie` / `QQMusicCookie` 再写注册表，旧明文读取时兼容
 - **点歌音量**：`AppSettings.PlayerVolume`（默认 60），菜单「播放控制 → 点歌音量」预设/滑块；
   `WebView2Player.Volume` + JS `setVolume()`，拖动即时生效（只改内置播放器，不动系统音量）
 - 完整接口与候选平台（酷狗 / 汽水 / YouTube / Spotify）见 **[docs/v2-sources.md](v2-sources.md)**
@@ -148,7 +150,7 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 
 | 决策 | 原因 | 代价 |
 |---|---|---|
-| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **393 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
+| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **399 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
 | **双模式**：纯显示 / 点歌 | 保住 V1「轻量」卖点 | 首次播放时才创建 WebView2（纯显示模式 25–33 MB） |
 | 弹幕用 **getConf** 而不是 getDanmuInfo | 新接口要 wbi 签名 + cookie，未签名直接 -352 | 老接口随时可能下线，届时要做 wbi |
 | 鉴权 **protover=2**（只 zlib） | .NET Framework 4.8 没有 Brotli | 服务器若强制 brotli 就收不到弹幕（会记警告） |
@@ -217,13 +219,13 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - 日志：`%TEMP%\musictoppin.log`（`sources:`、`netease client:`、`netease account:`、`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`qq:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
 - 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded` 等）
 - 安装目录：默认 `%LocalAppData%\Programs\MusicToppin`，可自定义
-- 单元测试：`run-tests.ps1`（140 项，不必联网）
+- 单元测试：`run-tests.ps1`（145 项，不必联网）
 - 叠加层：托盘开启后日志里有 `overlay server started at http://127.0.0.1:<port>/`，浏览器可直接打开验证
 
 ## 7. 新会话建议的第一次动作
 
 1. `git checkout main && git pull`
-2. `run-tests.ps1` + `build.ps1` 确认环境（应全绿、约 381 KB）
+2. `run-tests.ps1` + `build.ps1` 确认环境（应全绿、约 399 KB）
 3. `MusicToppin.exe --room=5050` 跑 30 秒，看日志里有没有 `danmaku auth ok` 与 `song request`
 4. `MusicToppin.exe --fake-danmaku="点歌 起风了"` 验证网易云链路（日志应有 `resolved:` + `queue play:`）
 5. 接着做 **S3 剩余**：Apple Music（只有试听），或按用户要求再评估酷狗/酷我
