@@ -1231,8 +1231,10 @@ internal sealed class TrayApp : ApplicationContext
         {
             if (_danmaku.LiveStatus == 0)
             {
-                LiveNotify("Music Toppin",
-                    "直播间 " + _danmaku.RoomId + " 未开播，收不到弹幕；开播后在「直播间状态」里点重新连接。",
+                // 连接是用户主动点的，这种情况值得弹一次气泡（平时点歌流程仍然静默）
+                _tray.ShowBalloonTip(6000, "直播间未开播",
+                    "直播间 " + _danmaku.RoomId + " 现在没有开播，B 站不会推送弹幕，点歌不会有反应。\n" +
+                    "开播后在「直播间状态」里点「重新连接」。",
                     ToolTipIcon.Warning);
                 UpdateLiveStatus("直播间 " + _danmaku.RoomId + " 未开播（收不到弹幕）");
             }
