@@ -1144,11 +1144,11 @@ internal sealed class TrayApp : ApplicationContext
     {
         var menu = new ToolStripMenuItem("视频声音");
 
-        var follow = new ToolStripMenuItem("跟随视频（音画同步，音量在 OBS 调）", null, (_, _) => SetVideoAudio(1)) { Tag = 1 };
-        var app = new ToolStripMenuItem("走应用播放器（可调音量，可能轻微不同步）", null, (_, _) => SetVideoAudio(0)) { Tag = 0 };
+        var app = new ToolStripMenuItem("走应用播放器（默认，确保有声）", null, (_, _) => SetVideoAudio(0)) { Tag = 0 };
+        var follow = new ToolStripMenuItem("跟随视频（OBS 允许带声播放时可用）", null, (_, _) => SetVideoAudio(1)) { Tag = 1 };
 
-        menu.DropDownItems.Add(follow);
         menu.DropDownItems.Add(app);
+        menu.DropDownItems.Add(follow);
         menu.DropDownOpening += (_, _) =>
         {
             follow.Checked = _settings.VideoAudio == 1;
@@ -2609,8 +2609,13 @@ internal sealed class TrayApp : ApplicationContext
 
             if (_danmaku != null && _danmaku.IsConnected)
             {
+                var packetAge = _danmaku.LastPacketUtc == DateTime.MinValue
+                    ? -1
+                    : (int)(DateTime.UtcNow - _danmaku.LastPacketUtc).TotalSeconds;
+
                 Logger.Write("danmaku tick: room " + _danmaku.RoomId + " live=" + _danmaku.LiveStatus +
-                             " messages=" + _danmaku.MessageCount + " queue=" + _queue.Count);
+                             " messages=" + _danmaku.MessageCount + " queue=" + _queue.Count +
+                             " lastPacket=" + packetAge + "s");
 
                 // 「先连上、后开播」的情况：每分钟重新拉一次开播状态
                 if (_danmaku.LiveStatus != 1)

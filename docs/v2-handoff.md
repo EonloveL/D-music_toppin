@@ -5,7 +5,7 @@
 ## 0. 一句话现状
 
 **V1.1.1 已发布（叠加层 / 离屏采集 / 遮挡模式，已合进 main）；V2 已完成 S1（点歌指令 + 队列）、S2（B 站弹幕接入 + 点歌自动播放）、S3-网易云、S4（BV 播放链路）。**
-S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示 + 视频小窗）。剩下 Apple Music（酷狗按需求先移除）。版本号 **1.2.0**（未发布）。
+S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示 + 视频小窗）。剩下 Apple Music（酷狗按需求先移除）。版本号 **1.2.1**。
 
 ## 1. 仓库与构建
 
@@ -141,7 +141,7 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 - 托盘「点歌队列（N 首）」展开列表（前 10 首：歌名 · 点歌人），带「下一首 / 清空」
 - 叠加层（OBS 浏览器源）同步「下一首 + 队列数」；点歌成功/放不了在叠加层底部弹 4.5 秒提示（`OverlayState.Toast / ToastId`）
 - **视频小窗**：`OverlayState.VideoBvid/VideoSound` → `/video` 页用 B 站官方嵌入播放器；默认 `videoSound=true`
-  （视频自带声音、音画同步，音量在 OBS 源上；可切 `VideoAudio=0` 回到应用播放器音量）。
+  （默认 `VideoAudio=0` 走应用播放器音量；OBS 允许带声自动播放时可切 `VideoAudio=1` 跟随视频）。
   播放 B 站视频时 `TrayApp._videoBvid` 置位，停止/下一首自动清空
 - 叠加层两个源共用一个端口：`OverlayServer.Start(preferredPort)` 优先上次端口、占用则 4681-4750 往后找，
   成功端口写回 `OverlayPort`；托盘可分别「复制叠加层地址 / 复制视频小窗地址」
@@ -235,5 +235,5 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - `main`：唯一开发线，已用 merge 提交把 **v1.1.1**（叠加层 / 离屏采集 / 遮挡模式）合进来，冲突点都在
   `TrayApp.cs`（菜单项/字段）、`Settings.cs`（注册表项）、`CHANGELOG.md`，处理原则是**两边都保留**。
 - `fix/v1`：停在 v1.1.1 发布点，只做 V1 修复；不要在这里加 V2 功能。
-- **版本号已升到 1.2.0**（`VersionInfo.cs` + `installer/Installer.cs`），但还没发布。
+- **版本号 1.2.1**（`VersionInfo.cs` + `installer/Installer.cs`）。
   发版时确认 GitHub Release 的 tag 与之一致，否则更新器会比对失败。

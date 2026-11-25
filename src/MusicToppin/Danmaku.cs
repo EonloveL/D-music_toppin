@@ -367,6 +367,9 @@ internal sealed class DanmakuClient : IDisposable
 
     /// <summary>最后一条弹幕的时间（UTC），没收到过就是 MinValue。</summary>
     public DateTime LastMessageUtc { get; private set; }
+
+    /// <summary>最后收到任意协议包的时间（用来判断半开连接）。</summary>
+    public DateTime LastPacketUtc { get; private set; }
     public bool IsConnected { get { return _connected; } }
     public int MessageCount { get { return Volatile.Read(ref _messageCount); } }
     private int _generation;
@@ -531,9 +534,21 @@ internal sealed class DanmakuClient : IDisposable
                     WebSocketReceiveResult result;
                     try
                     {
-                        result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), session.Token);
+                        // 服务端 60 秒左右至少会有一次心跳/popularity；超过 120 秒没包就是半开连接，主动重连
+                        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(session.Token))
+                        {
+                            timeout.CancelAfter(TimeSpan.FromSeconds(120));
+                            result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), timeout.Token);
+                        }
                     }
-                    catch (OperationCanceledException) { break; }
+                    catch (OperationCanceledException)
+                    {
+                        if (!session.IsCancellationRequested)
+                        {
+                            Logger.Write("danmaku receive: 120 秒没有收到任何数据，按断线重连");
+                        }
+                        break;
+                    }
                     catch (WebSocketException ex)
                     {
                         Logger.Write("danmaku receive: " + ex.Message);
@@ -543,6 +558,7 @@ internal sealed class DanmakuClient : IDisposable
                     if (result.MessageType == WebSocketMessageType.Close) break;
                     if (result.Count <= 0) continue;
 
+                    LastPacketUtc = DateTime.UtcNow;
                     for (var i = 0; i < result.Count; i++) pending.Add(buffer[i]);
 
                     DanmakuPacket packet;

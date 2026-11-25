@@ -9,7 +9,7 @@ namespace MusicToppin;
 internal sealed class AppSettings
 {
     private const string KeyPath = @"Software\MusicToppin";
-    private const int CurrentSchema = 2;
+    private const int CurrentSchema = 3;
 
     public int X = -1;
     public int Y = -1;
@@ -116,8 +116,9 @@ internal sealed class AppSettings
                 s.LiveAutoConnect = ReadInt(key, "LiveAutoConnect", 1) == 1;
                 s.LiveToast = ReadInt(key, "LiveToast", 0) == 1;
                 s.PlayerVolume = ReadInt(key, "PlayerVolume", 60);
-                s.VideoAudio = ReadInt(key, "VideoAudio", 1);
+                s.VideoAudio = ReadInt(key, "VideoAudio", 0);
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
+
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 0);
                 s.RemovePolicy = ReadInt(key, "RemovePolicy", 0);
                 s.NeteaseCookie = Secrets.Unprotect(ReadString(key, "NeteaseCookie", ""));
@@ -143,9 +144,16 @@ internal sealed class AppSettings
         // 旧版本默认是可交互的，升级后统一改成穿透，避免打游戏被吞点击
         if (s.Schema < CurrentSchema)
         {
-            s.Locked = true;
-            s.Hotkeys = true;
-            s.Migrated = true;
+            if (s.Schema < 2)
+            {
+                s.Locked = true;
+                s.Hotkeys = true;
+                s.Migrated = true;
+            }
+
+            // 旧版默认「跟随视频」，OBS 浏览器源可能不允许带声自动播放；升级后先保证有声
+            if (s.Schema < 3) s.VideoAudio = 0;
+
             s.Save();
         }
 
