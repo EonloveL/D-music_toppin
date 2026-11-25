@@ -467,6 +467,8 @@ internal sealed class TrayApp : ApplicationContext
     private bool _playingFromQueue;
     private int _idleTicks;
     private int _danmakuReceived;
+    private readonly List<string> _recentDanmaku = new List<string>();
+    private string _lastRequestResult = "";
     private string _toastText = "";
     private int _toastId;
     private DateTime _toastUntilUtc = DateTime.MinValue;
@@ -1201,7 +1203,7 @@ internal sealed class TrayApp : ApplicationContext
                 ? _settings.LiveRoomId
                 : (int)(_danmaku != null ? _danmaku.RoomId : 0);
             if (room > 0) ConnectLive(room, remember: false);
-        }))
+        }, () => HandleDanmaku(new DanmakuMessage { Text = "点歌 起风了", UserName = "本地测试", Uid = 1 })))
         {
             form.ShowDialog(_hud);
         }
@@ -1219,7 +1221,9 @@ internal sealed class TrayApp : ApplicationContext
             Running = client != null && client.IsRunning,
             MessageCount = client != null ? client.MessageCount : 0,
             LastMessageUtc = client != null ? client.LastMessageUtc : DateTime.MinValue,
-            LastError = client != null ? client.LastError : ""
+            LastError = client != null ? client.LastError : "",
+            LastRequestResult = _lastRequestResult,
+            Recent = new List<string>(_recentDanmaku)
         };
     }
 
@@ -1301,12 +1305,24 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (message == null) return;
 
+        AddRecentDanmaku(message.UserName + "：" + message.Text);
+
         SongRequest request;
-        if (!SongRequestParser.TryParse(message.Text, message.UserName, message.Uid, out request)) return;
+        if (!SongRequestParser.TryParse(message.Text, message.UserName, message.Uid, out request))
+        {
+            if (message.Text != null &&
+                (message.Text.Contains("点歌") || message.Text.Contains("點歌")))
+            {
+                _lastRequestResult = "格式没认出来：" + message.Text;
+                Logger.Write("danmaku parse miss: " + message.UserName + ": " + message.Text);
+            }
+            return;
+        }
 
         var result = _queue.Enqueue(request);
         if (result.Accepted)
         {
+            _lastRequestResult = "已入队（第 " + result.Position + " 位）：" + request.SourceLabel + " " + request.Query;
             Logger.Write("song request: " + message.UserName + " -> " + request.SourceLabel + " " + request.Query + " (#" + result.Position + ")");
             LiveNotify("已加入点歌队列（第 " + result.Position + " 位）",
                 message.UserName + "：" + request.Query, ToolTipIcon.Info);
@@ -1316,10 +1332,17 @@ internal sealed class TrayApp : ApplicationContext
         }
         else
         {
+            _lastRequestResult = "被拒绝（" + result.Message + "）：" + request.Query;
             Logger.Write("song request rejected: " + result.Message + " | " + message.UserName + ": " + message.Text);
         }
 
         RefreshLiveStatus();
+    }
+
+    private void AddRecentDanmaku(string line)
+    {
+        _recentDanmaku.Add(DateTime.Now.ToString("HH:mm:ss") + "  " + line);
+        while (_recentDanmaku.Count > 12) _recentDanmaku.RemoveAt(0);
     }
 
     private void UpdateQueueMenu()

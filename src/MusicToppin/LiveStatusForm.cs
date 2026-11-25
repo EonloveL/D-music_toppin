@@ -10,16 +10,20 @@ internal sealed class LiveStatusSnapshot
     public int MessageCount;
     public DateTime LastMessageUtc;
     public string LastError = "";
+    public string LastRequestResult = "";
+    public List<string> Recent = new List<string>();
 }
 
 /// <summary>
-/// 直播间状态：房间号、开播状态、弹幕连接、收到多少条、最后一条什么时候、最近错误。
-/// 用来回答「到底连上没有 / 为什么发点歌没反应」。
+/// 直播间状态：房间号、开播状态、弹幕连接、收到多少条、最后一条、最近错误、
+/// 最近 12 条弹幕原文、最近一次点歌解析结果。
+/// 「发点歌没反应」时先看这里：有没有收到弹幕、有没有解析成点歌。
 /// </summary>
 internal sealed class LiveStatusForm : Form
 {
     private readonly Func<LiveStatusSnapshot> _snapshot;
     private readonly Action _reconnect;
+    private readonly Action _testPlay;
 
     private readonly Label _room;
     private readonly Label _live;
@@ -27,16 +31,20 @@ internal sealed class LiveStatusForm : Form
     private readonly Label _count;
     private readonly Label _last;
     private readonly Label _error;
+    private readonly Label _request;
+    private readonly ListBox _recent;
 
+    private int _lastRecentCount = -1;
     private readonly System.Windows.Forms.Timer _timer;
 
-    public LiveStatusForm(Func<LiveStatusSnapshot> snapshot, Action reconnect)
+    public LiveStatusForm(Func<LiveStatusSnapshot> snapshot, Action reconnect, Action testPlay)
     {
         _snapshot = snapshot;
         _reconnect = reconnect;
+        _testPlay = testPlay;
 
         Text = "直播间状态 · Music Toppin";
-        ClientSize = new Size(520, 332);
+        ClientSize = new Size(560, 508);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -52,20 +60,50 @@ internal sealed class LiveStatusForm : Form
         _last = AddRow("最后一条", 4);
         _error = AddRow("最近错误", 5);
         _error.ForeColor = Color.FromArgb(176, 88, 60);
+        _request = AddRow("最近点歌", 6);
+
+        var recentLabel = new Label
+        {
+            Text = "最近弹幕（最新 12 条，含没解析成点歌的）",
+            Location = new Point(20, 248),
+            Size = new Size(480, 20),
+            ForeColor = Color.FromArgb(120, 126, 138)
+        };
+        Controls.Add(recentLabel);
+
+        _recent = new ListBox
+        {
+            Location = new Point(20, 270),
+            Size = new Size(520, 140),
+            Font = new Font("Microsoft YaHei UI", 8.5f),
+            BorderStyle = BorderStyle.FixedSingle,
+            IntegralHeight = false
+        };
+        Controls.Add(_recent);
 
         var hint = new Label
         {
-            Text = "未开播时 B 站不推弹幕；开播后点「重新连接」。发点歌没反应时，先看这里有没有「收到弹幕」。",
-            Location = new Point(20, 246),
-            Size = new Size(480, 32),
+            Text = "没收到弹幕 → 看「开播状态」和「弹幕连接」；收到了但没入队 → 看「最近点歌」的解析结果。\n" +
+                   "「测试点歌」会在本地模拟发一条「点歌 起风了」，用来单独验证播放链路。",
+            Location = new Point(20, 418),
+            Size = new Size(520, 34),
             ForeColor = Color.FromArgb(120, 126, 138)
         };
         Controls.Add(hint);
 
+        var test = new Button
+        {
+            Text = "测试点歌",
+            Location = new Point(196, 460),
+            Size = new Size(96, 30),
+            FlatStyle = FlatStyle.System
+        };
+        test.Click += (_, _) => _testPlay();
+
         var reconnectButton = new Button
         {
             Text = "重新连接",
-            Location = new Point(300, 288),
+            Location = new Point(300, 460),
             Size = new Size(96, 30),
             FlatStyle = FlatStyle.System
         };
@@ -74,14 +112,15 @@ internal sealed class LiveStatusForm : Form
         var close = new Button
         {
             Text = "关闭",
-            Location = new Point(404, 288),
+            Location = new Point(404, 460),
             Size = new Size(96, 30),
             FlatStyle = FlatStyle.System,
             DialogResult = DialogResult.Cancel
         };
 
-        AcceptButton = reconnectButton;
+        AcceptButton = test;
         CancelButton = close;
+        Controls.Add(test);
         Controls.Add(reconnectButton);
         Controls.Add(close);
 
@@ -93,7 +132,7 @@ internal sealed class LiveStatusForm : Form
 
     private Label AddRow(string caption, int index)
     {
-        var y = 20 + index * 36;
+        var y = 20 + index * 32;
 
         var label = new Label
         {
@@ -107,8 +146,9 @@ internal sealed class LiveStatusForm : Form
         {
             Text = "—",
             Location = new Point(116, y),
-            Size = new Size(384, 22),
-            ForeColor = Color.FromArgb(30, 34, 42)
+            Size = new Size(424, 22),
+            ForeColor = Color.FromArgb(30, 34, 42),
+            AutoEllipsis = true
         };
 
         Controls.Add(label);
@@ -123,7 +163,6 @@ internal sealed class LiveStatusForm : Form
         _room.Text = s.RoomId > 0 ? s.RoomId.ToString() : "未连接";
         _live.Text = s.LiveStatus == 1 ? "直播中" : s.LiveStatus == 0 ? "未开播（收不到弹幕）" : "未知";
         _connection.Text = s.Connected ? "已连接" : (s.Running ? "连接中 / 重连中" : "未连接");
-
         _count.Text = s.MessageCount + " 条";
 
         if (s.LastMessageUtc == DateTime.MinValue)
@@ -137,6 +176,18 @@ internal sealed class LiveStatusForm : Form
         }
 
         _error.Text = string.IsNullOrWhiteSpace(s.LastError) ? "无" : s.LastError;
+        _request.Text = string.IsNullOrWhiteSpace(s.LastRequestResult) ? "还没收到点歌" : s.LastRequestResult;
+
+        // 最近弹幕：只在变化时重建，避免每秒闪
+        if (s.Recent.Count != _lastRecentCount)
+        {
+            _lastRecentCount = s.Recent.Count;
+            _recent.BeginUpdate();
+            _recent.Items.Clear();
+            foreach (var line in s.Recent) _recent.Items.Add(line);
+            if (_recent.Items.Count > 0) _recent.TopIndex = _recent.Items.Count - 1;
+            _recent.EndUpdate();
+        }
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
