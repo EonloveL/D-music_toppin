@@ -1310,11 +1310,17 @@ internal sealed class TrayApp : ApplicationContext
         SongRequest request;
         if (!SongRequestParser.TryParse(message.Text, message.UserName, message.Uid, out request))
         {
-            if (message.Text != null &&
-                (message.Text.Contains("点歌") || message.Text.Contains("點歌")))
+            var text = message.Text ?? "";
+            var looksLikeRequest = text.Contains("点歌") || text.Contains("點歌") ||
+                                   text.StartsWith("qq ", StringComparison.OrdinalIgnoreCase) ||
+                                   text.StartsWith("wy ", StringComparison.OrdinalIgnoreCase) ||
+                                   text.StartsWith("am ", StringComparison.OrdinalIgnoreCase) ||
+                                   text.StartsWith("bv ", StringComparison.OrdinalIgnoreCase);
+
+            if (looksLikeRequest)
             {
-                _lastRequestResult = "格式没认出来：" + message.Text;
-                Logger.Write("danmaku parse miss: " + message.UserName + ": " + message.Text);
+                _lastRequestResult = "格式没认出来（必须以「点歌 」开头）：" + text;
+                Logger.Write("danmaku parse miss: " + message.UserName + ": " + text);
             }
             return;
         }
@@ -1337,6 +1343,23 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         RefreshLiveStatus();
+    }
+
+    private static string DescribeResolveFailure(SongRequest request)
+    {
+        if (request == null) return "没有点歌请求";
+
+        if (request.Source == SongSource.QQ && !QQMusic.IsLoggedIn)
+        {
+            return "QQ 音乐没在应用内登录（客户端登录不导出取流 key），去「曲源（登录）→ QQ 音乐：登录」扫码一次";
+        }
+
+        if (request.Source == SongSource.Netease && string.IsNullOrWhiteSpace(Netease.Cookie))
+        {
+            return "网易云是游客身份，这首没有免费版权";
+        }
+
+        return "没版权 / 需要登录 / 取不到直链";
     }
 
     private void AddRecentDanmaku(string line)
@@ -1426,12 +1449,15 @@ internal sealed class TrayApp : ApplicationContext
         if (song == null)
         {
             var label = item.Request != null ? item.Request.SourceLabel : "未知来源";
-            Logger.Write("queue skip: " + label + " " + item.DisplayName);
+            var query = item.Request != null ? item.Request.Query : item.DisplayName;
+            var reason = DescribeResolveFailure(item.Request);
+
+            _lastRequestResult = "已入队但放不了：" + label + " " + query + "（" + reason + "）";
+            Logger.Write("queue skip: " + label + " " + item.DisplayName + " | " + reason);
             LiveNotify("Music Toppin",
-                "这首暂时放不了（没版权 / 需要登录）：" + label + " " + (item.Request != null ? item.Request.Query : "") +
-                "\n网易云与 QQ 音乐可在「曲源（登录）」里登录；B 站 BV 不需要登录。",
+                "这首放不了：" + label + " " + query + "\n" + reason,
                 ToolTipIcon.Warning);
-            ShowOverlayToast("放不了：" + label + " " + (item.Request != null ? item.Request.Query : ""));
+            ShowOverlayToast("放不了：" + label + " " + query);
 
             _queue.ClearCurrent();
             _playingFromQueue = false;
@@ -1461,6 +1487,7 @@ internal sealed class TrayApp : ApplicationContext
         catch (Exception ex)
         {
             Logger.Write("queue play failed: " + ex.Message);
+            _lastRequestResult = "播放失败：" + song.Title + "（" + ex.Message + "）";
             LiveNotify("Music Toppin", ex.Message, ToolTipIcon.Warning);
 
             _queue.ClearCurrent();

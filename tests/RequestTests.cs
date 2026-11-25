@@ -50,6 +50,23 @@ namespace MusicToppin.Tests
             request = Parse("点歌 https://b23.tv/abcd");
             TestRun.Check(request != null && request.IsVideo && request.Source == SongSource.Bilibili, "b23 短链");
 
+            request = Parse("qq I don't care Ed Sheeran");
+            TestRun.Check(request != null && request.Source == SongSource.QQ && request.Query == "I don't care Ed Sheeran", "平台前缀直接开头（qq 歌名）");
+
+            request = Parse("wy 起风了");
+            TestRun.Check(request != null && request.Source == SongSource.Netease && request.Query == "起风了", "平台前缀直接开头（wy 歌名）");
+
+            request = Parse("bv BV1xx411c7mD");
+            TestRun.Check(request != null && request.IsVideo && request.Source == SongSource.Bilibili, "平台前缀直接开头（bv）");
+
+            request = Parse("点歌：起风了");
+            TestRun.Check(request != null && request.Query == "起风了", "点歌后带冒号");
+
+            request = Parse("点歌qq 起风了");
+            TestRun.Check(request != null && request.Source == SongSource.QQ && request.Query == "起风了", "点歌紧跟平台前缀");
+
+            TestRun.Check(Parse("qq") == null, "只有平台前缀不解析");
+
             TestRun.Section("队列");
 
             var queue = new RequestQueue { MaxSize = 3, UserCooldown = TimeSpan.FromSeconds(30), SongCooldown = TimeSpan.FromMinutes(5) };

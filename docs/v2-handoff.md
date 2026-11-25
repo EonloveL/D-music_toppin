@@ -15,7 +15,7 @@ S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「�
 | 分支 | `main` 是唯一开发线（V2 + v1.1.1 已合并）；`fix/v1` 保留为 v1.1.1 发布点 |
 | 最新提交 | 见 `git log -1` |
 | 构建 | `powershell -ExecutionPolicy Bypass -File .\build.ps1`（**不需要 .NET SDK**，首次自动下载工具链到 `.cache\nuget`） |
-| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（129 项，退出码 0 = 全过） |
+| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（135 项，退出码 0 = 全过） |
 | 产物 | `build\MusicToppin-Setup.exe`（约 367 KB）、`build\app\`（主程序 182 KB） |
 | 运行 | 装好后从托盘启动；调试直接跑 `build\app\MusicToppin.exe` |
 
@@ -27,7 +27,7 @@ S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「�
 
 | 文件 | 职责 |
 |---|---|
-| `src/MusicToppin/SongRequest.cs` | `点歌/點歌` 解析：`wy` / `qq` / `am` 前缀、`id:123`、`BV 号`、`b23.tv` 短链、繁体；必须「点歌 + 空格」开头 |
+| `src/MusicToppin/SongRequest.cs` | `点歌/點歌` 解析：`wy` / `qq` / `am` 前缀、`id:123`、`BV 号`、`b23.tv` 短链、繁体；也支持 **`qq 歌名` 这类不带「点歌」的平台前缀**，以及 `点歌：歌名` / `点歌qq 歌名` 容错 |
 | `src/MusicToppin/RequestQueue.cs` | 队列：去重、用户冷却、歌曲冷却、上限、FIFO、顶歌、按人撤回、冷却清理 |
 
 ### S2 弹幕接入（已实测直播间）
@@ -212,7 +212,7 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - 日志：`%TEMP%\musictoppin.log`（`sources:`、`netease client:`、`netease account:`、`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`qq:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
 - 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded` 等）
 - 安装目录：默认 `%LocalAppData%\Programs\MusicToppin`，可自定义
-- 单元测试：`run-tests.ps1`（129 项，不必联网）
+- 单元测试：`run-tests.ps1`（135 项，不必联网）
 - 叠加层：托盘开启后日志里有 `overlay server started at http://127.0.0.1:<port>/`，浏览器可直接打开验证
 
 ## 7. 新会话建议的第一次动作
