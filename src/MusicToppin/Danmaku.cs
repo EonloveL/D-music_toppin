@@ -376,6 +376,9 @@ internal sealed class DanmakuClient : IDisposable
 
     private int _packetCount;
     private volatile bool _reconnectRequested;
+
+    /// <summary>会话刷新间隔（秒，0 = 关闭）。B 站弹幕 token 长时间使用后会静默失效，定期换新连接更稳。</summary>
+    public int SessionRefreshSeconds { get; set; } = 90;
     private readonly HashSet<string> _seenCommands = new HashSet<string>(StringComparer.Ordinal);
     public bool IsConnected { get { return _connected; } }
     public int MessageCount { get { return Volatile.Read(ref _messageCount); } }
@@ -537,9 +540,18 @@ internal sealed class DanmakuClient : IDisposable
             {
                 var buffer = new byte[32 * 1024];
                 var pending = new List<byte>(64 * 1024);
+                var sessionStarted = DateTime.UtcNow;
 
                 while (!session.IsCancellationRequested)
                 {
+                    if (!_reconnectRequested && SessionRefreshSeconds > 0 &&
+                        (DateTime.UtcNow - sessionStarted).TotalSeconds >= SessionRefreshSeconds)
+                    {
+                        Logger.Write("danmaku: 会话刷新（" + SessionRefreshSeconds + "s），换一条新连接");
+                        _reconnectRequested = true;
+                        break;
+                    }
+
                     WebSocketReceiveResult result;
                     try
                     {

@@ -100,6 +100,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemLiveDiag = new ToolStripMenuItem("直播间状态…", null, (_, _) => ShowLiveStatus());
         _itemSkipPolicy = BuildSkipPolicyMenu();
         _itemRemovePolicy = BuildRemovePolicyMenu();
+        _itemSessionRefresh = BuildSessionRefreshMenu();
         _itemLiveConnect = new ToolStripMenuItem("连接直播间…", null, (_, _) => PromptLiveRoom());
         _itemLiveDisconnect = new ToolStripMenuItem("断开直播间", null, (_, _) => DisconnectLive()) { Enabled = false };
         _itemQueueNext = new ToolStripMenuItem("队列：空", null, (_, _) => StartNextQueuedSong()) { Enabled = false };
@@ -119,6 +120,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemQueueList,
             _itemSkipPolicy,
             _itemRemovePolicy,
+            _itemSessionRefresh,
             new ToolStripSeparator(),
             _itemLiveToast
         });
@@ -489,6 +491,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemCopyVideo;
     private ToolStripMenuItem _itemSkipPolicy;
     private ToolStripMenuItem _itemRemovePolicy;
+    private ToolStripMenuItem _itemSessionRefresh;
     private ToolStripMenuItem _itemLiveToast;
     private ToolStripMenuItem _itemNeteaseLogin;
     private ToolStripMenuItem _itemNeteaseLogout;
@@ -1085,6 +1088,42 @@ internal sealed class TrayApp : ApplicationContext
         Logger.Write("remove policy: " + _settings.RemovePolicy);
     }
 
+    private ToolStripMenuItem BuildSessionRefreshMenu()
+    {
+        var menu = new ToolStripMenuItem("会话刷新");
+
+        foreach (var seconds in new[] { 60, 120, 300, 0 })
+        {
+            var value = seconds;
+            menu.DropDownItems.Add(new ToolStripMenuItem(
+                seconds == 0 ? "关闭（不主动重连）" : seconds + " 秒",
+                null,
+                (_, _) => SetSessionRefresh(value)) { Tag = seconds });
+        }
+
+        menu.DropDownOpening += (_, _) =>
+        {
+            foreach (ToolStripItem item in menu.DropDownItems)
+            {
+                var menuItem = item as ToolStripMenuItem;
+                if (menuItem != null && menuItem.Tag is int) menuItem.Checked = (int)menuItem.Tag == _settings.SessionRefreshSeconds;
+            }
+
+            menu.Text = "会话刷新：" + (_settings.SessionRefreshSeconds <= 0 ? "关闭" : _settings.SessionRefreshSeconds + " 秒");
+        };
+
+        return menu;
+    }
+
+    private void SetSessionRefresh(int seconds)
+    {
+        _settings.SessionRefreshSeconds = Math.Max(0, seconds);
+        _settings.Save();
+
+        if (_danmaku != null) _danmaku.SessionRefreshSeconds = _settings.SessionRefreshSeconds;
+        Logger.Write("danmaku session refresh: " + _settings.SessionRefreshSeconds + "s");
+    }
+
     // ---- 视频声音模式 ----
 
     /// <summary>视频自带声音：不在应用内播音频，用计时器推进 HUD 进度并在时长到点后切下一首。</summary>
@@ -1438,6 +1477,7 @@ internal sealed class TrayApp : ApplicationContext
         if (_danmaku == null)
         {
             _danmaku = new DanmakuClient();
+            _danmaku.SessionRefreshSeconds = _settings.SessionRefreshSeconds;
             _danmaku.Received += OnDanmaku;
             _danmaku.ConnectionChanged += connected => _ui.Post(_ => OnLiveConnectionChanged(connected), null);
             _danmaku.StatusChanged += status =>

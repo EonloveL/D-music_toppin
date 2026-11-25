@@ -73,6 +73,9 @@ internal sealed class AppSettings
     public bool CaptureOccluded;
     public int Schema;
 
+    /// <summary>弹幕会话刷新间隔（秒，0 = 关闭）。B 站 token 久了会静默失效，定期换连接。</summary>
+    public int SessionRefreshSeconds = 60;
+
     // 颜色（ARGB），默认值与设计稿一致
     public int AccentColor = unchecked((int)0xFFFF3B30);
     public int TitleColor = unchecked((int)0xFFF5F8FC);
@@ -121,6 +124,7 @@ internal sealed class AppSettings
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 0);
                 s.RemovePolicy = ReadInt(key, "RemovePolicy", 0);
+                s.SessionRefreshSeconds = ReadInt(key, "SessionRefreshSeconds", 60);
                 s.NeteaseCookie = Secrets.Unprotect(ReadString(key, "NeteaseCookie", ""));
                 s.NeteaseNick = ReadString(key, "NeteaseNick", "");
                 s.QQMusicCookie = Secrets.Unprotect(ReadString(key, "QQMusicCookie", ""));
@@ -213,6 +217,7 @@ internal sealed class AppSettings
                 WriteInt(key, "OverlayPort", OverlayPort);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
                 WriteInt(key, "RemovePolicy", RemovePolicy);
+                WriteInt(key, "SessionRefreshSeconds", SessionRefreshSeconds);
                 try { key.SetValue("NeteaseCookie", Secrets.Protect(NeteaseCookie ?? ""), RegistryValueKind.String); } catch { }
                 try { key.SetValue("NeteaseNick", NeteaseNick ?? "", RegistryValueKind.String); } catch { }
                 try { key.SetValue("QQMusicCookie", Secrets.Protect(QQMusicCookie ?? ""), RegistryValueKind.String); } catch { }
