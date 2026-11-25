@@ -99,6 +99,8 @@ internal sealed class TrayApp : ApplicationContext
         _itemLiveDisconnect = new ToolStripMenuItem("断开直播间", null, (_, _) => DisconnectLive()) { Enabled = false };
         _itemQueueNext = new ToolStripMenuItem("队列：空", null, (_, _) => StartNextQueuedSong()) { Enabled = false };
         _itemQueueClear = new ToolStripMenuItem("清空点歌队列", null, (_, _) => ClearQueue()) { Enabled = false };
+        _itemQueueList = new ToolStripMenuItem("点歌队列：空");
+        _itemQueueList.DropDownOpening += (_, _) => RebuildQueueList();
         _itemLiveToast = new ToolStripMenuItem("点歌/播放时弹气泡提示（默认关闭）", null, (_, _) => ToggleLiveToast()) { Checked = _settings.LiveToast };
 
         var liveMenu = new ToolStripMenuItem("弹幕点歌");
@@ -108,8 +110,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemLiveDisconnect,
             new ToolStripSeparator(),
             _liveStatus,
-            _itemQueueNext,
-            _itemQueueClear,
+            _itemQueueList,
             new ToolStripSeparator(),
             _itemLiveToast
         });
@@ -434,6 +435,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemLiveDisconnect;
     private ToolStripMenuItem _itemQueueNext;
     private ToolStripMenuItem _itemQueueClear;
+    private ToolStripMenuItem _itemQueueList;
     private ToolStripMenuItem _itemLiveToast;
     private ToolStripMenuItem _itemNeteaseLogin;
     private ToolStripMenuItem _itemNeteaseLogout;
@@ -448,6 +450,9 @@ internal sealed class TrayApp : ApplicationContext
     private DanmakuClient _danmaku;
     private bool _playingFromQueue;
     private int _idleTicks;
+    private string _toastText = "";
+    private int _toastId;
+    private DateTime _toastUntilUtc = DateTime.MinValue;
     private ToolStripMenuItem _itemOverlay;
     private ToolStripMenuItem _itemOffscreen;
     private ToolStripMenuItem _itemOccluded;
@@ -904,6 +909,17 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Save();
     }
 
+    /// <summary>给观众看的一次性提示（叠加层网页顶部弹 4.5 秒），不影响主播的画面和键鼠。</summary>
+    private void ShowOverlayToast(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        _toastText = text;
+        _toastId++;
+        _toastUntilUtc = DateTime.UtcNow.AddSeconds(6);
+        Logger.Write("toast: " + text);
+    }
+
     // ---- 曲源登录（S3）----
 
     private void LoginNetease()
@@ -1207,6 +1223,7 @@ internal sealed class TrayApp : ApplicationContext
             Logger.Write("song request: " + message.UserName + " -> " + request.SourceLabel + " " + request.Query + " (#" + result.Position + ")");
             LiveNotify("已加入点歌队列（第 " + result.Position + " 位）",
                 message.UserName + "：" + request.Query, ToolTipIcon.Info);
+            ShowOverlayToast("已加入队列：" + request.Query + "　" + message.UserName);
             UpdateQueueMenu();
             StartNextQueuedSong();
         }
@@ -1226,8 +1243,50 @@ internal sealed class TrayApp : ApplicationContext
         _itemQueueNext.Text = count > 0 ? "队列：下一首（还有 " + count + " 首）" : "队列：空";
         _itemQueueNext.Enabled = count > 0;
         _itemQueueClear.Enabled = count > 0;
+        if (_itemQueueList != null)
+        {
+            _itemQueueList.Text = count > 0 ? "点歌队列（" + count + " 首）" : "点歌队列：空";
+        }
 
+        RebuildQueueList();
         RefreshLiveStatus();
+    }
+
+    /// <summary>托盘里的队列列表：每次展开时重建，最多列 10 首。</summary>
+    private void RebuildQueueList()
+    {
+        if (_itemQueueList == null) return;
+
+        _itemQueueList.DropDownItems.Clear();
+
+        if (_queue.Count == 0)
+        {
+            _itemQueueList.DropDownItems.Add(new ToolStripMenuItem("队列是空的（观众发「点歌 歌名」）") { Enabled = false });
+        }
+        else
+        {
+            var index = 1;
+            var preview = new List<string>();
+            foreach (var item in _queue.Items.Take(10))
+            {
+                var text = index + ". " + item.DisplayName +
+                           (string.IsNullOrWhiteSpace(item.Requester) ? "" : "  ·  " + item.Requester);
+                _itemQueueList.DropDownItems.Add(new ToolStripMenuItem(text) { Enabled = false });
+                preview.Add(text);
+                index++;
+            }
+
+            Logger.Write("queue list: " + string.Join(" | ", preview));
+
+            if (_queue.Count > 10)
+            {
+                _itemQueueList.DropDownItems.Add(new ToolStripMenuItem("… 还有 " + (_queue.Count - 10) + " 首") { Enabled = false });
+            }
+        }
+
+        _itemQueueList.DropDownItems.Add(new ToolStripSeparator());
+        _itemQueueList.DropDownItems.Add(_itemQueueNext);
+        _itemQueueList.DropDownItems.Add(_itemQueueClear);
     }
 
     private async void StartNextQueuedSong()
@@ -1258,6 +1317,7 @@ internal sealed class TrayApp : ApplicationContext
                 "这首暂时放不了（没版权 / 需要登录）：" + label + " " + (item.Request != null ? item.Request.Query : "") +
                 "\n网易云与 QQ 音乐可在「曲源（登录）」里登录；B 站 BV 不需要登录。",
                 ToolTipIcon.Warning);
+            ShowOverlayToast("放不了：" + label + " " + (item.Request != null ? item.Request.Query : ""));
 
             _queue.ClearCurrent();
             _playingFromQueue = false;
@@ -1332,6 +1392,11 @@ internal sealed class TrayApp : ApplicationContext
             TitleColor = ToHex(theme.Title),
             ArtistColor = ToHex(theme.Artist),
             Opacity = Math.Max(0.05f, Math.Min(1f, _settings.CardOpacity / 100f)),
+            NextTitle = np.NextTitle ?? "",
+            NextArtist = np.NextArtist ?? "",
+            QueueCount = np.QueueCount,
+            Toast = DateTime.UtcNow < _toastUntilUtc ? _toastText : "",
+            ToastId = _toastId,
             Show = np.HasSession && np.Title.Length > 0 && _hud.Visible || (np.HasSession && np.Title.Length > 0 && _settings.Overlay)
         };
     }

@@ -21,6 +21,15 @@ internal sealed class OverlayState
     public double Opacity = 0.96;
     public bool Show;
 
+    /// <summary>点歌队列：下一首 + 排队数。</summary>
+    public string NextTitle = "";
+    public string NextArtist = "";
+    public int QueueCount;
+
+    /// <summary>给观众看的提示（点歌成功 / 放不了），6 秒内有效；ToastId 变化时前端才重新弹。</summary>
+    public string Toast = "";
+    public int ToastId;
+
     /// <summary>手写 JSON（.NET Framework 4.8 没有 System.Text.Json）。</summary>
     public string ToJson()
     {
@@ -33,6 +42,11 @@ internal sealed class OverlayState
         AppendString(builder, "artistColor", ArtistColor);
         AppendString(builder, "prevTitle", PrevTitle);
         AppendString(builder, "prevArtist", PrevArtist);
+        AppendString(builder, "nextTitle", NextTitle);
+        AppendString(builder, "nextArtist", NextArtist);
+        AppendString(builder, "toast", Toast);
+        builder.Append(",\"queueCount\":").Append(QueueCount);
+        builder.Append(",\"toastId\":").Append(ToastId);
         builder.Append(",\"playing\":").Append(Playing ? "true" : "false");
         builder.Append(",\"hasTimeline\":").Append(HasTimeline ? "true" : "false");
         builder.Append(",\"show\":").Append(Show ? "true" : "false");
@@ -259,6 +273,12 @@ internal sealed class OverlayServer : IDisposable
   .nav{display:flex;align-items:baseline;gap:7px;font-size:12.5px;color:rgba(245,248,252,.86);}
   .nav .k{font-size:10px;letter-spacing:.1em;color:rgba(159,176,198,.62);}
   .nav .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .nav.next{margin-top:4px;display:none;}
+  .nav.next.on{display:flex;}
+  #toast{display:none;margin-top:8px;padding:8px 14px;border-radius:999px;
+    background:rgba(14,17,23,.94);border:1px solid rgba(255,255,255,.16);color:#F5F8FC;font-size:13px;
+    text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #toast.on{display:block;}
   .bar{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,.08);}
   .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),#FF7A45);}
   .prev{margin-top:9px;border-radius:10px;padding:10px 14px;
@@ -281,6 +301,7 @@ internal sealed class OverlayServer : IDisposable
     <div class=""artist"" id=""artist""></div>
     <div class=""divider"" id=""divider""></div>
     <div class=""nav""><span class=""k"">上一首</span><span class=""v"" id=""prev"">—</span></div>
+    <div class=""nav next"" id=""nextRow""><span class=""k"">下一首</span><span class=""v"" id=""next"">—</span></div>
     <div class=""bar"" id=""bar"" style=""display:none""><i id=""fill""></i></div>
   </div>
   <div class=""prev"" id=""prevCard"">
@@ -288,11 +309,19 @@ internal sealed class OverlayServer : IDisposable
     <div class=""t2"" id=""prevTitle""></div>
     <div class=""a2"" id=""prevArtist""></div>
   </div>
+  <div id=""toast""></div>
 </div>
 <script>
 (function(){
   var wrap=document.getElementById('wrap');
   var card=document.getElementById('card');
+  var lastToast=0, toastTimer=null;
+  function showToast(text){
+    var el=document.getElementById('toast');
+    el.textContent=text; el.className='on';
+    if(toastTimer) clearTimeout(toastTimer);
+    toastTimer=setTimeout(function(){ el.className=''; },4500);
+  }
   function pad(n){return (n<10?'0':'')+n;}
   function fmt(s){s=Math.max(0,s||0);return pad(Math.floor(s/60))+':'+pad(Math.floor(s%60));}
   function apply(st){
@@ -316,6 +345,14 @@ internal sealed class OverlayServer : IDisposable
     var pc=document.getElementById('prevCard');
     if(st.prevTitle){pc.className='prev on';document.getElementById('prevTitle').textContent=st.prevTitle;document.getElementById('prevArtist').textContent=st.prevArtist||'';}
     else{pc.className='prev';}
+    var nr=document.getElementById('nextRow');
+    if(st.nextTitle){
+      nr.className='nav next on';
+      document.getElementById('next').textContent=st.nextTitle+
+        (st.queueCount>1?'（队列 '+st.queueCount+'）':'')+
+        (st.nextArtist?' — '+st.nextArtist:'');
+    }else{nr.className='nav next';}
+    if(st.toast&&st.toastId&&st.toastId!==lastToast){lastToast=st.toastId;showToast(st.toast);}
   }
   function tick(){
     fetch('/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});

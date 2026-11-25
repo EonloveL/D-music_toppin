@@ -71,11 +71,15 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 
 > 各平台取流接口、登录方式和后续候选平台（酷我、酷狗、汽水、YouTube、Spotify）的可行性见 [docs/v2-sources.md](docs/v2-sources.md)。
 
-- 队列：同曲 5 分钟内不重复、同一人 30 秒冷却、最多 20 首、先点先放；托盘菜单实时显示「队列：下一首（还有 N 首）」
+- 队列：同曲 5 分钟内不重复、同一人 30 秒冷却、最多 20 首、先点先放
+- 托盘「点歌队列（N 首）」可以展开看前 10 首（序号 · 歌名 · 点歌人），里面还有「下一首 / 清空队列」
 - 第一首自动开播，放完自动下一首；放不了的会提示并跳过，不会卡住
 - HUD 多显示一行「下一首 ↓」，带队列长度；队列空了这行会自动收起（点歌模式才有）
+- 观众端：叠加层同样显示「下一首」，点歌成功 / 放不了会在叠加层底部弹 4.5 秒提示（不影响主播画面）
 
 ![HUD 下一首](docs/screenshots/hud-next.png)
+
+![叠加层下一首 + 提示](docs/screenshots/overlay-next.png)
 - 断线自动重连（2 秒起翻倍，最长 30 秒）；菜单里能看到「直播间 xxx · 弹幕 N 条 · 队列 N 首」
 - 直播间号会记住，下次启动自动重连；「断开直播间」会关掉自动重连
 - 弹幕走**游客身份**，不用登录 B 站账号
@@ -197,8 +201,8 @@ Uninstall.exe /S                                      静默卸载
 
 | 项目 | 实测（本机 Win11，V2 构建，纯显示模式） |
 |---|---|
-| 安装包 | **381 KB** |
-| 主程序 | **211 KB**（.NET Framework 4.8，系统自带运行时） |
+| 安装包 | **386 KB** |
+| 主程序 | **225 KB**（.NET Framework 4.8，系统自带运行时） |
 | 内存（私有） | **25–33 MB**（点歌播放时才加载 WebView2，约 +160 MB） |
 | 内存（含共享） | 56 MB |
 | CPU | 空闲 **≈0 %**（2 秒轮询；点歌播放时由 WebView2 占用） |
@@ -224,9 +228,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 产物：
 
 ```
-build\app\MusicToppin.exe        211 KB
+build\app\MusicToppin.exe        225 KB
 build\app\Uninstall.exe          15 KB
-build\MusicToppin-Setup.exe      381 KB
+build\MusicToppin-Setup.exe      386 KB
 ```
 
 构建链路：`toolchain.ps1` 定位 Roslyn `csc`（`Microsoft.Net.Compilers.Toolset`）、.NET Framework 4.8 引用程序集、WinRT 元数据（`Microsoft.Windows.SDK.Contracts`）→ 编译主程序（引用 `Windows.Media.winmd` 调 SMTC）→ 编译卸载器 → 打包 payload → 嵌入安装器。
@@ -314,14 +318,14 @@ Uninstall.exe /S                              静默卸载
 - ✅ **S2 弹幕接入**：直播间握手 → 游客鉴权 → 30 秒心跳 → zlib 解包 → `DANMU_MSG` 解析 → 入队 → 自动播放；断线自动重连；托盘可连接/断开/看队列
 - ✅ **S3（网易云 + QQ 音乐）**：`点歌 起风了` / `点歌 wy …` / `点歌 id:…` → 网易云搜索 → 320k 直链 → 播放；`点歌 qq …` → QQ 音乐搜索 → vkey → 播放；无版权自动跳过；登录支持「同步官方客户端 / 应用内扫码」
 - ✅ **S4 播放链路验证**：托盘「点歌测试（播放 BV）…」输入 BV 号 → 解析 DASH 音频 → WebView2 播放 → HUD 显示真实标题与进度
-- ✅ **S5（部分）**：HUD 显示「下一首 + 队列长度」，队列变化实时更新（托盘队列列表 / 弹幕提示还没做）
+- ✅ **S5**：HUD 与叠加层都显示「下一首 + 队列长度」；托盘可展开队列列表；点歌成功/失败在叠加层弹提示
 - ⏳ Apple Music、S5 展示整合（HUD 下一首/队列预览）
 
 `tests/` 里 **124 项单元测试**覆盖解析、队列、弹幕协议、JSON；`run-tests.ps1` 一键跑（0 = 全过）。
 
 **接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。
 
-播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 211 KB / 25 MB 的轻量形态。
+播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 225 KB / 25 MB 的轻量形态。
 ## 下一步（V2）
 
 - S3 剩余：Apple Music（只有试听）/ 酷我 / 酷狗，见 [docs/v2-sources.md](docs/v2-sources.md)
