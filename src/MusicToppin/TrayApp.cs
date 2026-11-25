@@ -90,6 +90,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemLiveDisconnect = new ToolStripMenuItem("断开直播间", null, (_, _) => DisconnectLive()) { Enabled = false };
         _itemQueueNext = new ToolStripMenuItem("队列：空", null, (_, _) => StartNextQueuedSong()) { Enabled = false };
         _itemQueueClear = new ToolStripMenuItem("清空点歌队列", null, (_, _) => ClearQueue()) { Enabled = false };
+        _itemLiveToast = new ToolStripMenuItem("点歌/播放时弹气泡提示（默认关闭）", null, (_, _) => ToggleLiveToast()) { Checked = _settings.LiveToast };
 
         var liveMenu = new ToolStripMenuItem("弹幕点歌");
         liveMenu.DropDownItems.AddRange(new ToolStripItem[]
@@ -99,8 +100,13 @@ internal sealed class TrayApp : ApplicationContext
             new ToolStripSeparator(),
             _liveStatus,
             _itemQueueNext,
-            _itemQueueClear
+            _itemQueueClear,
+            new ToolStripSeparator(),
+            _itemLiveToast
         });
+        _itemOverlay = new ToolStripMenuItem("直播叠加层（OBS 浏览器源）", null, (_, _) => ToggleOverlay()) { Checked = _settings.Overlay };
+        _itemOffscreen = new ToolStripMenuItem("离屏采集（窗口采集用）", null, (_, _) => ToggleOffscreen()) { Checked = _settings.CaptureOffscreen };
+        _itemOccluded = new ToolStripMenuItem("遮挡模式（压在其他窗口后面）", null, (_, _) => ToggleOccluded()) { Checked = _settings.CaptureOccluded };
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -140,6 +146,9 @@ internal sealed class TrayApp : ApplicationContext
             _itemCheckUpdate,
             _itemPlayBv,
             _itemStopPlay,
+            _itemOverlay,
+            _itemOffscreen,
+            _itemOccluded,
             _itemAutoStart,
             new ToolStripSeparator(),
             new ToolStripMenuItem("退出", null, (_, _) => ExitApp())
@@ -256,7 +265,11 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         // 启动时按保存的锚点重新贴边（屏幕分辨率/缩放变化后也能回到正确位置）
-        if (!string.IsNullOrEmpty(_settings.Anchor)) MoveHudTo(_settings.Anchor);
+        if (!string.IsNullOrEmpty(_settings.Anchor) && !_settings.CaptureOffscreen) MoveHudTo(_settings.Anchor);
+        if (_settings.Overlay)
+        {
+            StartOverlay();
+        }
         if (_settings.UpdateCheckOnStart)
         {
             var updateTimer = new System.Windows.Forms.Timer { Interval = 3200 };
@@ -271,7 +284,16 @@ internal sealed class TrayApp : ApplicationContext
 
         // 调试/自动化用：MUSICTOPPIN_ANCHOR=tl|tr|bl|br|center
         var anchor = Environment.GetEnvironmentVariable("MUSICTOPPIN_ANCHOR");
-        if (!string.IsNullOrEmpty(anchor)) MoveHudTo(anchor);
+        if (!string.IsNullOrEmpty(anchor) && !_settings.CaptureOffscreen) MoveHudTo(anchor);
+
+        if (_settings.CaptureOffscreen && _hud.Visible)
+        {
+            _hud.SetCaptureOffscreen(true);
+        }
+        else if (_settings.CaptureOccluded && _hud.Visible)
+        {
+            _hud.SetCaptureOccluded(true);
+        }
 
         if (_settings.Migrated)
         {
@@ -310,11 +332,15 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemLiveDisconnect;
     private ToolStripMenuItem _itemQueueNext;
     private ToolStripMenuItem _itemQueueClear;
+    private ToolStripMenuItem _itemLiveToast;
 
     private readonly RequestQueue _queue = new RequestQueue();
     private DanmakuClient _danmaku;
     private bool _playingFromQueue;
     private int _idleTicks;
+    private ToolStripMenuItem _itemOverlay;
+    private ToolStripMenuItem _itemOffscreen;
+    private ToolStripMenuItem _itemOccluded;
     private ToolStripMenuItem _colorMenu;
     private ToolStripMenuItem _itemAccentColor;
     private ToolStripMenuItem _itemTitleColor;
@@ -323,6 +349,7 @@ internal sealed class TrayApp : ApplicationContext
     private bool _updateDialogOpen;
     private bool _checkingUpdate;
     private WebView2Player _player;
+    private OverlayServer _overlay;
     private DateTime _lastLockToggleUtc = DateTime.MinValue;
     private string _anchor = "";
     private bool _reanchoring;
@@ -497,6 +524,14 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (!_hud.IsHandleCreated) return;
         if (_reanchoring) return;
+
+        if (_settings.CaptureOffscreen)
+        {
+            _settings.CaptureOffscreen = false;
+            _itemOffscreen.Checked = false;
+            _settings.Save();
+            _hud.SetCaptureOffscreen(false);
+        }
 
         if (!string.IsNullOrEmpty(anchor))
         {
@@ -717,13 +752,37 @@ internal sealed class TrayApp : ApplicationContext
     private void OnPlayerFailed(string message)
     {
         Logger.Write("player failed: " + message);
-        _tray.ShowBalloonTip(4000, "Music Toppin", message, ToolTipIcon.Warning);
+
+        // 直播中点歌是自动流程，默认不弹气泡（避免右下角通知干扰直播/游戏输入）
+        if (_playingFromQueue) LiveNotify("Music Toppin", message, ToolTipIcon.Warning);
+        else _tray.ShowBalloonTip(4000, "Music Toppin", message, ToolTipIcon.Warning);
 
         if (!_playingFromQueue) return;
 
         // 点歌播放失败：清掉当前项，接着放下面的，别卡住
         StopOwnPlayback();
         StartNextQueuedSong();
+    }
+
+    /// <summary>
+    /// 点歌/播放这类「自动发生」的提示：默认只写日志 + 更新托盘菜单状态，不弹 Windows 气泡。
+    /// 气泡会在屏幕右下角弹窗，直播或游戏时可能干扰键鼠输入；想要提示可在
+    /// 「弹幕点歌 → 点歌/播放时弹气泡提示」里打开。
+    /// </summary>
+    private void LiveNotify(string title, string text, ToolTipIcon icon)
+    {
+        Logger.Write("notify: " + title + " | " + (text ?? "").Replace("\n", " "));
+
+        if (!_settings.LiveToast) return;
+
+        try { _tray.ShowBalloonTip(2500, title, text, icon); } catch { }
+    }
+
+    private void ToggleLiveToast()
+    {
+        _settings.LiveToast = !_settings.LiveToast;
+        _itemLiveToast.Checked = _settings.LiveToast;
+        _settings.Save();
     }
 
     // ---- 弹幕点歌（S2）----
@@ -771,7 +830,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _itemLiveDisconnect.Enabled = true;
         UpdateLiveStatus("正在连接直播间 " + roomId + " …");
-        _tray.ShowBalloonTip(2200, "Music Toppin", "正在连接直播间 " + roomId + " 的弹幕…", ToolTipIcon.Info);
+        LiveNotify("Music Toppin", "正在连接直播间 " + roomId + " 的弹幕…", ToolTipIcon.Info);
     }
 
     private void DisconnectLive()
@@ -791,7 +850,7 @@ internal sealed class TrayApp : ApplicationContext
 
         if (connected)
         {
-            _tray.ShowBalloonTip(3000, "Music Toppin",
+            LiveNotify("Music Toppin",
                 "弹幕已连接：直播间 " + _danmaku.RoomId + "\n观众发「点歌 BV…」即可入队。", ToolTipIcon.Info);
         }
 
@@ -844,7 +903,7 @@ internal sealed class TrayApp : ApplicationContext
         if (result.Accepted)
         {
             Logger.Write("song request: " + message.UserName + " -> " + request.SourceLabel + " " + request.Query + " (#" + result.Position + ")");
-            _tray.ShowBalloonTip(2500, "已加入点歌队列（第 " + result.Position + " 位）",
+            LiveNotify("已加入点歌队列（第 " + result.Position + " 位）",
                 message.UserName + "：" + request.Query, ToolTipIcon.Info);
             UpdateQueueMenu();
             StartNextQueuedSong();
@@ -893,7 +952,7 @@ internal sealed class TrayApp : ApplicationContext
         {
             var label = item.Request != null ? item.Request.SourceLabel : "未知来源";
             Logger.Write("queue skip: " + label + " " + item.DisplayName);
-            _tray.ShowBalloonTip(3500, "Music Toppin",
+            LiveNotify("Music Toppin",
                 "这首暂时放不了：" + label + " " + (item.Request != null ? item.Request.Query : "") +
                 "\n目前只接了 B 站 BV 点播（S3 多平台还没做）。",
                 ToolTipIcon.Warning);
@@ -916,14 +975,14 @@ internal sealed class TrayApp : ApplicationContext
             await EnsurePlayer().PlayAsync(song);
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
             Logger.Write("queue play: " + song.Title + (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist));
-            _tray.ShowBalloonTip(2500, "正在播放点歌",
+            LiveNotify("正在播放点歌",
                 item.Requester + "：" + song.Title + (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist),
                 ToolTipIcon.Info);
         }
         catch (Exception ex)
         {
             Logger.Write("queue play failed: " + ex.Message);
-            _tray.ShowBalloonTip(4000, "Music Toppin", ex.Message, ToolTipIcon.Warning);
+            LiveNotify("Music Toppin", ex.Message, ToolTipIcon.Warning);
 
             _queue.ClearCurrent();
             _playingFromQueue = false;
@@ -955,6 +1014,145 @@ internal sealed class TrayApp : ApplicationContext
         _queue.Clear();
         UpdateQueueMenu();
         _tray.ShowBalloonTip(1800, "Music Toppin", "点歌队列已清空", ToolTipIcon.Info);
+    }
+
+    private OverlayState BuildOverlayState()
+    {
+        var np = _latest;
+        var theme = HudRenderer.Theme;
+
+        return new OverlayState
+        {
+            Title = np.HasSession ? np.Title : "",
+            Artist = np.HasSession ? np.Artist : "",
+            Playing = np.Playing,
+            Position = np.Position.TotalSeconds,
+            Duration = np.Duration.TotalSeconds,
+            HasTimeline = np.HasTimeline && np.Duration > TimeSpan.Zero,
+            PrevTitle = np.PrevTitles != null && np.PrevTitles.Length > 0 ? (np.PrevTitles[0] ?? "") : "",
+            PrevArtist = np.PrevArtists != null && np.PrevArtists.Length > 0 ? (np.PrevArtists[0] ?? "") : "",
+            Accent = ToHex(theme.Accent),
+            TitleColor = ToHex(theme.Title),
+            ArtistColor = ToHex(theme.Artist),
+            Opacity = Math.Max(0.05f, Math.Min(1f, _settings.CardOpacity / 100f)),
+            Show = np.HasSession && np.Title.Length > 0 && _hud.Visible || (np.HasSession && np.Title.Length > 0 && _settings.Overlay)
+        };
+    }
+
+    private static string ToHex(Color color)
+    {
+        return "#" + color.R.ToString("X2") + color.G.ToString("X2") + color.B.ToString("X2");
+    }
+
+    private void ToggleOverlay()
+    {
+        _settings.Overlay = !_settings.Overlay;
+        _itemOverlay.Checked = _settings.Overlay;
+        _settings.Save();
+
+        if (_settings.Overlay) StartOverlay();
+        else StopOverlay();
+    }
+
+    private void StartOverlay()
+    {
+        if (_overlay == null)
+        {
+            _overlay = new OverlayServer(BuildOverlayState);
+        }
+
+        if (!_overlay.Start())
+        {
+            _settings.Overlay = false;
+            _itemOverlay.Checked = false;
+            _settings.Save();
+            _tray.ShowBalloonTip(3000, "Music Toppin", "启动叠加层失败：端口 4681-4710 都被占用", ToolTipIcon.Warning);
+            return;
+        }
+
+        var url = _overlay.Url;
+        try { Clipboard.SetText(url); } catch { }
+        _tray.ShowBalloonTip(6000, "Music Toppin",
+            "叠加层地址已复制：" + url + "\n在 OBS 添加「浏览器源」，粘贴地址，宽 400 高 320。\n现在可以关掉桌面浮窗，观众仍能看到。",
+            ToolTipIcon.Info);
+    }
+
+    private void StopOverlay()
+    {
+        if (_overlay == null) return;
+        _overlay.Dispose();
+        _overlay = null;
+        Logger.Write("overlay server stopped");
+    }
+    private void ToggleOccluded()
+    {
+        _settings.CaptureOccluded = !_settings.CaptureOccluded;
+        _itemOccluded.Checked = _settings.CaptureOccluded;
+
+        // 两种采集模式互斥
+        if (_settings.CaptureOccluded && _settings.CaptureOffscreen)
+        {
+            _settings.CaptureOffscreen = false;
+            _itemOffscreen.Checked = false;
+            _hud.SetCaptureOffscreen(false);
+        }
+
+        _settings.Save();
+
+        if (_settings.CaptureOccluded)
+        {
+            if (!_hud.Visible)
+            {
+                _settings.Visible = true;
+                _itemShow.Checked = true;
+                _settings.Save();
+                ShowHud();
+            }
+
+            _hud.SetCaptureOccluded(true);
+            _tray.ShowBalloonTip(7000, "Music Toppin",
+                "已进入遮挡模式：浮窗压在其它窗口后面。\n全屏/无边框游戏会盖住它；切回桌面时可能露出来。\n直播软件里用「窗口采集」选 Music Toppin。\n想恢复：再点一次这个菜单。",
+                ToolTipIcon.Info);
+            return;
+        }
+
+        _hud.SetCaptureOccluded(false);
+        _tray.ShowBalloonTip(2500, "Music Toppin", "已退出遮挡模式", ToolTipIcon.Info);
+    }
+    private void ToggleOffscreen()
+    {
+        _settings.CaptureOffscreen = !_settings.CaptureOffscreen;
+        _itemOffscreen.Checked = _settings.CaptureOffscreen;
+
+        if (_settings.CaptureOffscreen && _settings.CaptureOccluded)
+        {
+            _settings.CaptureOccluded = false;
+            _itemOccluded.Checked = false;
+            _hud.SetCaptureOccluded(false);
+        }
+
+        _settings.Save();
+
+        if (_settings.CaptureOffscreen)
+        {
+            if (!_hud.Visible)
+            {
+                _settings.Visible = true;
+                _itemShow.Checked = true;
+                _settings.Save();
+                ShowHud();
+            }
+
+            _hud.SetCaptureOffscreen(true);
+
+            _tray.ShowBalloonTip(7000, "Music Toppin",
+                "浮窗已移到屏幕外。\n在直播姬/直播伴侣里添加「窗口采集」，选择窗口「Music Toppin」。\n想恢复：再点一次这个菜单。",
+                ToolTipIcon.Info);
+            return;
+        }
+
+        _hud.SetCaptureOffscreen(false);
+        _tray.ShowBalloonTip(2500, "Music Toppin", "浮窗已回到屏幕", ToolTipIcon.Info);
     }
     private void ShowWizard()
     {
@@ -1410,6 +1608,7 @@ internal sealed class TrayApp : ApplicationContext
             try { _danmaku?.Dispose(); } catch { }
             try { _player?.Dispose(); } catch { }
             _service?.Dispose();
+            StopOverlay();
 
             foreach (Form form in Application.OpenForms)
             {

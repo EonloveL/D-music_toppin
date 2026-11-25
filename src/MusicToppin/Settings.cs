@@ -35,6 +35,18 @@ internal sealed class AppSettings
 
     /// <summary>启动时是否自动重连上次的直播间。</summary>
     public bool LiveAutoConnect = true;
+
+    /// <summary>点歌/播放时是否弹 Windows 气泡（默认关闭：直播中弹窗会干扰键鼠输入）。</summary>
+    public bool LiveToast;
+
+    /// <summary>是否开启浏览器源叠加层（给 OBS 用，桌面浮窗可以隐藏）。</summary>
+    public bool Overlay;
+
+    /// <summary>把浮窗移到屏幕外（配合只能做窗口采集的直播软件）。</summary>
+    public bool CaptureOffscreen;
+
+    /// <summary>遮挡模式：浮窗压在其它窗口后面（主播看不到，窗口采集仍可抓到）。</summary>
+    public bool CaptureOccluded;
     public int Schema;
 
     // 颜色（ARGB），默认值与设计稿一致
@@ -78,6 +90,10 @@ internal sealed class AppSettings
                 s.UpdateCheckOnStart = ReadInt(key, "UpdateCheckOnStart", 1) == 1;
                 s.LiveRoomId = ReadInt(key, "LiveRoomId", 0);
                 s.LiveAutoConnect = ReadInt(key, "LiveAutoConnect", 1) == 1;
+                s.LiveToast = ReadInt(key, "LiveToast", 0) == 1;
+                s.Overlay = ReadInt(key, "Overlay", 0) == 1;
+                s.CaptureOffscreen = ReadInt(key, "CaptureOffscreen", 0) == 1;
+                s.CaptureOccluded = ReadInt(key, "CaptureOccluded", 0) == 1;
                 s.Schema = ReadInt(key, "Schema", 0);
                 s.AccentColor = ReadInt(key, "AccentColor", unchecked((int)0xFFFF3B30));
                 s.TitleColor = ReadInt(key, "TitleColor", unchecked((int)0xFFF5F8FC));
@@ -149,6 +165,10 @@ internal sealed class AppSettings
                 WriteInt(key, "UpdateCheckOnStart", UpdateCheckOnStart ? 1 : 0);
                 WriteInt(key, "LiveRoomId", LiveRoomId);
                 WriteInt(key, "LiveAutoConnect", LiveAutoConnect ? 1 : 0);
+                WriteInt(key, "LiveToast", LiveToast ? 1 : 0);
+                WriteInt(key, "Overlay", Overlay ? 1 : 0);
+                WriteInt(key, "CaptureOffscreen", CaptureOffscreen ? 1 : 0);
+                WriteInt(key, "CaptureOccluded", CaptureOccluded ? 1 : 0);
                 try { key.SetValue("UpdateUrl", UpdateUrl ?? "", RegistryValueKind.String); } catch { }
                 WriteInt(key, "Schema", CurrentSchema);
                 WriteInt(key, "AccentColor", AccentColor);

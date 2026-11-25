@@ -219,6 +219,76 @@ internal sealed class HudForm : Form
     public DateTime LastInteractionUtc { get; private set; } = DateTime.UtcNow;
 
     /// <summary>取消进行中的拖动（锁定/隐藏/弹菜单时调用，避免鼠标状态残留）。</summary>
+    private Point _offscreenBackup = Point.Empty;
+
+    private const int SWP_NOSIZE = 0x0001;
+    private const int SWP_NOMOVE = 0x0002;
+    private const int SWP_NOACTIVATE = 0x0010;
+    private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
+
+    /// <summary>是否处于"遮挡模式"（压在其它窗口后面）。</summary>
+    public bool IsOccluded { get; private set; }
+
+    /// <summary>
+    /// 遮挡模式：取消置顶并把窗口压到 Z 序最底，被游戏/浏览器挡住。
+    /// 窗口仍在屏幕内且可见，按窗口采集的软件仍能拿到画面。
+    /// </summary>
+    public void SetCaptureOccluded(bool occluded)
+    {
+        if (occluded)
+        {
+            IsOccluded = true;
+            TopMost = false;
+            if (Handle != IntPtr.Zero)
+            {
+                SetWindowPos(Handle, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            Logger.Write("capture occluded");
+            return;
+        }
+
+        if (!IsOccluded) return;
+
+        IsOccluded = false;
+        TopMost = true;
+        Logger.Write("capture occluded: off");
+    }
+
+    /// <summary>是否处于"移到屏幕外"的采集模式。</summary>
+    public bool IsOffscreen { get; private set; }
+
+    /// <summary>
+    /// 把浮窗挪到所有显示器之外：主播看不到，但窗口仍然可见（IsWindowVisible），
+    /// 直播姬/直播伴侣这类"窗口采集"仍能选到它。
+    /// </summary>
+    public void SetCaptureOffscreen(bool offscreen)
+    {
+        if (offscreen)
+        {
+            if (!IsOffscreen) _offscreenBackup = Location;
+
+            IsOffscreen = true;
+
+            var screen = SystemInformation.VirtualScreen;
+            Location = new Point(screen.Left - Width - 320, screen.Top + 40);
+            Logger.Write("capture offscreen: " + Location.X + "," + Location.Y);
+            Render();
+            return;
+        }
+
+        if (!IsOffscreen) return;
+
+        IsOffscreen = false;
+        if (_offscreenBackup != Point.Empty)
+        {
+            Location = _offscreenBackup;
+        }
+        Logger.Write("capture offscreen: restored");
+        Render();
+    }
     public void CancelDrag()
     {
         _dragging = false;
