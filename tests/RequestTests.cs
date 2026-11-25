@@ -104,6 +104,36 @@ namespace MusicToppin.Tests
             var loose = new RequestQueue { MaxSize = 5, UserCooldown = TimeSpan.Zero, SongCooldown = TimeSpan.Zero };
             TestRun.Check(loose.Enqueue(Parse("点歌 起风了", "观众A")).Accepted, "冷却为 0 时可重复点");
             TestRun.Check(loose.Enqueue(Parse("点歌 起风了", "观众A")).Accepted, "冷却为 0 时同用户可连点");
+
+            // 弹幕撤回：按序号 / 撤回自己的 / 按歌名
+            var removeQueue = new RequestQueue { MaxSize = 5, UserCooldown = TimeSpan.Zero, SongCooldown = TimeSpan.Zero };
+            var r1 = Parse("点歌 起风了", "甲");
+            var r2 = Parse("点歌 群青", "乙");
+            var r3 = Parse("点歌 Lemon", "丙");
+            r1.RequesterUid = 2001;
+            r2.RequesterUid = 2002;
+            r3.RequesterUid = 2003;
+            removeQueue.Enqueue(r1);
+            removeQueue.Enqueue(r2);
+            removeQueue.Enqueue(r3);
+
+            var removed = removeQueue.RemoveAt(2);
+            TestRun.Check(removed != null && removed.Request.Query == "群青" && removeQueue.Count == 2, "按序号撤回待播歌曲");
+
+            removed = removeQueue.RemoveByRequesterUid(2003);
+            TestRun.Check(removed != null && removed.Request.Query == "Lemon" && removeQueue.Count == 1, "撤回自己的待播歌曲");
+
+            TestRun.Check(removeQueue.RemoveAt(99) == null, "序号越界不删");
+
+            var keywordQueue = new RequestQueue { MaxSize = 5, UserCooldown = TimeSpan.Zero, SongCooldown = TimeSpan.Zero };
+            keywordQueue.Enqueue(Parse("点歌 起风了", "甲"));
+            keywordQueue.Enqueue(Parse("点歌 群青", "乙"));
+            int matches;
+            removed = keywordQueue.RemoveByKeyword("起风", out matches);
+            TestRun.Check(removed != null && matches == 1 && keywordQueue.Count == 1, "按歌名撤回待播歌曲");
+
+            removed = keywordQueue.RemoveByKeyword("群青", out matches);
+            TestRun.Check(removed != null && keywordQueue.Count == 0, "按歌名撤回最后一首");
         }
     }
 }

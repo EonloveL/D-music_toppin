@@ -167,6 +167,64 @@ internal sealed class RequestQueue
         RaiseChanged();
     }
 
+    /// <summary>按队列序号（1 起，和托盘列表一致）移除还没轮到的歌；成功返回被移除的项。</summary>
+    public QueueItem RemoveAt(int oneBasedPosition)
+    {
+        if (oneBasedPosition < 1 || oneBasedPosition > _items.Count) return null;
+
+        var item = _items[oneBasedPosition - 1];
+        _items.RemoveAt(oneBasedPosition - 1);
+        RaiseChanged();
+        return item;
+    }
+
+    /// <summary>移除某个观众还没轮到的第一首（按 uid，避免同名观众误删）。</summary>
+    public QueueItem RemoveByRequesterUid(long uid)
+    {
+        if (uid <= 0) return null;
+
+        for (var i = 0; i < _items.Count; i++)
+        {
+            if (_items[i].Request != null && _items[i].Request.RequesterUid == uid)
+            {
+                var item = _items[i];
+                _items.RemoveAt(i);
+                RaiseChanged();
+                return item;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>按歌名/关键词找唯一匹配的待播项并移除；matches 告诉你命中了几首。</summary>
+    public QueueItem RemoveByKeyword(string keyword, out int matches)
+    {
+        matches = 0;
+        QueueItem found = null;
+
+        if (string.IsNullOrWhiteSpace(keyword)) return null;
+
+        for (var i = 0; i < _items.Count; i++)
+        {
+            var item = _items[i];
+            var name = item.DisplayName ?? "";
+            var query = item.Request != null ? item.Request.Query : "";
+
+            if (name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                query.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                matches++;
+                if (found == null) found = item;
+            }
+        }
+
+        if (matches != 1) return null;
+
+        _items.Remove(found);
+        RaiseChanged();
+        return found;
+    }
+
     /// <summary>把自己的点歌撤掉（还没轮到的话）。</summary>
     public bool RemoveByRequester(string requester)
     {

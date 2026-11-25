@@ -48,6 +48,9 @@ internal sealed class AppSettings
     /// <summary>叠加层上次用的端口（0 = 没记录）。</summary>
     public int OverlayPort;
 
+    /// <summary>弹幕切歌权限：0 = 所有人，1 = 仅当前点歌人，2 = 关闭。</summary>
+    public int SkipPolicy;
+
     /// <summary>网易云登录 cookie（MUSIC_U 等；空 = 游客）。</summary>
     public string NeteaseCookie = "";
     public string NeteaseNick = "";
@@ -112,6 +115,7 @@ internal sealed class AppSettings
                 s.PlayerVolume = ReadInt(key, "PlayerVolume", 60);
                 s.VideoAudio = ReadInt(key, "VideoAudio", 1);
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
+                s.SkipPolicy = ReadInt(key, "SkipPolicy", 0);
                 s.NeteaseCookie = ReadString(key, "NeteaseCookie", "");
                 s.NeteaseNick = ReadString(key, "NeteaseNick", "");
                 s.QQMusicCookie = ReadString(key, "QQMusicCookie", "");
@@ -195,6 +199,7 @@ internal sealed class AppSettings
                 WriteInt(key, "PlayerVolume", PlayerVolume);
                 WriteInt(key, "VideoAudio", VideoAudio);
                 WriteInt(key, "OverlayPort", OverlayPort);
+                WriteInt(key, "SkipPolicy", SkipPolicy);
                 try { key.SetValue("NeteaseCookie", NeteaseCookie ?? "", RegistryValueKind.String); } catch { }
                 try { key.SetValue("NeteaseNick", NeteaseNick ?? "", RegistryValueKind.String); } catch { }
                 try { key.SetValue("QQMusicCookie", QQMusicCookie ?? "", RegistryValueKind.String); } catch { }

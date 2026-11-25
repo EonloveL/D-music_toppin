@@ -36,6 +36,9 @@ internal sealed class OverlayState
     /// <summary>视频声音是否跟随视频（true = iframe 出声、音画同步；false = 静音，声音走应用播放器）。</summary>
     public bool VideoSound;
 
+    /// <summary>视频重开标记：变一次就强制前端重建 iframe（用于「上一首」重播视频）。</summary>
+    public int VideoNonce;
+
     /// <summary>手写 JSON（.NET Framework 4.8 没有 System.Text.Json）。</summary>
     public string ToJson()
     {
@@ -53,6 +56,7 @@ internal sealed class OverlayState
         AppendString(builder, "toast", Toast);
         AppendString(builder, "videoBvid", VideoBvid);
         builder.Append(",\"videoSound\":").Append(VideoSound ? "true" : "false");
+        builder.Append(",\"videoNonce\":").Append(VideoNonce);
         builder.Append(",\"queueCount\":").Append(QueueCount);
         builder.Append(",\"toastId\":").Append(ToastId);
         builder.Append(",\"playing\":").Append(Playing ? "true" : "false");
@@ -412,7 +416,7 @@ internal sealed class OverlayServer : IDisposable
   function apply(st){
     var bv=st.videoBvid||'';
     var sound=!!st.videoSound;
-    var key=bv+(sound?'|1':'|0');
+    var key=bv+(sound?'|1':'|0')+'|'+(st.videoNonce||0);
     if(key===current) return;
     current=key;
     if(!bv){stage.className='';player.removeAttribute('src');return;}

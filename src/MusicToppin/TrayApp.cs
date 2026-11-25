@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 
 namespace MusicToppin;
 
@@ -97,6 +98,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _liveStatus = new ToolStripMenuItem("未连接直播间") { Enabled = false };
         _itemLiveDiag = new ToolStripMenuItem("直播间状态…", null, (_, _) => ShowLiveStatus());
+        _itemSkipPolicy = BuildSkipPolicyMenu();
         _itemLiveConnect = new ToolStripMenuItem("连接直播间…", null, (_, _) => PromptLiveRoom());
         _itemLiveDisconnect = new ToolStripMenuItem("断开直播间", null, (_, _) => DisconnectLive()) { Enabled = false };
         _itemQueueNext = new ToolStripMenuItem("队列：空", null, (_, _) => StartNextQueuedSong()) { Enabled = false };
@@ -114,6 +116,7 @@ internal sealed class TrayApp : ApplicationContext
             _liveStatus,
             _itemLiveDiag,
             _itemQueueList,
+            _itemSkipPolicy,
             new ToolStripSeparator(),
             _itemLiveToast
         });
@@ -164,8 +167,8 @@ internal sealed class TrayApp : ApplicationContext
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("自由拖动：先按快捷键解锁") { Enabled = false });
 
         var controlsMenu = new ToolStripMenuItem("播放控制");
-        controlsMenu.DropDownItems.Add(new ToolStripMenuItem("上一首", null, (_, _) => _ = SkipAsync(previous: true)));
-        controlsMenu.DropDownItems.Add(new ToolStripMenuItem("下一首", null, (_, _) => _ = SkipAsync(previous: false)));
+        controlsMenu.DropDownItems.Add(new ToolStripMenuItem("切歌（下一首）", null, (_, _) => _ = SkipAsync(previous: false)));
+        controlsMenu.DropDownItems.Add(new ToolStripMenuItem("重播（上一首）", null, (_, _) => _ = SkipAsync(previous: true)));
         controlsMenu.DropDownItems.Add(new ToolStripSeparator());
         _volumeMenu = BuildVolumeMenu();
         controlsMenu.DropDownItems.Add(_volumeMenu);
@@ -334,6 +337,24 @@ internal sealed class TrayApp : ApplicationContext
             statusTimer.Start();
         }
 
+        // 调试用：--skip-after=6 在 6 秒后自动切下一首（验证切歌链路）
+        var skipArg = Environment.GetCommandLineArgs()
+            .FirstOrDefault(a => a.StartsWith("--skip-after=", StringComparison.OrdinalIgnoreCase));
+        int skipSeconds;
+        if (skipArg != null &&
+            int.TryParse(skipArg.Substring("--skip-after=".Length), out skipSeconds) &&
+            skipSeconds > 0)
+        {
+            var skipTimer = new System.Windows.Forms.Timer { Interval = skipSeconds * 1000 };
+            skipTimer.Tick += (_, _) =>
+            {
+                skipTimer.Stop();
+                skipTimer.Dispose();
+                _ = SkipAsync(previous: false);
+            };
+            skipTimer.Start();
+        }
+
         // 调试用：--player-check 打开播放器检查对话框
         if (Environment.GetCommandLineArgs().Any(a => a.Equals("--player-check", StringComparison.OrdinalIgnoreCase)))
         {
@@ -464,6 +485,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _volumeMenu;
     private ToolStripMenuItem _itemCopyOverlay;
     private ToolStripMenuItem _itemCopyVideo;
+    private ToolStripMenuItem _itemSkipPolicy;
     private ToolStripMenuItem _itemLiveToast;
     private ToolStripMenuItem _itemNeteaseLogin;
     private ToolStripMenuItem _itemNeteaseLogout;
@@ -489,6 +511,8 @@ internal sealed class TrayApp : ApplicationContext
     private DateTime _videoStartedUtc;
     private TimeSpan _videoDuration;
     private ResolvedSong _videoSong;
+    private int _videoNonce;
+    private DateTime _lastSkipCommandUtc;
     private ToolStripMenuItem _itemOverlay;
     private ToolStripMenuItem _itemOffscreen;
     private ToolStripMenuItem _itemOccluded;
@@ -980,12 +1004,47 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Save();
     }
 
+    // ---- 弹幕切歌权限 ----
+
+    private ToolStripMenuItem BuildSkipPolicyMenu()
+    {
+        var menu = new ToolStripMenuItem("弹幕切歌");
+
+        var everyone = new ToolStripMenuItem("所有人（发「切歌」就切）", null, (_, _) => SetSkipPolicy(0)) { Tag = 0 };
+        var requester = new ToolStripMenuItem("仅当前点歌人", null, (_, _) => SetSkipPolicy(1)) { Tag = 1 };
+        var off = new ToolStripMenuItem("关闭", null, (_, _) => SetSkipPolicy(2)) { Tag = 2 };
+
+        menu.DropDownItems.Add(everyone);
+        menu.DropDownItems.Add(requester);
+        menu.DropDownItems.Add(off);
+
+        menu.DropDownOpening += (_, _) =>
+        {
+            everyone.Checked = _settings.SkipPolicy == 0;
+            requester.Checked = _settings.SkipPolicy == 1;
+            off.Checked = _settings.SkipPolicy == 2;
+
+            menu.Text = "弹幕切歌：" + (_settings.SkipPolicy == 0 ? "所有人"
+                : _settings.SkipPolicy == 1 ? "仅点歌人" : "关闭");
+        };
+
+        return menu;
+    }
+
+    private void SetSkipPolicy(int policy)
+    {
+        _settings.SkipPolicy = policy < 0 || policy > 2 ? 0 : policy;
+        _settings.Save();
+        Logger.Write("skip policy: " + _settings.SkipPolicy);
+    }
+
     // ---- 视频声音模式 ----
 
     /// <summary>视频自带声音：不在应用内播音频，用计时器推进 HUD 进度并在时长到点后切下一首。</summary>
     private void StartVideoPlayback(ResolvedSong song)
     {
         _videoSong = song;
+        _videoNonce++;
         _videoStartedUtc = DateTime.UtcNow;
         _videoDuration = song.Duration > TimeSpan.Zero ? song.Duration : TimeSpan.Zero;
 
@@ -1470,6 +1529,18 @@ internal sealed class TrayApp : ApplicationContext
 
         AddRecentDanmaku(message.UserName + "：" + message.Text);
 
+        if (TryHandleSkipCommand(message))
+        {
+            RefreshLiveStatus();
+            return;
+        }
+
+        if (TryHandleRemoveCommand(message))
+        {
+            RefreshLiveStatus();
+            return;
+        }
+
         SongRequest request;
         if (!SongRequestParser.TryParse(message.Text, message.UserName, message.Uid, out request))
         {
@@ -1529,6 +1600,115 @@ internal sealed class TrayApp : ApplicationContext
     {
         _recentDanmaku.Add(DateTime.Now.ToString("HH:mm:ss") + "  " + line);
         while (_recentDanmaku.Count > 12) _recentDanmaku.RemoveAt(0);
+    }
+
+    // ---- 弹幕切歌 ----
+
+    private static readonly HashSet<string> SkipCommands = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "切歌", "切歌吧", "换歌", "下一首", "跳过", "跳过这首", "跳过这歌", "切了"
+    };
+
+    /// <summary>观众发「切歌」切掉当前这首；返回 true 表示这条弹幕已被当作切歌处理。</summary>
+    private bool TryHandleSkipCommand(DanmakuMessage message)
+    {
+        var text = (message.Text ?? "").Trim().TrimEnd('。', '!', '！', '~', '～', ' ');
+        if (!SkipCommands.Contains(text)) return false;
+
+        if (_settings.SkipPolicy == 2)
+        {
+            Logger.Write("danmaku skip: disabled | " + message.UserName);
+            return true;
+        }
+
+        if (_settings.SkipPolicy == 1)
+        {
+            var current = _queue.Current;
+            var ownerUid = current != null && current.Request != null ? current.Request.RequesterUid : 0;
+            if (ownerUid <= 0 || ownerUid != message.Uid)
+            {
+                Logger.Write("danmaku skip: denied (not requester) | " + message.UserName + " uid=" + message.Uid);
+                return true;
+            }
+        }
+
+        // 防刷：3 秒内只响应一次
+        if ((DateTime.UtcNow - _lastSkipCommandUtc).TotalSeconds < 3)
+        {
+            Logger.Write("danmaku skip: throttled | " + message.UserName);
+            return true;
+        }
+
+        var hasOwnPlayback = _playingFromQueue || _videoBvid.Length > 0 ||
+                             (_player != null && _player.Current != null);
+        if (!hasOwnPlayback)
+        {
+            Logger.Write("danmaku skip: nothing playing | " + message.UserName);
+            return true;
+        }
+
+        _lastSkipCommandUtc = DateTime.UtcNow;
+        _lastRequestResult = "弹幕切歌：" + message.UserName;
+        Logger.Write("danmaku skip: " + message.UserName + " (uid " + message.Uid + ")");
+        ShowOverlayToast("已切歌：" + message.UserName);
+        _ = SkipAsync(previous: false);
+        return true;
+    }
+
+    private static readonly Regex RemoveCommandPattern = new Regex(
+        @"^(?:撤回|取消|删歌|删除|撤销|remove|del)(?:\s+(.+))?$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// 观众撤掉队列里还没播的歌：
+    ///   「撤回」= 自己的那首；「撤回 2」= 队列第 2 首；「撤回 起风了」= 按歌名（唯一匹配）。
+    /// </summary>
+    private bool TryHandleRemoveCommand(DanmakuMessage message)
+    {
+        var text = (message.Text ?? "").Trim().TrimEnd('。', '!', '！', '~', '～', ' ');
+        var match = RemoveCommandPattern.Match(text);
+        if (!match.Success) return false;
+
+        var arg = match.Groups[1].Success ? match.Groups[1].Value.Trim() : "";
+
+        QueueItem removed = null;
+        string error = null;
+
+        if (arg.Length == 0)
+        {
+            removed = _queue.RemoveByRequesterUid(message.Uid);
+            if (removed == null) error = "队列里没有你点的歌（可用「撤回 序号」删指定的一首）";
+        }
+        else if (int.TryParse(arg, out var position))
+        {
+            removed = _queue.RemoveAt(position);
+            if (removed == null) error = "队列里没有第 " + position + " 首";
+        }
+        else
+        {
+            int matches;
+            removed = _queue.RemoveByKeyword(arg, out matches);
+            if (removed == null)
+            {
+                error = matches > 1
+                    ? "有多首匹配「" + arg + "」，请用「撤回 序号」"
+                    : "队列里没找到「" + arg + "」";
+            }
+        }
+
+        if (removed == null)
+        {
+            Logger.Write("danmaku remove: " + error + " | " + message.UserName + ": " + text);
+            _lastRequestResult = "弹幕撤回失败：" + error;
+            ShowOverlayToast(error);
+            return true;
+        }
+
+        Logger.Write("danmaku remove: " + removed.DisplayName + " by " + message.UserName);
+        _lastRequestResult = "弹幕撤回：" + removed.DisplayName + "（" + message.UserName + "）";
+        ShowOverlayToast("已移除：" + removed.DisplayName);
+        UpdateQueueMenu();
+        return true;
     }
 
     private void UpdateQueueMenu()
@@ -1726,6 +1906,7 @@ internal sealed class TrayApp : ApplicationContext
             ToastId = _toastId,
             VideoBvid = _videoBvid,
             VideoSound = _settings.VideoAudio == 1,
+            VideoNonce = _videoNonce,
             Show = np.HasSession && np.Title.Length > 0 && _hud.Visible || (np.HasSession && np.Title.Length > 0 && _settings.Overlay)
         };
     }
@@ -2237,9 +2418,48 @@ internal sealed class TrayApp : ApplicationContext
 
     private async Task SkipAsync(bool previous)
     {
+        var hasOwnPlayback = _playingFromQueue || _videoBvid.Length > 0 ||
+                             (_player != null && _player.Current != null);
+
+        if (hasOwnPlayback)
+        {
+            if (!previous)
+            {
+                // 切歌：停掉当前（视频/音乐），直接放队列下一首
+                Logger.Write("skip: next (own playback)");
+                StopOwnPlayback();
+                StartNextQueuedSong();
+                return;
+            }
+
+            // 上一首：音乐回到开头；视频重开（计时器 + iframe 一起重置）
+            if (_videoBvid.Length > 0)
+            {
+                Logger.Write("skip: restart video");
+                RestartVideo();
+                return;
+            }
+
+            if (_player != null && _player.Current != null)
+            {
+                Logger.Write("skip: restart track");
+                _ = _player.SeekAsync(TimeSpan.Zero);
+                return;
+            }
+        }
+
         if (_service is null) return;
         if (previous) await _service.SkipPreviousAsync();
         else await _service.SkipNextAsync();
+    }
+
+    private void RestartVideo()
+    {
+        if (_videoBvid.Length == 0 || _videoSong == null) return;
+
+        _videoNonce++;
+        _videoStartedUtc = DateTime.UtcNow;
+        PushOwnState(_videoSong, new PlaybackState { Playing = true, Position = TimeSpan.Zero, Duration = _videoDuration });
     }
 
     private void Apply(NowPlaying np)
