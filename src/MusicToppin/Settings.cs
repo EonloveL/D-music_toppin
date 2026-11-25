@@ -74,7 +74,12 @@ internal sealed class AppSettings
     public int Schema;
 
     /// <summary>弹幕会话刷新间隔（秒，0 = 关闭）。B 站 token 久了会静默失效，定期换连接。</summary>
-    public int SessionRefreshSeconds = 60;
+    public int SessionRefreshSeconds = 300;
+
+    /// <summary>B 站登录（SESSDATA 等），部分房间只给登录用户下发弹幕。</summary>
+    public string BilibiliCookie = "";
+    public string BilibiliUid = "";
+    public string BilibiliNick = "";
 
     // 颜色（ARGB），默认值与设计稿一致
     public int AccentColor = unchecked((int)0xFFFF3B30);
@@ -124,7 +129,10 @@ internal sealed class AppSettings
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 0);
                 s.RemovePolicy = ReadInt(key, "RemovePolicy", 0);
-                s.SessionRefreshSeconds = ReadInt(key, "SessionRefreshSeconds", 60);
+                s.SessionRefreshSeconds = ReadInt(key, "SessionRefreshSeconds", 300);
+                s.BilibiliCookie = Secrets.Unprotect(ReadString(key, "BilibiliCookie", ""));
+                s.BilibiliUid = ReadString(key, "BilibiliUid", "");
+                s.BilibiliNick = ReadString(key, "BilibiliNick", "");
                 s.NeteaseCookie = Secrets.Unprotect(ReadString(key, "NeteaseCookie", ""));
                 s.NeteaseNick = ReadString(key, "NeteaseNick", "");
                 s.QQMusicCookie = Secrets.Unprotect(ReadString(key, "QQMusicCookie", ""));
@@ -218,6 +226,9 @@ internal sealed class AppSettings
                 WriteInt(key, "SkipPolicy", SkipPolicy);
                 WriteInt(key, "RemovePolicy", RemovePolicy);
                 WriteInt(key, "SessionRefreshSeconds", SessionRefreshSeconds);
+                try { key.SetValue("BilibiliCookie", Secrets.Protect(BilibiliCookie ?? ""), RegistryValueKind.String); } catch { }
+                try { key.SetValue("BilibiliUid", BilibiliUid ?? "", RegistryValueKind.String); } catch { }
+                try { key.SetValue("BilibiliNick", BilibiliNick ?? "", RegistryValueKind.String); } catch { }
                 try { key.SetValue("NeteaseCookie", Secrets.Protect(NeteaseCookie ?? ""), RegistryValueKind.String); } catch { }
                 try { key.SetValue("NeteaseNick", NeteaseNick ?? "", RegistryValueKind.String); } catch { }
                 try { key.SetValue("QQMusicCookie", Secrets.Protect(QQMusicCookie ?? ""), RegistryValueKind.String); } catch { }

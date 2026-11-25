@@ -54,6 +54,11 @@ if (-not (Test-Path $icon)) {
 Write-Host "== [2/5] 编译主程序（.NET Framework 4.8，产物几十 KB）" -ForegroundColor Cyan
 $refs = @(Get-FrameworkRefArgs) + @(Get-WinmdRefArgs)
 
+$brotli = Join-Path $root 'src\MusicToppin\lib\BrotliSharpLib.dll'
+$unsafe = Join-Path $root 'src\MusicToppin\lib\System.Runtime.CompilerServices.Unsafe.dll'
+$refs += '/r:"' + $brotli + '"'
+$refs += '/r:"' + $unsafe + '"'
+
 $webView2 = Join-Path $cacheRoot 'webview2\pkg\lib\net462'
 if (Test-Path (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll'))
 {
@@ -77,6 +82,8 @@ if (Test-Path (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll'))
     Copy-Item (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll') $appOut -Force
     Copy-Item (Join-Path $webView2 'Microsoft.Web.WebView2.WinForms.dll') $appOut -Force
     Copy-Item (Join-Path $cacheRoot 'webview2\pkg\runtimes\win-x64\native\WebView2Loader.dll') $appOut -Force
+Copy-Item $brotli $appOut -Force
+Copy-Item $unsafe $appOut -Force
 }
 Write-Host ("   MusicToppin.exe = " + [math]::Round((Get-Item $appExe).Length / 1KB, 1) + " KB")
 

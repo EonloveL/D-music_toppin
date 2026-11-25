@@ -106,6 +106,7 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 ![叠加层下一首 + 提示](docs/screenshots/overlay-next.png)
 - 断线自动重连（2 秒起翻倍，最长 30 秒）；菜单里能看到「直播间 xxx · 弹幕 N 条 · 队列 N 首」
 - 直播间号会记住，下次启动自动重连；「断开直播间」会关掉自动重连
+- **「B 站：登录（扫码，弹幕用）…」**：部分直播间只给登录用户下发弹幕；登录后弹幕连接会带账号（游客只收到人气包）
 - **「直播间状态…」**：看开播状态 / 是否连上弹幕 / 收到多少条 / 最后一条时间 / 最近错误 / **最近 12 条弹幕原文** / **最近一次点歌解析结果**；未开播会明确标出来（未开播时 B 站不推弹幕），可一键「重新连接」，还有「测试点歌」用来单独验证播放链路
 
 ![直播间状态](docs/screenshots/live-status.png)
@@ -239,8 +240,8 @@ Uninstall.exe /S                                      静默卸载
 
 | 项目 | 实测（本机 Win11，V2 构建，纯显示模式） |
 |---|---|
-| 安装包 | **400 KB** |
-| 主程序 | **259 KB**（.NET Framework 4.8，系统自带运行时） |
+| 安装包 | **798 KB** |
+| 主程序 | **270 KB**（.NET Framework 4.8，系统自带运行时） |
 | 内存（私有） | **25–33 MB**（点歌播放时才加载 WebView2，约 +160 MB） |
 | 内存（含共享） | 56 MB |
 | CPU | 空闲 **≈0 %**（2 秒轮询；点歌播放时由 WebView2 占用） |
@@ -266,9 +267,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 产物：
 
 ```
-build\app\MusicToppin.exe        259 KB
+build\app\MusicToppin.exe        270 KB
 build\app\Uninstall.exe          15 KB
-build\MusicToppin-Setup.exe      400 KB
+build\MusicToppin-Setup.exe      798 KB
 ```
 
 构建链路：`toolchain.ps1` 定位 Roslyn `csc`（`Microsoft.Net.Compilers.Toolset`）、.NET Framework 4.8 引用程序集、WinRT 元数据（`Microsoft.Windows.SDK.Contracts`）→ 编译主程序（引用 `Windows.Media.winmd` 调 SMTC）→ 编译卸载器 → 打包 payload → 嵌入安装器。
@@ -352,7 +353,7 @@ Uninstall.exe /S                              静默卸载
 - 弹幕走游客身份，只能拿到 uid / 昵称，拿不到完整用户资料；房间号必须是**开播中或有人说话**的直播间（冷场房间连上也收不到弹幕）
 - 视频小窗用的是 B 站官方嵌入播放器：UP 主禁止站外播放的视频会黑屏报错（音频不受影响）
 - 酷我经实测免费歌只有移动端能用（桌面只给 ~11 秒试听），已放弃接入
-- 抖音直播间暂不支持：链接能识别但弹幕要签名 + protobuf，后续再接（现在只支持 B 站房间号 / 链接）
+- 抖音直播间暂不支持：链接能识别但弹幕要签名 + protobuf，后续再接（现在只支持 B 站房间号 / 链接）\n- B 站弹幕在部分房间要求**登录**（游客只收到人气包）；用「B 站：登录（扫码，弹幕用）」登录即可
 
 ## V2 进度
 
@@ -368,7 +369,7 @@ Uninstall.exe /S                              静默卸载
 
 **接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。
 
-播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 259 KB / 25 MB 的轻量形态。
+播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 270 KB / 25 MB 的轻量形态（弹幕 brotli 解码库约 +1.3 MB 只在安装包里）。
 ## 下一步（V2）
 
 - S3 剩余：Apple Music（只有试听）；酷狗/酷我按需求先不做，见 [docs/v2-sources.md](docs/v2-sources.md)

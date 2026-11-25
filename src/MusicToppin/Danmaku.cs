@@ -76,12 +76,15 @@ internal static class DanmakuProtocol
     }
 
     /// <summary>鉴权包：游客 uid=0 即可，protover=2 让服务器回 zlib（.NET Framework 没有 brotli）。</summary>
-    public static byte[] BuildAuthPacket(long roomId, string token, int protoVersion = 2)
+    public static byte[] BuildAuthPacket(long roomId, string token, long uid = 0, int protoVersion = 2)
     {
+        var buvid = BilibiliLive.ExtractCookieValue("buvid3");
+
         var body =
-            "{\"uid\":0,\"roomid\":" + roomId.ToString() +
+            "{\"uid\":" + uid.ToString() + ",\"roomid\":" + roomId.ToString() +
             ",\"protover\":" + protoVersion.ToString() +
-            ",\"platform\":\"web\",\"type\":2,\"key\":" + Json.Escape(token ?? "") + "}";
+            ",\"platform\":\"web\",\"type\":2,\"key\":" + Json.Escape(token ?? "") +
+            (string.IsNullOrEmpty(buvid) ? "" : ",\"buvid\":\"" + buvid + "\"") + "}";
 
         return BuildPacket(OpAuth, Encoding.UTF8.GetBytes(body));
     }
@@ -209,6 +212,33 @@ internal static class BilibiliLive
     public const string UserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+    /// <summary>B 站登录 cookie（SESSDATA 等），空 = 游客。</summary>
+    public static string Cookie = "";
+
+    /// <summary>调试：取 token 用 cookie，但 WebSocket 握手不带 cookie。</summary>
+    public static bool WsNoCookie;
+
+    /// <summary>从登录 cookie 里取某个键（如 SESSDATA / buvid3）。</summary>
+    public static string ExtractCookieValue(string name)
+    {
+        if (string.IsNullOrWhiteSpace(Cookie)) return "";
+
+        var parts = Cookie.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            var trimmed = part.Trim();
+            var eq = trimmed.IndexOf('=');
+            if (eq <= 0) continue;
+
+            if (string.Equals(trimmed.Substring(0, eq).Trim(), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed.Substring(eq + 1).Trim();
+            }
+        }
+
+        return "";
+    }
+
     private static readonly Regex RoomIdPattern = new Regex(@"\d{1,12}", RegexOptions.Compiled);
 
     /// <summary>抖音直播间链接（目前只做识别，弹幕协议还没接）。</summary>
@@ -255,8 +285,114 @@ internal static class BilibiliLive
     /// 拿鉴权 token 和弹幕服务器列表。
     /// 注意：新的 getDanmuInfo 需要 wbi 签名，未签名会返回 -352；老接口 getConf 目前仍然可用。
     /// </summary>
+    private static string _wbiKey;
+    private static DateTime _wbiKeyFetchedUtc;
+
+    private static string GetWbiKey()
+    {
+        if (!string.IsNullOrEmpty(_wbiKey) && (DateTime.UtcNow - _wbiKeyFetchedUtc).TotalHours < 11)
+        {
+            return _wbiKey;
+        }
+
+        var json = Get("https://api.bilibili.com/x/web-interface/nav", "https://www.bilibili.com/");
+        var root = ParseOrNull(json);
+        var data = root != null ? root["data"] : null;
+        var wbi = data != null ? data["wbi_img"] : null;
+        var img = wbi != null && wbi["img_url"] != null ? wbi["img_url"].AsString : "";
+        var sub = wbi != null && wbi["sub_url"] != null ? wbi["sub_url"].AsString : "";
+        if (string.IsNullOrEmpty(img) || string.IsNullOrEmpty(sub)) return null;
+
+        var shuffled = FileKey(img) + FileKey(sub);
+        if (shuffled.Length < 64) return null;
+
+        var table = new[] { 46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13 };
+        var builder = new StringBuilder(32);
+        foreach (var index in table) builder.Append(shuffled[index]);
+
+        _wbiKey = builder.ToString();
+        _wbiKeyFetchedUtc = DateTime.UtcNow;
+        return _wbiKey;
+    }
+
+    private static string FileKey(string url)
+    {
+        var slash = url.LastIndexOf('/');
+        var name = slash >= 0 ? url.Substring(slash + 1) : url;
+        var dot = name.IndexOf('.');
+        return dot > 0 ? name.Substring(0, dot) : name;
+    }
+
+    private static string Md5Hex(string text)
+    {
+        using (var md5 = System.Security.Cryptography.MD5.Create())
+        {
+            var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(text));
+            var builder = new StringBuilder(hash.Length * 2);
+            foreach (var b in hash) builder.Append(b.ToString("x2"));
+            return builder.ToString();
+        }
+    }
+
+    /// <summary>
+    /// 新版弹幕服务器接口（需要 wbi 签名）：返回的 host_list 使用 wss_port=2245，
+    /// 旧 getConf 的 443 对部分房间只推人气、不推弹幕。
+    /// </summary>
+    private static DanmakuEndpoint GetDanmuInfoEndpoint(long roomId)
+    {
+        try
+        {
+            var wbiKey = GetWbiKey();
+            if (string.IsNullOrEmpty(wbiKey)) return null;
+
+            var wts = ((long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds).ToString();
+            var query = "id=" + roomId + "&type=0&web_location=444.8&wts=" + wts;
+            var wrid = Md5Hex(query + wbiKey);
+
+            var url = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?" + query + "&w_rid=" + wrid;
+            var json = Get(url, "https://live.bilibili.com/" + roomId);
+            var root = ParseOrNull(json);
+            if (root == null || root["code"] == null || root["code"].AsInt != 0) return null;
+
+            var data = root["data"];
+            if (data == null) return null;
+
+            var endpoint = new DanmakuEndpoint { Token = data["token"] != null ? (data["token"].AsString ?? "") : "" };
+
+            var hosts = data["host_list"];
+            if (hosts != null && hosts.Kind == JsonKind.Array)
+            {
+                foreach (var host in hosts.Items)
+                {
+                    if (host == null) continue;
+
+                    var name = host["host"] != null ? host["host"].AsString : null;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    var port = host["wss_port"] != null ? host["wss_port"].AsInt : 443;
+                    var wsUrl = "wss://" + name + ":" + port + "/sub";
+                    if (!endpoint.WssHosts.Contains(wsUrl)) endpoint.WssHosts.Add(wsUrl);
+                }
+            }
+
+            return endpoint;
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("danmaku getDanmuInfo: " + ex.Message);
+            return null;
+        }
+    }
+
     public static DanmakuEndpoint GetEndpoint(long realRoomId)
     {
+        var modern = GetDanmuInfoEndpoint(realRoomId);
+        if (modern != null && !string.IsNullOrEmpty(modern.Token) && modern.WssHosts.Count > 0)
+        {
+            Logger.Write("danmaku: getDanmuInfo ok, hosts=" + modern.WssHosts.Count + " first=" + modern.WssHosts[0]);
+            return modern;
+        }
+
         var json = Get("https://api.live.bilibili.com/room/v1/Danmu/getConf?room_id=" + realRoomId,
             "https://live.bilibili.com/" + realRoomId);
         if (json == null) return null;
@@ -312,6 +448,7 @@ internal static class BilibiliLive
             request.UserAgent = UserAgent;
             request.Referer = referer;
             request.Accept = "application/json, text/plain, */*";
+            if (!string.IsNullOrWhiteSpace(Cookie)) request.Headers["Cookie"] = Cookie;
             request.Timeout = 12000;
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
 
@@ -378,7 +515,16 @@ internal sealed class DanmakuClient : IDisposable
     private volatile bool _reconnectRequested;
 
     /// <summary>会话刷新间隔（秒，0 = 关闭）。B 站弹幕 token 长时间使用后会静默失效，定期换新连接更稳。</summary>
-    public int SessionRefreshSeconds { get; set; } = 90;
+    public int SessionRefreshSeconds { get; set; } = 300;
+
+    /// <summary>调试用：强制优先使用某个弹幕服务器（host 名或完整 wss 地址）。</summary>
+    public string HostOverride { get; set; }
+
+    /// <summary>登录用户的 uid（0 = 游客）。B 站部分房间只给登录用户下发弹幕。</summary>
+    public long Uid { get; set; }
+
+    /// <summary>鉴权用的 protover（2 = zlib，3 = brotli）。</summary>
+    public int ProtoVersion { get; set; } = 3;
     private readonly HashSet<string> _seenCommands = new HashSet<string>(StringComparer.Ordinal);
     public bool IsConnected { get { return _connected; } }
     public int MessageCount { get { return Volatile.Read(ref _messageCount); } }
@@ -505,7 +651,26 @@ internal sealed class DanmakuClient : IDisposable
                 if (ct.IsCancellationRequested) break;
 
                 // 连上过足够久就重置退避，避免长期运行后被一次偶发断线拖成 30 秒
-                if (DateTime.UtcNow - connectedAt > TimeSpan.FromSeconds(60)) backoff = 2;
+                var lifetime = DateTime.UtcNow - connectedAt;
+                if (lifetime > TimeSpan.FromSeconds(60))
+                {
+                    backoff = 2;
+                    _quickCloses = 0;
+                }
+                else if (lifetime < TimeSpan.FromSeconds(5))
+                {
+                    // 秒断：多半是登录态/token 不匹配（或被限流），退避久一点
+                    backoff = Math.Max(backoff, 30);
+
+                    if (!string.IsNullOrEmpty(BilibiliLive.Cookie) && ++_quickCloses >= 3)
+                    {
+                        Logger.Write("danmaku: 登录态连续秒断，临时改用游客连接");
+                        BilibiliLive.Cookie = "";
+                        Uid = 0;
+                        _quickCloses = 0;
+                        backoff = 2;
+                    }
+                }
             }
 
             ReconnectCount++;
@@ -531,7 +696,7 @@ internal sealed class DanmakuClient : IDisposable
         using (var socket = await ConnectAnyAsync(endpoint, ct))
         {
             await socket.SendAsync(
-                new ArraySegment<byte>(DanmakuProtocol.BuildAuthPacket(RoomId, endpoint.Token)),
+                new ArraySegment<byte>(DanmakuProtocol.BuildAuthPacket(RoomId, endpoint.Token, Uid, ProtoVersion)),
                 WebSocketMessageType.Binary, true, ct);
 
             var heartbeat = Task.Run(() => HeartbeatLoopAsync(socket, session.Token));
@@ -602,16 +767,49 @@ internal sealed class DanmakuClient : IDisposable
         }
     }
 
-    private static async Task<ClientWebSocket> ConnectAnyAsync(DanmakuEndpoint endpoint, CancellationToken ct)
+    private int _hostCursor;
+    private int _quickCloses;
+
+    private async Task<ClientWebSocket> ConnectAnyAsync(DanmakuEndpoint endpoint, CancellationToken ct)
     {
         Exception last = null;
 
-        foreach (var url in endpoint.WssHosts)
+        var hosts = new List<string>(endpoint.WssHosts);
+
+        // 每次重连换一个节点开局，避免一直连到不推弹幕的节点
+        if (hosts.Count > 1)
+        {
+            var cursor = _hostCursor++ % hosts.Count;
+            if (cursor > 0)
+            {
+                var rotated = hosts.GetRange(cursor, hosts.Count - cursor);
+                rotated.AddRange(hosts.GetRange(0, cursor));
+                hosts = rotated;
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(HostOverride))
+        {
+            var match = hosts.Find(h => h.IndexOf(HostOverride, StringComparison.OrdinalIgnoreCase) >= 0);
+            if (match != null)
+            {
+                hosts.Remove(match);
+                hosts.Insert(0, match);
+            }
+            else
+            {
+                hosts.Insert(0, HostOverride.StartsWith("wss://", StringComparison.OrdinalIgnoreCase)
+                    ? HostOverride
+                    : "wss://" + HostOverride + ":443/sub");
+            }
+        }
+
+        foreach (var url in hosts)
         {
             // 每个 host 用新 socket：ConnectAsync 失败后同一个实例不能复用
             var socket = new ClientWebSocket();
             try { socket.Options.SetRequestHeader("User-Agent", BilibiliLive.UserAgent); } catch { }
             try { socket.Options.SetRequestHeader("Origin", "https://live.bilibili.com"); } catch { }
+            if (!string.IsNullOrWhiteSpace(BilibiliLive.Cookie) && !BilibiliLive.WsNoCookie) { try { socket.Options.SetRequestHeader("Cookie", BilibiliLive.Cookie); } catch { } }
 
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
@@ -756,12 +954,25 @@ internal sealed class DanmakuClient : IDisposable
                 }
                 else if (packet.Version == 3)
                 {
-                    if (!_brotliWarned)
+                    byte[] inflated;
+                    try
                     {
-                        _brotliWarned = true;
-                        LastError = "服务器返回 brotli 压缩，当前只支持 zlib";
-                        Logger.Write("danmaku: protover 3 (brotli) not supported");
+                        inflated = BrotliSharpLib.Brotli.DecompressBuffer(packet.Body, 0, packet.Body.Length, null);
                     }
+                    catch (Exception ex)
+                    {
+                        if (!_brotliWarned)
+                        {
+                            _brotliWarned = true;
+                            LastError = "brotli 解压失败：" + ex.Message;
+                            Logger.Write("danmaku brotli: " + ex.Message);
+                        }
+                        return;
+                    }
+
+                    var nested = new List<byte>(inflated);
+                    DanmakuPacket inner;
+                    while (DanmakuProtocol.TryTakePacket(nested, out inner)) HandlePacket(inner, depth + 1);
                 }
                 else
                 {

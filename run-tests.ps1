@@ -1,9 +1,13 @@
-# 单元测试：编译源文件 + tests/ 下的测试，跑完用退出码表示结果（0 = 全过）。
+﻿# 单元测试：编译源文件 + tests/ 下的测试，跑完用退出码表示结果（0 = 全过）。
 # 不引测试框架，避免给构建加依赖；直接编译成 exe 跑。
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\toolchain.ps1"
 
 $refs = @(Get-FrameworkRefArgs) + @(Get-WinmdRefArgs)
+$brotli = Join-Path $PSScriptRoot 'src\MusicToppin\lib\BrotliSharpLib.dll'
+$unsafe = Join-Path $PSScriptRoot 'src\MusicToppin\lib\System.Runtime.CompilerServices.Unsafe.dll'
+$refs += '/r:"' + $brotli + '"'
+$refs += '/r:"' + $unsafe + '"'
 $app = Join-Path $PSScriptRoot 'src\MusicToppin'
 $tests = Join-Path $PSScriptRoot 'tests'
 $out = Join-Path $PSScriptRoot '.cache\unit-tests.exe'

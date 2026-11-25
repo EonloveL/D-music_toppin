@@ -5,7 +5,7 @@
 ## 0. 一句话现状
 
 **V1.1.1 已发布（叠加层 / 离屏采集 / 遮挡模式，已合进 main）；V2 已完成 S1（点歌指令 + 队列）、S2（B 站弹幕接入 + 点歌自动播放）、S3-网易云、S4（BV 播放链路）。**
-S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示 + 视频小窗）。剩下 Apple Music（酷狗按需求先移除）。版本号 **1.2.1**。
+S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示 + 视频小窗）。剩下 Apple Music（酷狗按需求先移除）。版本号 **1.2.5**。
 
 ## 1. 仓库与构建
 
@@ -219,7 +219,7 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - 日志：`%TEMP%\musictoppin.log`（`sources:`、`netease client:`、`netease account:`、`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`qq:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
 - 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded` 等）
 - 安装目录：默认 `%LocalAppData%\Programs\MusicToppin`，可自定义
-- 单元测试：`run-tests.ps1`（148 项，不必联网）
+- 单元测试：`run-tests.ps1`（148 项，不必联网；已引用 `src\MusicToppin\lib` 下的 brotli 依赖）
 - 叠加层：托盘开启后日志里有 `overlay server started at http://127.0.0.1:<port>/`，浏览器可直接打开验证
 
 ## 7. 新会话建议的第一次动作

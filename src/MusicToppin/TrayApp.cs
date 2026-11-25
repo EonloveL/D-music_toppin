@@ -1,4 +1,6 @@
+using System.Net;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace MusicToppin;
@@ -57,6 +59,25 @@ internal sealed class TrayApp : ApplicationContext
         QQMusic.Cookie = _settings.QQMusicCookie ?? "";
         QQMusic.Uin = _settings.QQMusicUin ?? "";
         QQMusic.ClientLoggedIn = SourceCheck.IsQQMusicClientLoggedIn();
+        _noBiliLogin = Environment.GetCommandLineArgs().Any(a => a.Equals("--no-bili-login", StringComparison.OrdinalIgnoreCase));
+        BilibiliLive.WsNoCookie = Environment.GetCommandLineArgs().Any(a => a.Equals("--ws-no-cookie", StringComparison.OrdinalIgnoreCase));
+        BilibiliLive.Cookie = _noBiliLogin ? "" : (_settings.BilibiliCookie ?? "");
+        Logger.Write("bilibili cookie: len=" + BilibiliLive.Cookie.Length + " uidSetting=" + (_settings.BilibiliUid ?? ""));
+
+        if (!string.IsNullOrWhiteSpace(_settings.BilibiliCookie) && ParseUid(_settings.BilibiliUid) == 0)
+        {
+            var savedCookie = _settings.BilibiliCookie;
+            Task.Run(() => FetchBilibiliUid(savedCookie)).ContinueWith(task =>
+            {
+                var uid = task.Result;
+                Logger.Write("bilibili uid backfill: " + uid);
+                if (uid <= 0) return;
+
+                _settings.BilibiliUid = uid.ToString();
+                _settings.Save();
+                _ui.Post(_ => { if (_danmaku != null) _danmaku.Uid = uid; }, null);
+            });
+        }
         Logger.Write("sources: netease=" + (Netease.IsLoggedIn ? "logged in" : "guest") +
                      ", qq=" + (QQMusic.IsLoggedIn ? "logged in" : "guest"));
 
@@ -103,6 +124,8 @@ internal sealed class TrayApp : ApplicationContext
         _itemSessionRefresh = BuildSessionRefreshMenu();
         _itemLiveConnect = new ToolStripMenuItem("连接直播间…", null, (_, _) => PromptLiveRoom());
         _itemLiveDisconnect = new ToolStripMenuItem("断开直播间", null, (_, _) => DisconnectLive()) { Enabled = false };
+        _itemBiliLogin = new ToolStripMenuItem("B 站：登录（扫码，弹幕用）…", null, (_, _) => LoginBilibili());
+        _itemBiliLogout = new ToolStripMenuItem("B 站：退出登录", null, (_, _) => LogoutBilibili());
         _itemQueueNext = new ToolStripMenuItem("队列：空", null, (_, _) => StartNextQueuedSong()) { Enabled = false };
         _itemQueueClear = new ToolStripMenuItem("清空点歌队列", null, (_, _) => ClearQueue()) { Enabled = false };
         _itemQueueList = new ToolStripMenuItem("点歌队列：空");
@@ -114,6 +137,8 @@ internal sealed class TrayApp : ApplicationContext
         {
             _itemLiveConnect,
             _itemLiveDisconnect,
+            _itemBiliLogin,
+            _itemBiliLogout,
             new ToolStripSeparator(),
             _liveStatus,
             _itemLiveDiag,
@@ -492,6 +517,9 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemSkipPolicy;
     private ToolStripMenuItem _itemRemovePolicy;
     private ToolStripMenuItem _itemSessionRefresh;
+    private bool _noBiliLogin;
+    private ToolStripMenuItem _itemBiliLogin;
+    private ToolStripMenuItem _itemBiliLogout;
     private ToolStripMenuItem _itemLiveToast;
     private ToolStripMenuItem _itemNeteaseLogin;
     private ToolStripMenuItem _itemNeteaseLogout;
@@ -1378,10 +1406,82 @@ internal sealed class TrayApp : ApplicationContext
         RefreshSourceStatus();
     }
 
+    private static long ParseUid(string text)
+    {
+        long uid;
+        return long.TryParse(text, out uid) ? uid : 0;
+    }
+
+    /// <summary>B 站登录：部分直播间只给登录用户下发弹幕（游客只收到人气包）。</summary>
+    private void LoginBilibili()
+    {
+        using (var form = new WebLoginForm(
+            "登录 B 站（直播间弹幕用）",
+            "https://passport.bilibili.com/login",
+            "https://www.bilibili.com",
+            cookies => cookies.ContainsKey("SESSDATA") && !string.IsNullOrWhiteSpace(cookies["SESSDATA"]),
+            "扫码或用账号登录；登录后弹幕连接会带账号（部分房间只给登录用户下发弹幕）"))
+        {
+            if (form.ShowDialog(_hud) != DialogResult.OK) return;
+
+            var cookie = form.CookieHeader;
+            var uid = FetchBilibiliUid(cookie);
+
+            _settings.BilibiliCookie = cookie;
+            _settings.BilibiliUid = uid.ToString();
+            _settings.Save();
+
+            BilibiliLive.Cookie = cookie;
+            if (_danmaku != null) _danmaku.Uid = uid;
+
+            Logger.Write("bilibili login: uid=" + uid);
+            if (_settings.LiveRoomId > 0) ConnectLive(_settings.LiveRoomId, remember: false);
+        }
+    }
+
+    private static long FetchBilibiliUid(string cookie)
+    {
+        try
+        {
+            var request = (HttpWebRequest)WebRequest.Create("https://api.bilibili.com/x/web-interface/nav");
+            request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+            request.Timeout = 12000;
+            request.ReadWriteTimeout = 12000;
+            if (!string.IsNullOrEmpty(cookie)) request.Headers["Cookie"] = cookie;
+
+            using (var response = (HttpWebResponse)request.GetResponse())
+            using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+            {
+                var root = Json.Parse(reader.ReadToEnd());
+                var data = root != null ? root["data"] : null;
+                if (data == null) return 0;
+
+                // nav 接口返回的是 mid，不是 uid
+                if (data["mid"] != null) return data["mid"].AsLong;
+                return data["uid"] != null ? data["uid"].AsLong : 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("bilibili uid: " + ex.Message);
+            return 0;
+        }
+    }
+
+    private void LogoutBilibili()
+    {
+        _settings.BilibiliCookie = "";
+        _settings.BilibiliUid = "";
+        _settings.Save();
+
+        BilibiliLive.Cookie = "";
+        if (_danmaku != null) _danmaku.Uid = 0;
+        if (_settings.LiveRoomId > 0) ConnectLive(_settings.LiveRoomId, remember: false);
+    }
+
     private void RefreshSourceStatus()
     {
-        if (_neteaseStatus != null)
-        {
+        if (_neteaseStatus != null)        {
             _neteaseStatus.Text = string.IsNullOrWhiteSpace(_settings.NeteaseCookie)
                 ? "网易云：未登录（游客曲库）"
                 : "网易云：已登录" + (string.IsNullOrWhiteSpace(_settings.NeteaseNick) ? "" : " " + _settings.NeteaseNick);
@@ -1477,7 +1577,11 @@ internal sealed class TrayApp : ApplicationContext
         if (_danmaku == null)
         {
             _danmaku = new DanmakuClient();
+            _danmaku.Uid = _noBiliLogin ? 0 : ParseUid(_settings.BilibiliUid);
             _danmaku.SessionRefreshSeconds = _settings.SessionRefreshSeconds;
+            var protoArg = Environment.GetCommandLineArgs().FirstOrDefault(a => a.StartsWith("--protover=", StringComparison.OrdinalIgnoreCase));
+            int proto;
+            if (protoArg != null && int.TryParse(protoArg.Substring("--protover=".Length), out proto)) _danmaku.ProtoVersion = proto;
             _danmaku.Received += OnDanmaku;
             _danmaku.ConnectionChanged += connected => _ui.Post(_ => OnLiveConnectionChanged(connected), null);
             _danmaku.StatusChanged += status =>
