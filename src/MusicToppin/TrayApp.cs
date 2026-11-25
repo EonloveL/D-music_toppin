@@ -268,7 +268,7 @@ internal sealed class TrayApp : ApplicationContext
         if (!string.IsNullOrEmpty(_settings.Anchor) && !_settings.CaptureOffscreen) MoveHudTo(_settings.Anchor);
         if (_settings.Overlay)
         {
-            StartOverlay();
+            StartOverlay(notify: false);
         }
         if (_settings.UpdateCheckOnStart)
         {
@@ -1050,11 +1050,11 @@ internal sealed class TrayApp : ApplicationContext
         _itemOverlay.Checked = _settings.Overlay;
         _settings.Save();
 
-        if (_settings.Overlay) StartOverlay();
+        if (_settings.Overlay) StartOverlay(notify: true);
         else StopOverlay();
     }
 
-    private void StartOverlay()
+    private void StartOverlay(bool notify)
     {
         if (_overlay == null)
         {
@@ -1072,6 +1072,11 @@ internal sealed class TrayApp : ApplicationContext
 
         var url = _overlay.Url;
         try { Clipboard.SetText(url); } catch { }
+        Logger.Write("overlay url: " + url);
+
+        // 启动时自动恢复的叠加层不弹气泡（直播/开机时不想被通知打扰），只在手动开启时提示
+        if (!notify) return;
+
         _tray.ShowBalloonTip(6000, "Music Toppin",
             "叠加层地址已复制：" + url + "\n在 OBS 添加「浏览器源」，粘贴地址，宽 400 高 320。\n现在可以关掉桌面浮窗，观众仍能看到。",
             ToolTipIcon.Info);
