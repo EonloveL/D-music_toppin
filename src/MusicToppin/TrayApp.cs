@@ -163,6 +163,9 @@ internal sealed class TrayApp : ApplicationContext
         var controlsMenu = new ToolStripMenuItem("播放控制");
         controlsMenu.DropDownItems.Add(new ToolStripMenuItem("上一首", null, (_, _) => _ = SkipAsync(previous: true)));
         controlsMenu.DropDownItems.Add(new ToolStripMenuItem("下一首", null, (_, _) => _ = SkipAsync(previous: false)));
+        controlsMenu.DropDownItems.Add(new ToolStripSeparator());
+        _volumeMenu = BuildVolumeMenu();
+        controlsMenu.DropDownItems.Add(_volumeMenu);
 
         _itemHotkey = new ToolStripMenuItem("锁定快捷键：…", null, (_, _) => ShowHotkeyDialog());
 
@@ -452,6 +455,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemQueueClear;
     private ToolStripMenuItem _itemQueueList;
     private ToolStripMenuItem _itemLiveDiag;
+    private ToolStripMenuItem _volumeMenu;
     private ToolStripMenuItem _itemLiveToast;
     private ToolStripMenuItem _itemNeteaseLogin;
     private ToolStripMenuItem _itemNeteaseLogout;
@@ -891,11 +895,69 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (_player == null)
         {
-            _player = new WebView2Player();
+            _player = new WebView2Player { Volume = ClampVolume(_settings.PlayerVolume) / 100f };
             _player.StateChanged += OnOwnPlaybackState;
             _player.Failed += OnPlayerFailed;
         }
         return _player;
+    }
+
+    // ---- 点歌音量 ----
+
+    private ToolStripMenuItem BuildVolumeMenu()
+    {
+        var menu = new ToolStripMenuItem("点歌音量");
+
+        foreach (var percent in new[] { 100, 80, 60, 50, 40, 20, 0 })
+        {
+            var value = percent;
+            var item = new ToolStripMenuItem(percent == 0 ? "静音" : percent + "%", null, (_, _) => SetPlayerVolume(value));
+            item.Tag = percent;
+            menu.DropDownItems.Add(item);
+        }
+
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(new ToolStripMenuItem("自定义…", null, (_, _) =>
+        {
+            using (var dialog = new VolumeDialog(_settings.PlayerVolume, ApplyPlayerVolume, SetPlayerVolume))
+            {
+                dialog.ShowDialog(_hud);
+            }
+        }));
+
+        menu.DropDownOpening += (_, _) => SyncVolumeMenu(menu);
+        return menu;
+    }
+
+    private void SyncVolumeMenu(ToolStripMenuItem menu)
+    {
+        menu.Text = "点歌音量：" + _settings.PlayerVolume + "%";
+
+        foreach (ToolStripItem item in menu.DropDownItems)
+        {
+            var menuItem = item as ToolStripMenuItem;
+            if (menuItem == null || !(menuItem.Tag is int)) continue;
+
+            menuItem.Checked = (int)menuItem.Tag == _settings.PlayerVolume;
+        }
+    }
+
+    private static int ClampVolume(int percent)
+    {
+        return Math.Max(0, Math.Min(100, percent));
+    }
+
+    /// <summary>只改内存并立即生效（拖动滑块时实时听），不写注册表。</summary>
+    private void ApplyPlayerVolume(int percent)
+    {
+        _settings.PlayerVolume = ClampVolume(percent);
+        if (_player != null) _ = _player.SetVolumeAsync(_settings.PlayerVolume / 100f);
+    }
+
+    private void SetPlayerVolume(int percent)
+    {
+        ApplyPlayerVolume(percent);
+        _settings.Save();
     }
 
     private void OnPlayerFailed(string message)

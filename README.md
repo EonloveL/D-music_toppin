@@ -66,6 +66,12 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 - **不写前缀**（`点歌 起风了`）：按登录情况自动选 —— **只登录了一个平台就用它**；都登录了网易云优先、QQ 兜底
 - **两种写法都认**：`点歌 qq 歌名` 和 `qq 歌名`（平台前缀直接开头，可不带「点歌」）
 - 容错：`点歌：起风了`、`点歌，起风了`、`点歌qq 起风了`（少空格）都能识别
+
+| 已登录 | `点歌 歌名` | `wy 歌名` | `qq 歌名` |
+|---|---|---|---|
+| 仅网易云 | 网易云 | 网易云 | QQ（QQ 未登录时多数歌放不了） |
+| 仅 QQ 音乐 | **QQ 音乐** | 网易云（游客曲库） | QQ 音乐 |
+| 两个都登录 | **网易云优先**，失败兜底 QQ | 网易云 | QQ 音乐 |
 - **写前缀**：`点歌 wy …` / `点歌 qq …` 强制指定平台；`点歌 BV…` 走 B 站视频
 - 酷狗按需求先移除（后续要加时再看 [docs/v2-sources.md](docs/v2-sources.md)）
 
@@ -84,6 +90,7 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 
 - 队列：同曲 5 分钟内不重复、同一人 30 秒冷却、最多 20 首、先点先放
 - **同一时间只放一首**：新歌排在当前之后；手动「点歌测试」会先停掉队列播放，不会两路同时出声
+- **点歌音量**：托盘「播放控制 → 点歌音量」可选 100/80/60/50/40/20/静音 + 自定义滑块，默认 **60%**，拖动即时生效并记住（不会动系统音量）
 - 托盘「点歌队列（N 首）」可以展开看前 10 首（序号 · 歌名 · 点歌人），里面还有「下一首 / 清空队列」
 - 第一首自动开播，放完自动下一首；放不了的会提示并跳过，不会卡住
 - HUD 多显示一行「下一首 ↓」，带队列长度；队列空了这行会自动收起（点歌模式才有）
@@ -226,8 +233,8 @@ Uninstall.exe /S                                      静默卸载
 
 | 项目 | 实测（本机 Win11，V2 构建，纯显示模式） |
 |---|---|
-| 安装包 | **390 KB** |
-| 主程序 | **237 KB**（.NET Framework 4.8，系统自带运行时） |
+| 安装包 | **392 KB** |
+| 主程序 | **242 KB**（.NET Framework 4.8，系统自带运行时） |
 | 内存（私有） | **25–33 MB**（点歌播放时才加载 WebView2，约 +160 MB） |
 | 内存（含共享） | 56 MB |
 | CPU | 空闲 **≈0 %**（2 秒轮询；点歌播放时由 WebView2 占用） |
@@ -253,9 +260,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 产物：
 
 ```
-build\app\MusicToppin.exe        237 KB
+build\app\MusicToppin.exe        242 KB
 build\app\Uninstall.exe          15 KB
-build\MusicToppin-Setup.exe      390 KB
+build\MusicToppin-Setup.exe      392 KB
 ```
 
 构建链路：`toolchain.ps1` 定位 Roslyn `csc`（`Microsoft.Net.Compilers.Toolset`）、.NET Framework 4.8 引用程序集、WinRT 元数据（`Microsoft.Windows.SDK.Contracts`）→ 编译主程序（引用 `Windows.Media.winmd` 调 SMTC）→ 编译卸载器 → 打包 payload → 嵌入安装器。
@@ -355,7 +362,7 @@ Uninstall.exe /S                              静默卸载
 
 **接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。
 
-播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 237 KB / 25 MB 的轻量形态。
+播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 242 KB / 25 MB 的轻量形态。
 ## 下一步（V2）
 
 - S3 剩余：Apple Music（只有试听）；酷狗/酷我按需求先不做，见 [docs/v2-sources.md](docs/v2-sources.md)

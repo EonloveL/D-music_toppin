@@ -39,6 +39,9 @@ internal sealed class AppSettings
     /// <summary>点歌/播放时是否弹 Windows 气泡（默认关闭：直播中弹窗会干扰键鼠输入）。</summary>
     public bool LiveToast;
 
+    /// <summary>内置播放器音量（0-100）。默认 60，避免直播时盖过游戏/人声。</summary>
+    public int PlayerVolume = 60;
+
     /// <summary>网易云登录 cookie（MUSIC_U 等；空 = 游客）。</summary>
     public string NeteaseCookie = "";
     public string NeteaseNick = "";
@@ -100,6 +103,7 @@ internal sealed class AppSettings
                 s.LiveRoomId = ReadInt(key, "LiveRoomId", 0);
                 s.LiveAutoConnect = ReadInt(key, "LiveAutoConnect", 1) == 1;
                 s.LiveToast = ReadInt(key, "LiveToast", 0) == 1;
+                s.PlayerVolume = ReadInt(key, "PlayerVolume", 60);
                 s.NeteaseCookie = ReadString(key, "NeteaseCookie", "");
                 s.NeteaseNick = ReadString(key, "NeteaseNick", "");
                 s.QQMusicCookie = ReadString(key, "QQMusicCookie", "");
@@ -180,6 +184,7 @@ internal sealed class AppSettings
                 WriteInt(key, "LiveRoomId", LiveRoomId);
                 WriteInt(key, "LiveAutoConnect", LiveAutoConnect ? 1 : 0);
                 WriteInt(key, "LiveToast", LiveToast ? 1 : 0);
+                WriteInt(key, "PlayerVolume", PlayerVolume);
                 try { key.SetValue("NeteaseCookie", NeteaseCookie ?? "", RegistryValueKind.String); } catch { }
                 try { key.SetValue("NeteaseNick", NeteaseNick ?? "", RegistryValueKind.String); } catch { }
                 try { key.SetValue("QQMusicCookie", QQMusicCookie ?? "", RegistryValueKind.String); } catch { }

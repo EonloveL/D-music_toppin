@@ -26,6 +26,7 @@ internal sealed class WebView2Player : IDisposable
         "function playAudio(u){var a=document.getElementById('a');a.src=u;a.play().catch(function(){});}" +
         "function stopAudio(){var a=document.getElementById('a');a.pause();a.removeAttribute('src');a.load();}" +
         "function seekTo(t){var a=document.getElementById('a');try{a.currentTime=t;}catch(e){}}" +
+        "function setVolume(v){var a=document.getElementById('a');try{a.volume=Math.max(0,Math.min(1,v));}catch(e){}}" +
         "function getState(){var a=document.getElementById('a');return JSON.stringify({t:a.currentTime||0,d:a.duration||0,p:a.paused,e:a.error?a.error.code:0,ended:a.ended});}" +
         "</script></body></html>";
 
@@ -55,6 +56,9 @@ internal sealed class WebView2Player : IDisposable
     {
         get { return _ready; }
     }
+
+    /// <summary>音量 0..1（默认 0.6，直播时别用满音量）。</summary>
+    public float Volume { get; set; } = 0.6f;
 
     public async Task EnsureReadyAsync()
     {
@@ -152,6 +156,7 @@ internal sealed class WebView2Player : IDisposable
         _backupTried = false;
         _failureReported = false;
 
+        await ApplyVolumeAsync();
         await _web.CoreWebView2.ExecuteScriptAsync("playAudio(" + ToJsString(song.AudioUrl) + ")");
         _poll.Start();
     }
@@ -168,6 +173,28 @@ internal sealed class WebView2Player : IDisposable
             if (_ready) await _web.CoreWebView2.ExecuteScriptAsync("stopAudio()");
         }
         catch { }
+    }
+
+    public async Task SetVolumeAsync(float volume)
+    {
+        Volume = Math.Max(0f, Math.Min(1f, volume));
+        await ApplyVolumeAsync();
+    }
+
+    private async Task ApplyVolumeAsync()
+    {
+        if (!_ready) return;
+
+        try
+        {
+            var value = Math.Max(0f, Math.Min(1f, Volume));
+            await _web.CoreWebView2.ExecuteScriptAsync("setVolume(" + value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + ")");
+            Logger.Write("player volume: " + (int)Math.Round(value * 100) + "%");
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("player volume: " + ex.Message);
+        }
     }
 
     public async Task SeekAsync(TimeSpan position)

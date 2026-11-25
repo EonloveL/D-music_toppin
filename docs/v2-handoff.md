@@ -118,6 +118,8 @@ QQ 音乐：点歌 qq 起风了
 - **自动选平台**：`点歌 歌名` 只看「应用内可播」的登录态 —— 只登录一个就用它，都登录网易云优先、QQ 兜底；
   `wy` / `qq` 前缀强制指定；`BV` 永远走 B 站（`SongResolvers.AutoOrder` 有单元测试）
 - **单队列播放**：同一时间只放一首（`_playingFromQueue` + 手动点播先 `StopOwnPlayback`）
+- **点歌音量**：`AppSettings.PlayerVolume`（默认 60），菜单「播放控制 → 点歌音量」预设/滑块；
+  `WebView2Player.Volume` + JS `setVolume()`，拖动即时生效（只改内置播放器，不动系统音量）
 - 完整接口与候选平台（酷狗 / 汽水 / YouTube / Spotify）见 **[docs/v2-sources.md](v2-sources.md)**
 
 > 直播中**默认不弹任何通知**：点歌/连接/播放只写日志 + 更新菜单状态行，避免右下角弹窗干扰键鼠输入判定。
