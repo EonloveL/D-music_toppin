@@ -309,6 +309,19 @@ internal sealed class TrayApp : ApplicationContext
             loginTimer.Start();
         }
 
+        // 调试用：--player-check 打开播放器检查对话框
+        if (Environment.GetCommandLineArgs().Any(a => a.Equals("--player-check", StringComparison.OrdinalIgnoreCase)))
+        {
+            var checkTimer = new System.Windows.Forms.Timer { Interval = 1500 };
+            checkTimer.Tick += (_, _) =>
+            {
+                checkTimer.Stop();
+                checkTimer.Dispose();
+                ShowPlayerCheck();
+            };
+            checkTimer.Start();
+        }
+
         var fakeArguments = Environment.GetCommandLineArgs()
             .Where(a => a.StartsWith("--fake-danmaku=", StringComparison.OrdinalIgnoreCase))
             .Select(a => a.Substring("--fake-danmaku=".Length).Trim())
@@ -1068,10 +1081,10 @@ internal sealed class TrayApp : ApplicationContext
 
     private void ShowPlayerCheck()
     {
-        var text = SourceCheck.Describe();
-        MessageBox.Show(_hud,
-            text + "\n\n网易云的登录状态读自本机官方客户端，只在本机使用，不会上传。",
-            "播放器检查 · Music Toppin", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        using (var form = new PlayerCheckForm())
+        {
+            form.ShowDialog(_hud);
+        }
     }
 
     // ---- 弹幕点歌（S2）----

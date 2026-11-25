@@ -15,7 +15,7 @@ S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「�
 | 分支 | `main` 是唯一开发线（V2 + v1.1.1 已合并）；`fix/v1` 保留为 v1.1.1 发布点 |
 | 最新提交 | 见 `git log -1` |
 | 构建 | `powershell -ExecutionPolicy Bypass -File .\build.ps1`（**不需要 .NET SDK**，首次自动下载工具链到 `.cache\nuget`） |
-| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（110 项，退出码 0 = 全过） |
+| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（124 项，退出码 0 = 全过） |
 | 产物 | `build\MusicToppin-Setup.exe`（约 367 KB）、`build\app\`（主程序 182 KB） |
 | 运行 | 装好后从托盘启动；调试直接跑 `build\app\MusicToppin.exe` |
 
@@ -45,7 +45,7 @@ S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「�
 | `src/MusicToppin/Json.cs` | 零依赖只读 JSON（对象→Dictionary / 数组→List） |
 | `src/MusicToppin/TrayApp.cs` | 「弹幕点歌」菜单：连接/断开、队列状态、自动播放、放不了就跳下一首 |
 | `src/MusicToppin/Settings.cs` | `LiveRoomId`、`LiveAutoConnect`（记住直播间，启动自动重连） |
-| `tests/` | 110 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
+| `tests/` | 124 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
 
 行为要点：
 
@@ -93,7 +93,9 @@ QQ 音乐：点歌 qq 起风了
 | `src/MusicToppin/QQMusic.cs` | QQ 搜索 / vkey / uin 归一化 / 解析（纯函数可测） |
 | `src/MusicToppin/NeteaseClient.cs` | 从官方客户端读登录 cookie（winsqlite3 + DPAPI + AES-GCM） |
 | `src/MusicToppin/WebLoginForm.cs` | 应用内登录窗口（官方登录页 + 自动抓 cookie） |
-| `src/MusicToppin/SourceCheck.cs` | 播放器检查：已安装 / 运行中 / 登录 |
+| `src/MusicToppin/SourceCheck.cs` | 播放器检查：已安装 / 运行中 / 登录（三平台各自的本地信号） |
+| `src/MusicToppin/PlayerCheckForm.cs` | 播放器检查对话框（再次检查 / 启动客户端） |
+| `src/MusicToppin/IniFile.cs` | 极简 ini 读取（QQ 音乐 / 酷狗登录账号） |
 | `src/MusicToppin/SongResolvers.cs` | 按 `SongRequest.Source` 分派：`Auto`/`Netease` → 网易云，`QQ` → QQ 音乐，`Bilibili` → BV |
 | `src/MusicToppin/ResolvedSong.cs` | 各平台统一的「可播放条目」（从 `Bilibili.cs` 拆出来） |
 
@@ -105,6 +107,9 @@ QQ 音乐：点歌 qq 起风了
 - 关键词取搜索前 3 个候选逐个试（搜索第一名常是翻唱）；`id:` 直接查详情
 - 无版权 / 会员歌：`player/url` 返回 `code=404`、`outer/url` 302 到 `music.163.com/404` → null → 队列跳过
 - **QQ 音乐匿名大概率拿不到 purl**（`req_0.code=1000`），少数免费歌可以；登录后正常
+- **播放器检查**（对齐参考工具的 3.1.4）：网易云读 CEF cookie；QQ 音乐读 `ComData\qmcomdata.ini` 的
+  `[SectQMAPI] uin`（0 = 未登录，没有这个文件才退回 `UserData\<QQ号>`）；酷狗读
+  `HKCU\Software\KuGoo3` 的 `LastLoginUserID` 或 `kugou.ini`；没开客户端可直接「启动」，状态可「再次检查」
 - 完整接口与候选平台（酷我 / 酷狗 / 汽水 / YouTube / Spotify）见 **[docs/v2-sources.md](v2-sources.md)**
 
 > 直播中**默认不弹任何通知**：点歌/连接/播放只写日志 + 更新菜单状态行，避免右下角弹窗干扰键鼠输入判定。
@@ -175,6 +180,10 @@ NowPlaying.NextTitle / NextArtist / QueueCount
     必须先复制到 `%TEMP%` 再读。
 17. **QQ 音乐「搜索成功 ≠ 能播」**：匿名时 vkey 返回 `req_0.code=1000` + 空 `purl`，不要只看搜索有结果。
 18. **读客户端 cookie 是敏感操作**：只在本机做、只用于网易云官方请求；README/文档里写明，不要外传或落盘到别处。
+19. **QQ 音乐的登录账号在 `ComData\qmcomdata.ini`**：`[SectQMAPI] uin=0` 表示未登录；文件可能被客户端锁着，
+    用 `File.ReadAllText` 读之前不要复制（直接读一般可以，读不到就退回 `UserData` 账号目录）。
+20. **酷狗的登录标记不统一**：新版读注册表 `HKCU\Software\KuGoo3` 的 `LastLoginUserID`/`UserID`，
+    老版可能在 `%APPDATA%\KuGou8\kugou.ini`；都没有就显示「未知」，别硬说成「未登录」。
 
 ## 6. 调试入口
 
@@ -192,7 +201,7 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - 日志：`%TEMP%\musictoppin.log`（`sources:`、`netease client:`、`netease account:`、`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`qq:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
 - 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded` 等）
 - 安装目录：默认 `%LocalAppData%\Programs\MusicToppin`，可自定义
-- 单元测试：`run-tests.ps1`（110 项，不必联网）
+- 单元测试：`run-tests.ps1`（124 项，不必联网）
 - 叠加层：托盘开启后日志里有 `overlay server started at http://127.0.0.1:<port>/`，浏览器可直接打开验证
 
 ## 7. 新会话建议的第一次动作

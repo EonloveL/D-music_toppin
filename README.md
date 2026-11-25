@@ -67,7 +67,7 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 - **网易云：从官方客户端同步登录（推荐）** —— 只要本机装了网易云客户端并登录过，应用会自动读出登录会话（本机读取，不上传），会员曲也能按你账号的权限放。启动时如果还没登录，会自动尝试一次。
 - **网易云：登录（扫码 / 手机号）…** —— 没装客户端时的备选，应用内打开官方登录页，扫码后自动保存。
 - **QQ 音乐：登录（QQ / 微信扫码）…** —— QQ 音乐未登录时大部分歌只给空地址；登录后正常。
-- **播放器检查…** —— 列出网易云 / QQ 音乐 / 酷狗 的「已安装 / 运行中 / 登录」状态，和参考工具里的检查表一致。
+- **播放器检查…** —— 列出网易云 / QQ 音乐 / 酷狗 的「已安装 / 运行中 / 登录」状态：网易云读客户端会话，QQ 音乐读 `ComData\qmcomdata.ini` 的 `[SectQMAPI] uin`，酷狗读注册表 / `kugou.ini`；没开客户端时可以直接点「启动」，状态不对可以点「再次检查」。
 
 > 各平台取流接口、登录方式和后续候选平台（酷我、酷狗、汽水、YouTube、Spotify）的可行性见 [docs/v2-sources.md](docs/v2-sources.md)。
 
@@ -260,13 +260,15 @@ src/MusicToppin/
   NeteaseClient.cs      从官方客户端同步登录（DPAPI + AES-GCM 读 CEF cookie）
   QQMusic.cs            QQ 音乐取流：搜索 → vkey（需登录）（V2 S3）
   WebLoginForm.cs       应用内登录窗口（官方登录页 + 自动抓 cookie）
-  SourceCheck.cs        播放器检查：已安装 / 运行中 / 登录
+  SourceCheck.cs        播放器检查：已安装 / 运行中 / 登录（三平台各自的本地信号）
+  PlayerCheckForm.cs    播放器检查对话框（再次检查 / 启动客户端）
+  IniFile.cs            极简 ini 读取（QQ 音乐 / 酷狗登录账号）
   ResolvedSong.cs       各平台统一的「可播放条目」
   Json.cs               零依赖只读 JSON 解析
   Bilibili.cs           B 站取流：BV → view / playurl → DASH 音频
   WebView2Player.cs     隐藏 WebView2 音频宿主（Referer 注入、状态轮询）
   PromptDialog.cs       单行输入框
-tests/                  单元测试（110 项：解析/队列/协议/JSON/曲源）
+tests/                  单元测试（124 项：解析/队列/协议/JSON/曲源）
 installer/
   Installer.cs          安装器（静默模式 / 安装中禁止关窗）
   Uninstall.cs          卸载器
@@ -314,7 +316,7 @@ Uninstall.exe /S                              静默卸载
 - ✅ **S5（部分）**：HUD 显示「下一首 + 队列长度」，队列变化实时更新（托盘队列列表 / 弹幕提示还没做）
 - ⏳ Apple Music、S5 展示整合（HUD 下一首/队列预览）
 
-`tests/` 里 **110 项单元测试**覆盖解析、队列、弹幕协议、JSON；`run-tests.ps1` 一键跑（0 = 全过）。
+`tests/` 里 **124 项单元测试**覆盖解析、队列、弹幕协议、JSON；`run-tests.ps1` 一键跑（0 = 全过）。
 
 **接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。
 

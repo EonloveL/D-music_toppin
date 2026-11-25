@@ -30,13 +30,25 @@ internal static class Netease
 
     private static string CookieHeader()
     {
-        return string.IsNullOrWhiteSpace(Cookie) ? GuestCookie : GuestCookie + "; " + Cookie;
+        return CookieHeader(null);
+    }
+
+    private static string CookieHeader(string cookie)
+    {
+        var extra = string.IsNullOrWhiteSpace(cookie) ? Cookie : cookie;
+        return string.IsNullOrWhiteSpace(extra) ? GuestCookie : GuestCookie + "; " + extra;
     }
 
     /// <summary>用当前 cookie 查账号，返回昵称；未登录/失效返回 null。</summary>
     public static string CheckAccount()
     {
-        var json = Get("https://music.163.com/api/nuser/account/get");
+        return CheckAccount(null);
+    }
+
+    /// <summary>用指定 cookie 查账号（播放器检查会用另一份会话试探，不污染全局状态）。</summary>
+    public static string CheckAccount(string cookie)
+    {
+        var json = Get("https://music.163.com/api/nuser/account/get", cookie);
         if (json == null) return null;
 
         var root = SafeParse(json);
@@ -262,7 +274,7 @@ internal static class Netease
         }
     }
 
-    private static string Get(string url)
+    private static string Get(string url, string cookie = null)
     {
         try
         {
@@ -271,7 +283,7 @@ internal static class Netease
             var request = (HttpWebRequest)WebRequest.Create(url);
             request.UserAgent = UserAgent;
             request.Referer = Referer;
-            request.Headers["Cookie"] = CookieHeader();
+            request.Headers["Cookie"] = CookieHeader(cookie);
             request.Accept = "*/*";
             request.Timeout = 12000;
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
