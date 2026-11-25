@@ -9,6 +9,7 @@ namespace MusicToppin.Tests
         {
             RequestTests.Run();
             DanmakuTests.Run();
+            NeteaseTests.Run();
             return TestRun.Summarize();
         }
     }

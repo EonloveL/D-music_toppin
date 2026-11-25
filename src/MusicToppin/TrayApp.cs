@@ -954,7 +954,7 @@ internal sealed class TrayApp : ApplicationContext
             Logger.Write("queue skip: " + label + " " + item.DisplayName);
             LiveNotify("Music Toppin",
                 "这首暂时放不了：" + label + " " + (item.Request != null ? item.Request.Query : "") +
-                "\n目前只接了 B 站 BV 点播（S3 多平台还没做）。",
+                "\n已支持：网易云、B 站 BV；QQ / Apple Music 还没接入。",
                 ToolTipIcon.Warning);
 
             _queue.ClearCurrent();
@@ -993,20 +993,15 @@ internal sealed class TrayApp : ApplicationContext
 
     private async Task<ResolvedSong> ResolveQueuedSongAsync(QueueItem item)
     {
+        if (item == null || item.Request == null) return null;
+
         var request = item.Request;
-        if (request == null || request.Source != SongSource.Bilibili)
+        var song = await Task.Run(() => SongResolvers.Resolve(request));
+        if (song != null)
         {
-            return null;
+            Logger.Write("resolved: " + request.SourceLabel + " " + request.Query + " -> " + song.Title);
         }
-
-        var query = request.Query;
-        if (query.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-        {
-            query = await Task.Run(() => Bilibili.ResolveShortLink(query));
-            if (string.IsNullOrWhiteSpace(query)) return null;
-        }
-
-        return await Task.Run(() => Bilibili.Resolve(query));
+        return song;
     }
 
     private void ClearQueue()

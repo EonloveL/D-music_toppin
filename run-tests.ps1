@@ -17,7 +17,9 @@ $sources = @(
     'SongRequest.cs',
     'RequestQueue.cs',
     'Json.cs',
-    'Danmaku.cs'
+    'ResolvedSong.cs',
+    'Danmaku.cs',
+    'Netease.cs'
 ) | ForEach-Object { Join-Path $app $_ }
 $sources += Get-ChildItem $tests -Filter *.cs -File | ForEach-Object { $_.FullName }
 

@@ -4,18 +4,6 @@ using System.Text.RegularExpressions;
 
 namespace MusicToppin;
 
-/// <summary>解析出来的可播放条目。</summary>
-internal sealed class ResolvedSong
-{
-    public string Title = "";
-    public string Artist = "";
-    public string AudioUrl = "";
-    public string BackupUrl = "";
-    public TimeSpan Duration = TimeSpan.Zero;
-    public string SourceLabel = "B站";
-    public string PageUrl = "";
-}
-
 /// <summary>
 /// B 站取流：view 拿 cid/标题/时长 → playurl(fnval=16) 拿 DASH 音频直链。
 /// 直链有热链保护，播放时必须带 Referer，由播放器注入。

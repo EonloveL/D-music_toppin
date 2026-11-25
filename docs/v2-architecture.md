@@ -137,7 +137,7 @@ internal interface IPlaybackEngine : IDisposable
 |---|---|---|---|
 | **S1（已完成）** | 指令解析 + 队列核心（去重/冷却/上限/顶歌/撤回） | `SongRequest.cs`、`RequestQueue.cs` + 单元测试 | ✅ |
 | **S2（已完成）** | B站弹幕接入：房间握手、心跳、`DANMU_MSG`、断线重连 | `Danmaku.cs`（客户端 + 协议）、`Json.cs`；托盘「弹幕点歌」连接/断开/队列；点歌自动播放 | ✅ |
-| S3 | 曲源解析：网易云（搜索/取流）、QQ、Apple Music、B站 playurl | `ISongResolver` 四个实现，逐个可开关 | 3–6 天 |
+| **S3（网易云已完成）** | 曲源解析：网易云 ✅、B 站 playurl ✅、QQ、Apple Music | `Netease.cs` + `SongResolvers` 分派（`Auto`/`wy` → 网易云，`BV` → B 站）；QQ / Apple 待做 | 进行中 |
 | **S4（已完成）** | 播放引擎：WebView2 音频宿主 + 队列驱动 + 进度回传 | 点歌可以真正出声，HUD 显示自有状态与「下一首」 | ✅ |
 | S5 | 展示与调优：HUD 队列预览、点歌板叠加页、失败提示 | 完整 V2 | 1–2 天 |
 
@@ -197,8 +197,8 @@ view API（拿 cid/标题/时长，无需 cookie）
 
 ## 八、下一步建议
 
-1. S3 从**网易云**开始（参考项目里最成熟、资料最多）：先抽 `ISongResolver` 接口 + `ResolveQueuedSongAsync` 分派
+1. S3 剩余：QQ 音乐 / Apple Music（照着 `Netease.cs` 写，`SongResolvers` 加 case）
 2. S5 再把「下一首/队列」接进 HUD，并把点歌成功/失败做成弹幕提示
-3. 发布前把 `fix/v1`（叠加层、离屏采集）合回 `main`，避免两条线越走越远
+3. 发布前确认版本号（已升到 1.2.0）与 GitHub Release tag 一致
 
-本仓库当前状态：V1 已完整交付；S1（队列核心）、S2（弹幕接入）、S4（BV 播放）已合并进 `main` 并带 79 项单元测试。
+本仓库当前状态：V1.1.1 已发布并合入 main；V2 的 S1（队列）、S2（弹幕）、S3-网易云、S4（BV 播放）已完成，带 94 项单元测试。

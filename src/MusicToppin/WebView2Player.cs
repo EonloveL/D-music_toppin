@@ -134,6 +134,11 @@ internal sealed class WebView2Player : IDisposable
                 e.Request.Headers.SetHeader("Referer", "https://www.bilibili.com");
                 e.Request.Headers.SetHeader("Origin", "https://www.bilibili.com");
             }
+            else if (uri.IndexOf("music.126.net", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                // 网易云 CDN：实测不校验 Referer，但带上更稳
+                e.Request.Headers.SetHeader("Referer", "https://music.163.com/");
+            }
         }
         catch { }
     }
