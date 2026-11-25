@@ -62,6 +62,7 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 - 断线自动重连（2 秒起翻倍，最长 30 秒）；菜单里能看到「直播间 xxx · 弹幕 N 条 · 队列 N 首」
 - 直播间号会记住，下次启动自动重连；「断开直播间」会关掉自动重连
 - 弹幕走**游客身份**，不用登录 B 站账号
+- **默认不弹通知**：点歌/连接/播放状态只写日志和托盘「弹幕点歌」菜单里的状态行，不会在右下角弹窗（直播时弹窗会干扰键鼠输入判定）；想要气泡提示可在菜单底部打开「点歌/播放时弹气泡提示」
 
 > 只认「点歌」开头的弹幕（`点歌姬` 这类词不会误判）。协议细节与排错见 [docs/v2-danmaku.md](docs/v2-danmaku.md)。
 
@@ -179,8 +180,8 @@ Uninstall.exe /S                                      静默卸载
 
 | 项目 | 实测（本机 Win11，V2 构建，纯显示模式） |
 |---|---|
-| 安装包 | **361 KB** |
-| 主程序 | **153 KB**（.NET Framework 4.8，系统自带运行时） |
+| 安装包 | **367 KB** |
+| 主程序 | **182 KB**（.NET Framework 4.8，系统自带运行时） |
 | 内存（私有） | **25–33 MB**（点歌播放时才加载 WebView2，约 +160 MB） |
 | 内存（含共享） | 56 MB |
 | CPU | 空闲 **≈0 %**（2 秒轮询；点歌播放时由 WebView2 占用） |
@@ -206,9 +207,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 产物：
 
 ```
-build\app\MusicToppin.exe        153 KB
+build\app\MusicToppin.exe        182 KB
 build\app\Uninstall.exe          15 KB
-build\MusicToppin-Setup.exe      361 KB
+build\MusicToppin-Setup.exe      367 KB
 ```
 
 构建链路：`toolchain.ps1` 定位 Roslyn `csc`（`Microsoft.Net.Compilers.Toolset`）、.NET Framework 4.8 引用程序集、WinRT 元数据（`Microsoft.Windows.SDK.Contracts`）→ 编译主程序（引用 `Windows.Media.winmd` 调 SMTC）→ 编译卸载器 → 打包 payload → 嵌入安装器。
@@ -224,9 +225,10 @@ src/MusicToppin/
   WindowPlayers.cs      通道②：窗口标题解析（20+ 播放器）+ 媒体键
   AudioSessions.cs      按进程查音频会话状态（Core Audio）
   AudioPeak.cs          默认设备峰值（兜底）
-  HudForm.cs            分层窗口、预乘 alpha、拖拽/穿透、动画
+  HudForm.cs            分层窗口、预乘 alpha、拖拽/穿透、动画、离屏/遮挡采集
   HudRenderer.cs        GDI+ 绘制（主卡 / 灰卡堆叠 / 文字换行 / 进度条）
   HudTheme.cs           配色与透明度
+  OverlayServer.cs      直播叠加层：本地 HTTP + 透明 HTML（OBS 浏览器源）
   WizardForm.cs         首次启动上屏向导
   OpacityDialog.cs      背景透明度滑块
   Settings.cs           设置存 HKCU + 开机自启
@@ -286,7 +288,7 @@ Uninstall.exe /S                              静默卸载
 
 **接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。
 
-播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 153 KB / 25 MB 的轻量形态。
+播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 182 KB / 25 MB 的轻量形态。
 ## 下一步（V2）
 
 - S3：网易云 / QQ / Apple Music 取流，每个源一个 resolver，失败只影响单源
