@@ -146,7 +146,7 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 - 叠加层两个源共用一个端口：`OverlayServer.Start(preferredPort)` 优先上次端口、占用则 4681-4750 往后找，
   成功端口写回 `OverlayPort`；托盘可分别「复制叠加层地址 / 复制视频小窗地址」
 - 至此 S5 完成；剩余是 S3 的 Apple Music（酷狗暂缓）
-## 3. 关键决策与代价
+> **弹幕排查教训**：见 [postmortem-danmaku.md](postmortem-danmaku.md)（brotli / getDanmuInfo(2245) / 登录 uid=mid 三个坑）。\n\n## 3. 关键决策与代价
 
 | 决策 | 原因 | 代价 |
 |---|---|---|

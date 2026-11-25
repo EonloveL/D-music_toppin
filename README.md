@@ -367,7 +367,7 @@ Uninstall.exe /S                              静默卸载
 
 `tests/` 里 **148 项单元测试**覆盖解析、队列、弹幕协议、JSON；`run-tests.ps1` 一键跑（0 = 全过）。
 
-**接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。
+**接手 V2 请先读 [docs/v2-handoff.md](docs/v2-handoff.md)**（现状、文件地图、待办、已知坑、调试入口）。\n\n> 弹幕「连上了但收不到」的完整复盘与排查方法：[docs/postmortem-danmaku.md](docs/postmortem-danmaku.md)
 
 播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 270 KB / 25 MB 的轻量形态（弹幕 brotli 解码库约 +1.3 MB 只在安装包里）。
 ## 下一步（V2）
