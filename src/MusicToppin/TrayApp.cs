@@ -82,6 +82,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _itemWizard = new ToolStripMenuItem("上屏向导…", null, (_, _) => ShowWizard());
         _itemCheckUpdate = new ToolStripMenuItem("检查更新…", null, (_, _) => CheckForUpdates(manual: true));
+        _itemOverlay = new ToolStripMenuItem("直播叠加层（OBS 浏览器源）", null, (_, _) => ToggleOverlay()) { Checked = _settings.Overlay };
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -118,6 +119,7 @@ internal sealed class TrayApp : ApplicationContext
             positionMenu,
             _itemWizard,
             _itemCheckUpdate,
+            _itemOverlay,
             _itemAutoStart,
             new ToolStripSeparator(),
             new ToolStripMenuItem("退出", null, (_, _) => ExitApp())
@@ -174,6 +176,10 @@ internal sealed class TrayApp : ApplicationContext
 
         // 启动时按保存的锚点重新贴边（屏幕分辨率/缩放变化后也能回到正确位置）
         if (!string.IsNullOrEmpty(_settings.Anchor)) MoveHudTo(_settings.Anchor);
+        if (_settings.Overlay)
+        {
+            StartOverlay();
+        }
         if (_settings.UpdateCheckOnStart)
         {
             var updateTimer = new System.Windows.Forms.Timer { Interval = 3200 };
@@ -220,6 +226,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemHotkey;
     private ToolStripMenuItem _itemWizard;
     private ToolStripMenuItem _itemCheckUpdate;
+    private ToolStripMenuItem _itemOverlay;
     private ToolStripMenuItem _colorMenu;
     private ToolStripMenuItem _itemAccentColor;
     private ToolStripMenuItem _itemTitleColor;
@@ -227,6 +234,7 @@ internal sealed class TrayApp : ApplicationContext
     private bool _wizardOpen;
     private bool _updateDialogOpen;
     private bool _checkingUpdate;
+    private OverlayServer _overlay;
     private DateTime _lastLockToggleUtc = DateTime.MinValue;
     private string _anchor = "";
     private bool _reanchoring;
@@ -515,6 +523,74 @@ internal sealed class TrayApp : ApplicationContext
         {
             _updateDialogOpen = false;
         }
+    }
+    private OverlayState BuildOverlayState()
+    {
+        var np = _latest;
+        var theme = HudRenderer.Theme;
+
+        return new OverlayState
+        {
+            Title = np.HasSession ? np.Title : "",
+            Artist = np.HasSession ? np.Artist : "",
+            Playing = np.Playing,
+            Position = np.Position.TotalSeconds,
+            Duration = np.Duration.TotalSeconds,
+            HasTimeline = np.HasTimeline && np.Duration > TimeSpan.Zero,
+            PrevTitle = np.PrevTitles != null && np.PrevTitles.Length > 0 ? (np.PrevTitles[0] ?? "") : "",
+            PrevArtist = np.PrevArtists != null && np.PrevArtists.Length > 0 ? (np.PrevArtists[0] ?? "") : "",
+            Accent = ToHex(theme.Accent),
+            TitleColor = ToHex(theme.Title),
+            ArtistColor = ToHex(theme.Artist),
+            Opacity = Math.Max(0.05f, Math.Min(1f, _settings.CardOpacity / 100f)),
+            Show = np.HasSession && np.Title.Length > 0 && _hud.Visible || (np.HasSession && np.Title.Length > 0 && _settings.Overlay)
+        };
+    }
+
+    private static string ToHex(Color color)
+    {
+        return "#" + color.R.ToString("X2") + color.G.ToString("X2") + color.B.ToString("X2");
+    }
+
+    private void ToggleOverlay()
+    {
+        _settings.Overlay = !_settings.Overlay;
+        _itemOverlay.Checked = _settings.Overlay;
+        _settings.Save();
+
+        if (_settings.Overlay) StartOverlay();
+        else StopOverlay();
+    }
+
+    private void StartOverlay()
+    {
+        if (_overlay == null)
+        {
+            _overlay = new OverlayServer(BuildOverlayState);
+        }
+
+        if (!_overlay.Start())
+        {
+            _settings.Overlay = false;
+            _itemOverlay.Checked = false;
+            _settings.Save();
+            _tray.ShowBalloonTip(3000, "Music Toppin", "启动叠加层失败：端口 4681-4710 都被占用", ToolTipIcon.Warning);
+            return;
+        }
+
+        var url = _overlay.Url;
+        try { Clipboard.SetText(url); } catch { }
+        _tray.ShowBalloonTip(6000, "Music Toppin",
+            "叠加层地址已复制：" + url + "\n在 OBS 添加「浏览器源」，粘贴地址，宽 400 高 320。\n现在可以关掉桌面浮窗，观众仍能看到。",
+            ToolTipIcon.Info);
+    }
+
+    private void StopOverlay()
+    {
+        if (_overlay == null) return;
+        _overlay.Dispose();
+        _overlay = null;
+        Logger.Write("overlay server stopped");
     }
     private void ShowWizard()
     {
@@ -964,6 +1040,7 @@ internal sealed class TrayApp : ApplicationContext
             _demoTimer?.Dispose();
             ReleaseHotkeys();
             _service?.Dispose();
+            StopOverlay();
 
             foreach (Form form in Application.OpenForms)
             {

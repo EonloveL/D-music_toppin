@@ -29,6 +29,9 @@ internal sealed class AppSettings
 
     /// <summary>启动时是否自动检查更新。</summary>
     public bool UpdateCheckOnStart = true;
+
+    /// <summary>是否开启浏览器源叠加层（给 OBS 用，桌面浮窗可以隐藏）。</summary>
+    public bool Overlay;
     public int Schema;
 
     // 颜色（ARGB），默认值与设计稿一致
@@ -70,6 +73,7 @@ internal sealed class AppSettings
                 s.WizardShown = ReadInt(key, "WizardShown", 0) == 1;
                 s.UpdateUrl = ReadString(key, "UpdateUrl", "");
                 s.UpdateCheckOnStart = ReadInt(key, "UpdateCheckOnStart", 1) == 1;
+                s.Overlay = ReadInt(key, "Overlay", 0) == 1;
                 s.Schema = ReadInt(key, "Schema", 0);
                 s.AccentColor = ReadInt(key, "AccentColor", unchecked((int)0xFFFF3B30));
                 s.TitleColor = ReadInt(key, "TitleColor", unchecked((int)0xFFF5F8FC));
@@ -139,6 +143,7 @@ internal sealed class AppSettings
                 try { key.SetValue("Hotkey", Hotkey ?? "", RegistryValueKind.String); } catch { }
                 WriteInt(key, "WizardShown", WizardShown ? 1 : 0);
                 WriteInt(key, "UpdateCheckOnStart", UpdateCheckOnStart ? 1 : 0);
+                WriteInt(key, "Overlay", Overlay ? 1 : 0);
                 try { key.SetValue("UpdateUrl", UpdateUrl ?? "", RegistryValueKind.String); } catch { }
                 WriteInt(key, "Schema", CurrentSchema);
                 WriteInt(key, "AccentColor", AccentColor);
