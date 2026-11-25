@@ -158,42 +158,19 @@ internal static class NeteaseClient
     private static Dictionary<string, string> ReadCookies(string dbPath, byte[] key)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!NativeSqlite.Available) return null;
+        if (!Sqlite.Available) return null;
 
-        IntPtr db;
-        if (NativeSqlite.Open(dbPath, out db) != 0) return null;
+        var rows = Sqlite.Query(dbPath,
+            "SELECT name, encrypted_value, value FROM cookies WHERE host_key LIKE '%music.163.com%'", blobColumn: 1);
 
-        try
+        foreach (var row in rows)
         {
-            IntPtr stmt;
-            const string sql = "SELECT name, encrypted_value, value FROM cookies WHERE host_key LIKE '%music.163.com%'";
-            if (NativeSqlite.Prepare(db, sql, out stmt) != 0) return null;
+            var name = row.Text.Length > 0 ? row.Text[0] : null;
+            if (string.IsNullOrEmpty(name)) continue;
 
-            try
-            {
-                while (NativeSqlite.Step(stmt) == 100)
-                {
-                    var name = NativeSqlite.ColumnText(stmt, 0);
-                    if (string.IsNullOrEmpty(name)) continue;
-
-                    var length = NativeSqlite.ColumnBytes(stmt, 1);
-                    var blob = NativeSqlite.ColumnBlob(stmt, 1, length);
-
-                    string value = null;
-                    if (blob != null && blob.Length > 0) value = AesGcmDecrypt(key, blob);
-                    if (string.IsNullOrEmpty(value)) value = NativeSqlite.ColumnText(stmt, 2);
-
-                    if (!string.IsNullOrEmpty(value)) result[name] = value;
-                }
-            }
-            finally
-            {
-                NativeSqlite.Finalize(stmt);
-            }
-        }
-        finally
-        {
-            NativeSqlite.Close(db);
+            var value = row.Blob != null && row.Blob.Length > 0 ? AesGcmDecrypt(key, row.Blob) : null;
+            if (string.IsNullOrEmpty(value) && row.Text.Length > 2) value = row.Text[2];
+            if (!string.IsNullOrEmpty(value)) result[name] = value;
         }
 
         return result;
@@ -353,90 +330,4 @@ internal static class NeteaseClient
         }
     }
 
-    /// <summary>系统自带的 SQLite（Windows 10/11 的 winsqlite3.dll），不用额外带 SQLite 依赖。</summary>
-    private static class NativeSqlite
-    {
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int sqlite3_open_v2(byte[] filename, out IntPtr db, int flags, IntPtr vfs);
-
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int sqlite3_prepare_v2(IntPtr db, byte[] sql, int nByte, out IntPtr stmt, IntPtr tail);
-
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int sqlite3_step(IntPtr stmt);
-
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr sqlite3_column_text(IntPtr stmt, int col);
-
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern IntPtr sqlite3_column_blob(IntPtr stmt, int col);
-
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int sqlite3_column_bytes(IntPtr stmt, int col);
-
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int sqlite3_finalize(IntPtr stmt);
-
-        [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int sqlite3_close(IntPtr db);
-
-        private static bool? _available;
-
-        public static bool Available
-        {
-            get
-            {
-                if (_available.HasValue) return _available.Value;
-                try
-                {
-                    var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "winsqlite3.dll");
-                    _available = File.Exists(path);
-                }
-                catch { _available = false; }
-                return _available.Value;
-            }
-        }
-
-        public static int Open(string path, out IntPtr db)
-        {
-            return sqlite3_open_v2(ToUtf8(path), out db, 1, IntPtr.Zero);
-        }
-
-        public static int Prepare(IntPtr db, string sql, out IntPtr stmt)
-        {
-            return sqlite3_prepare_v2(db, ToUtf8(sql), -1, out stmt, IntPtr.Zero);
-        }
-
-        public static int Step(IntPtr stmt) { return sqlite3_step(stmt); }
-
-        public static void Finalize(IntPtr stmt) { sqlite3_finalize(stmt); }
-
-        public static void Close(IntPtr db) { sqlite3_close(db); }
-
-        public static string ColumnText(IntPtr stmt, int col)
-        {
-            var ptr = sqlite3_column_text(stmt, col);
-            return ptr == IntPtr.Zero ? null : Marshal.PtrToStringAnsi(ptr);
-        }
-
-        public static byte[] ColumnBlob(IntPtr stmt, int col, int length)
-        {
-            if (length <= 0) return null;
-            var ptr = sqlite3_column_blob(stmt, col);
-            if (ptr == IntPtr.Zero) return null;
-            var bytes = new byte[length];
-            Marshal.Copy(ptr, bytes, 0, length);
-            return bytes;
-        }
-
-        public static int ColumnBytes(IntPtr stmt, int col) { return sqlite3_column_bytes(stmt, col); }
-
-        private static byte[] ToUtf8(string text)
-        {
-            var bytes = Encoding.UTF8.GetBytes(text);
-            var zero = new byte[bytes.Length + 1];
-            Buffer.BlockCopy(bytes, 0, zero, 0, bytes.Length);
-            return zero;
-        }
-    }
 }

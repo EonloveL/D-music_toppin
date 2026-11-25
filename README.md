@@ -67,7 +67,7 @@ Windows 的 SMTC 只暴露**当前**媒体项，协议里没有队列；第三�
 - **网易云：从官方客户端同步登录（推荐）** —— 只要本机装了网易云客户端并登录过，应用会自动读出登录会话（本机读取，不上传），会员曲也能按你账号的权限放。启动时如果还没登录，会自动尝试一次。
 - **网易云：登录（扫码 / 手机号）…** —— 没装客户端时的备选，应用内打开官方登录页，扫码后自动保存。
 - **QQ 音乐：登录（QQ / 微信扫码）…** —— QQ 音乐未登录时大部分歌只给空地址；登录后正常。
-- **播放器检查…** —— 列出网易云 / QQ 音乐 / 酷狗 的「已安装 / 运行中 / 登录」状态：网易云读客户端会话，QQ 音乐读 `ComData\qmcomdata.ini` 的 `[SectQMAPI] uin`，酷狗读注册表 / `kugou.ini`；没开客户端时可以直接点「启动」，状态不对可以点「再次检查」。
+- **播放器检查…** —— 列出网易云 / QQ 音乐 / 酷狗 的「已安装 / 运行中 / 登录」状态：网易云读客户端会话，QQ 音乐读内嵌 chromium 的 cookie（`pt2gguin`，兼容 `qmcomdata.ini`），酷狗读注册表 / `kugou.ini`；没开客户端时可以直接点「启动」，状态不对可以点「再次检查」。
 
 > 各平台取流接口、登录方式和后续候选平台（酷我、酷狗、汽水、YouTube、Spotify）的可行性见 [docs/v2-sources.md](docs/v2-sources.md)。
 
@@ -263,6 +263,7 @@ src/MusicToppin/
   SourceCheck.cs        播放器检查：已安装 / 运行中 / 登录（三平台各自的本地信号）
   PlayerCheckForm.cs    播放器检查对话框（再次检查 / 启动客户端）
   IniFile.cs            极简 ini 读取（QQ 音乐 / 酷狗登录账号）
+  Sqlite.cs             只读 SQLite（winsqlite3.dll，读客户端 cookie 库）
   ResolvedSong.cs       各平台统一的「可播放条目」
   Json.cs               零依赖只读 JSON 解析
   Bilibili.cs           B 站取流：BV → view / playurl → DASH 音频

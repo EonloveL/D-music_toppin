@@ -107,9 +107,10 @@ QQ 音乐：点歌 qq 起风了
 - 关键词取搜索前 3 个候选逐个试（搜索第一名常是翻唱）；`id:` 直接查详情
 - 无版权 / 会员歌：`player/url` 返回 `code=404`、`outer/url` 302 到 `music.163.com/404` → null → 队列跳过
 - **QQ 音乐匿名大概率拿不到 purl**（`req_0.code=1000`），少数免费歌可以；登录后正常
-- **播放器检查**（对齐参考工具的 3.1.4）：网易云读 CEF cookie；QQ 音乐读 `ComData\qmcomdata.ini` 的
-  `[SectQMAPI] uin`（0 = 未登录，没有这个文件才退回 `UserData\<QQ号>`）；酷狗读
-  `HKCU\Software\KuGoo3` 的 `LastLoginUserID` 或 `kugou.ini`；没开客户端可直接「启动」，状态可「再次检查」
+- **播放器检查**（对齐参考工具的 3.1.4）：网易云读 CEF cookie（MUSIC_U）；QQ 音乐读内嵌 chromium 的
+  `QQMusicCache\WebkitCache\*\Cookies` 里的 `pt2gguin`（值形如 `o1305835491`，也认 `uin` / `qm_keyst`），
+  `ComData\qmcomdata.ini` 的 `[SectQMAPI] uin` 只作辅助（实测登录后它仍是 0，不能单靠它）；
+  酷狗读 `HKCU\Software\KuGoo3` 的 `LastLoginUserID` 或 `kugou.ini`；没开客户端可直接「启动」，状态可「再次检查」
 - 完整接口与候选平台（酷我 / 酷狗 / 汽水 / YouTube / Spotify）见 **[docs/v2-sources.md](v2-sources.md)**
 
 > 直播中**默认不弹任何通知**：点歌/连接/播放只写日志 + 更新菜单状态行，避免右下角弹窗干扰键鼠输入判定。
@@ -180,8 +181,9 @@ NowPlaying.NextTitle / NextArtist / QueueCount
     必须先复制到 `%TEMP%` 再读。
 17. **QQ 音乐「搜索成功 ≠ 能播」**：匿名时 vkey 返回 `req_0.code=1000` + 空 `purl`，不要只看搜索有结果。
 18. **读客户端 cookie 是敏感操作**：只在本机做、只用于网易云官方请求；README/文档里写明，不要外传或落盘到别处。
-19. **QQ 音乐的登录账号在 `ComData\qmcomdata.ini`**：`[SectQMAPI] uin=0` 表示未登录；文件可能被客户端锁着，
-    用 `File.ReadAllText` 读之前不要复制（直接读一般可以，读不到就退回 `UserData` 账号目录）。
+19. **QQ 音乐的登录态不在 `qmcomdata.ini` 里**：`[SectQMAPI] uin` 实测登录后仍是 0（它是 QMAPI 插件的字段）。
+    真正的账号在 `QQMusicCache\WebkitCache\*\Cookies`（SQLite）的 `pt2gguin=o<QQ号>`；文件被 qmbrowser 锁着，
+    要复制到 temp 再用 winsqlite3 读。
 20. **酷狗的登录标记不统一**：新版读注册表 `HKCU\Software\KuGoo3` 的 `LastLoginUserID`/`UserID`，
     老版可能在 `%APPDATA%\KuGou8\kugou.ini`；都没有就显示「未知」，别硬说成「未登录」。
 

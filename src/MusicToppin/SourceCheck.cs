@@ -116,10 +116,68 @@ internal static class SourceCheck
             return status;
         }
 
-        // 老版本没有 qmcomdata.ini，退回按账号目录判断
+        // 内嵌 Chromium 的 cookie 库里存着 QQ 登录态（pt2gguin=o<QQ号>）
+        var cookieAccount = FindQQMusicAccountFromCookies(dataDir);
+        if (cookieAccount.Length > 0)
+        {
+            status.LoginText = cookieAccount == "-" ? "已登录" : "已登录（账号 " + cookieAccount + "）";
+            return status;
+        }
+
+        // 老版本没有 cookie 库时，退回按账号目录判断
         var account = FindQQMusicAccount(dataDir);
         status.LoginText = account.Length > 0 ? "已登录（账号 " + account + "）" : "未登录";
         return status;
+    }
+
+    /// <summary>QQ 音乐的 qmbrowser（CEF）把登录 cookie 存在 WebkitCache\*\Cookies。
+    /// 有 pt2gguin（值形如 o123456）或 uin / qm_keyst 就算登录。</summary>
+    private static string FindQQMusicAccountFromCookies(string dataDir)
+    {
+        try
+        {
+            var cacheRoot = Path.Combine(dataDir, "QQMusicCache", "WebkitCache");
+            if (!Directory.Exists(cacheRoot)) return "";
+
+            foreach (var profile in Directory.GetDirectories(cacheRoot))
+            {
+                var cookiesPath = Path.Combine(profile, "Cookies");
+                if (!File.Exists(cookiesPath)) continue;
+
+                var temp = Path.Combine(Path.GetTempPath(), "musictoppin-qqmusic-cookies.db");
+                try { File.Copy(cookiesPath, temp, true); }
+                catch { continue; }
+
+                var rows = Sqlite.Query(temp, "SELECT name, value FROM cookies");
+                try { File.Delete(temp); } catch { }
+
+                var uin = "";
+                var hasKey = false;
+
+                foreach (var row in rows)
+                {
+                    if (row.Text.Length < 2) continue;
+                    var name = row.Text[0] ?? "";
+                    var value = row.Text[1] ?? "";
+                    if (value.Length == 0) continue;
+
+                    if (name == "pt2gguin" || name == "uin" || name == "p_uin")
+                    {
+                        var normalized = QQMusic.NormalizeUin(value);
+                        if (normalized.Length > 0 && normalized != "0") uin = normalized;
+                    }
+                    else if (name == "qm_keyst" || name == "qqmusic_key") hasKey = true;
+                }
+
+                if (uin.Length > 0) return uin;
+                if (hasKey) return "-";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("sourcecheck qq cookies: " + ex.Message);
+        }
+        return "";
     }
 
     /// <summary>QQ 音乐按 QQ 号建用户目录：UserData\&lt;QQ号&gt;\…，有就是登录过。</summary>

@@ -33,7 +33,7 @@ MUSIC_U / __csrf / NMTID  → 直接当请求 cookie
 | 平台 | 检测方式 | 说明 |
 |---|---|---|
 | 网易云 | 客户端 CEF cookie 解密（`winsqlite3` + DPAPI + AES-GCM） | 能直接拿到会话，还能顺便用来播放 |
-| QQ 音乐 | `%APPDATA%\Tencent\QQMusic\ComData\qmcomdata.ini` → `[SectQMAPI] uin` | `0` = 未登录；文件没有时退回 `UserData\<QQ号>` 目录 |
+| QQ 音乐 | 内嵌 chromium：`QQMusicCache\WebkitCache\*\Cookies` 里的 `pt2gguin`（`o<QQ号>`） | 也认 `uin` / `qm_keyst`；`ComData\qmcomdata.ini` 的 `[SectQMAPI] uin` 实测登录后仍为 0，只作辅助 |
 | 酷狗 | 注册表 `HKCU\Software\KuGoo3`（`LastLoginUserID`/`UserID`）或 `kugou.ini` | 都找不到时显示「未知」 |
 
 对话框还会显示「已安装 / 运行中」，没开的客户端可以直接点「启动」。
