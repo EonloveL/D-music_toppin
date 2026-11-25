@@ -1498,6 +1498,8 @@ internal sealed class TrayApp : ApplicationContext
             Running = client != null && client.IsRunning,
             MessageCount = client != null ? client.MessageCount : 0,
             LastMessageUtc = client != null ? client.LastMessageUtc : DateTime.MinValue,
+            LastPacketUtc = client != null ? client.LastPacketUtc : DateTime.MinValue,
+            PacketCount = client != null ? client.PacketCount : 0,
             LastError = client != null ? client.LastError : "",
             LastRequestResult = _lastRequestResult,
             Recent = new List<string>(_recentDanmaku)

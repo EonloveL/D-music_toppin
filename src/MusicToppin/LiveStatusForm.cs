@@ -11,6 +11,8 @@ internal sealed class LiveStatusSnapshot
     public DateTime LastMessageUtc;
     public string LastError = "";
     public string LastRequestResult = "";
+    public DateTime LastPacketUtc;
+    public int PacketCount;
     public List<string> Recent = new List<string>();
 }
 
@@ -32,6 +34,7 @@ internal sealed class LiveStatusForm : Form
     private readonly Label _last;
     private readonly Label _error;
     private readonly Label _request;
+    private readonly Label _packet;
     private readonly ListBox _recent;
 
     private int _lastRecentCount = -1;
@@ -44,7 +47,7 @@ internal sealed class LiveStatusForm : Form
         _testPlay = testPlay;
 
         Text = "直播间状态 · Music Toppin";
-        ClientSize = new Size(560, 508);
+        ClientSize = new Size(560, 512);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -61,11 +64,12 @@ internal sealed class LiveStatusForm : Form
         _error = AddRow("最近错误", 5);
         _error.ForeColor = Color.FromArgb(176, 88, 60);
         _request = AddRow("最近点歌", 6);
+        _packet = AddRow("最后收包", 7);
 
         var recentLabel = new Label
         {
             Text = "最近弹幕（最新 12 条，含没解析成点歌的）",
-            Location = new Point(20, 248),
+            Location = new Point(20, 272),
             Size = new Size(480, 20),
             ForeColor = Color.FromArgb(120, 126, 138)
         };
@@ -73,8 +77,8 @@ internal sealed class LiveStatusForm : Form
 
         _recent = new ListBox
         {
-            Location = new Point(20, 270),
-            Size = new Size(520, 140),
+            Location = new Point(20, 294),
+            Size = new Size(520, 130),
             Font = new Font("Microsoft YaHei UI", 8.5f),
             BorderStyle = BorderStyle.FixedSingle,
             IntegralHeight = false
@@ -85,7 +89,7 @@ internal sealed class LiveStatusForm : Form
         {
             Text = "没收到弹幕 → 看「开播状态」和「弹幕连接」；收到了但没入队 → 看「最近点歌」的解析结果。\n" +
                    "「测试点歌」会在本地模拟发一条「点歌 起风了」，用来单独验证播放链路。",
-            Location = new Point(20, 418),
+            Location = new Point(20, 432),
             Size = new Size(520, 34),
             ForeColor = Color.FromArgb(120, 126, 138)
         };
@@ -94,7 +98,7 @@ internal sealed class LiveStatusForm : Form
         var test = new Button
         {
             Text = "测试点歌",
-            Location = new Point(196, 460),
+            Location = new Point(196, 470),
             Size = new Size(96, 30),
             FlatStyle = FlatStyle.System
         };
@@ -103,7 +107,7 @@ internal sealed class LiveStatusForm : Form
         var reconnectButton = new Button
         {
             Text = "重新连接",
-            Location = new Point(300, 460),
+            Location = new Point(300, 470),
             Size = new Size(96, 30),
             FlatStyle = FlatStyle.System
         };
@@ -112,7 +116,7 @@ internal sealed class LiveStatusForm : Form
         var close = new Button
         {
             Text = "关闭",
-            Location = new Point(404, 460),
+            Location = new Point(404, 470),
             Size = new Size(96, 30),
             FlatStyle = FlatStyle.System,
             DialogResult = DialogResult.Cancel
@@ -177,6 +181,16 @@ internal sealed class LiveStatusForm : Form
 
         _error.Text = string.IsNullOrWhiteSpace(s.LastError) ? "无" : s.LastError;
         _request.Text = string.IsNullOrWhiteSpace(s.LastRequestResult) ? "还没收到点歌" : s.LastRequestResult;
+
+        if (s.LastPacketUtc == DateTime.MinValue)
+        {
+            _packet.Text = "还没收到过";
+        }
+        else
+        {
+            var age = Math.Max(0, (int)(DateTime.UtcNow - s.LastPacketUtc).TotalSeconds);
+            _packet.Text = s.LastPacketUtc.ToLocalTime().ToString("HH:mm:ss") + "（" + age + " 秒前）· 共 " + s.PacketCount + " 个包";
+        }
 
         // 最近弹幕：只在变化时重建，避免每秒闪
         if (s.Recent.Count != _lastRecentCount)

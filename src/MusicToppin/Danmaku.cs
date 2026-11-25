@@ -370,6 +370,12 @@ internal sealed class DanmakuClient : IDisposable
 
     /// <summary>最后收到任意协议包的时间（用来判断半开连接）。</summary>
     public DateTime LastPacketUtc { get; private set; }
+
+    /// <summary>收到的协议包总数（心跳/popularity 也算）。</summary>
+    public int PacketCount { get { return Volatile.Read(ref _packetCount); } }
+
+    private int _packetCount;
+    private readonly HashSet<string> _seenCommands = new HashSet<string>(StringComparer.Ordinal);
     public bool IsConnected { get { return _connected; } }
     public int MessageCount { get { return Volatile.Read(ref _messageCount); } }
     private int _generation;
@@ -559,6 +565,7 @@ internal sealed class DanmakuClient : IDisposable
                     if (result.Count <= 0) continue;
 
                     LastPacketUtc = DateTime.UtcNow;
+                    Interlocked.Increment(ref _packetCount);
                     for (var i = 0; i < result.Count; i++) pending.Add(buffer[i]);
 
                     DanmakuPacket packet;
@@ -731,7 +738,6 @@ internal sealed class DanmakuClient : IDisposable
         if (body == null || body.Length == 0) return;
 
         var text = Encoding.UTF8.GetString(body);
-        if (text.IndexOf("DANMU_MSG", StringComparison.Ordinal) < 0) return;
 
         JsonValue root;
         try
@@ -745,7 +751,16 @@ internal sealed class DanmakuClient : IDisposable
         }
 
         var message = DanmakuProtocol.ParseDanmaku(root);
-        if (message == null) return;
+        if (message == null)
+        {
+            // 记录出现过的命令类型，排查「连上了但收不到弹幕」
+            var cmd = root != null && root["cmd"] != null ? root["cmd"].AsString : "";
+            if (!string.IsNullOrEmpty(cmd) && _seenCommands.Add(cmd))
+            {
+                Logger.Write("danmaku cmd: " + cmd);
+            }
+            return;
+        }
 
         LastMessageUtc = DateTime.UtcNow;
         Interlocked.Increment(ref _messageCount);
