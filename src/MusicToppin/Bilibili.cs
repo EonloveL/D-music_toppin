@@ -261,6 +261,7 @@ internal static class Bilibili
             request.Timeout = 15000;
             request.ReadWriteTimeout = 12000;
             request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            if (!string.IsNullOrWhiteSpace(BilibiliLive.Cookie)) request.Headers["Cookie"] = BilibiliLive.Cookie;
 
             using (var response = (HttpWebResponse)request.GetResponse())
             using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))

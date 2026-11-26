@@ -160,22 +160,6 @@ internal static class Updater
                 }
             }
 
-            if (chosen == null)
-            {
-                // 兼容旧命名：只接受 .exe，绝不把 SHA256SUMS.txt 当安装包
-                for (var i = 0; i < assets.Count; i++)
-                {
-                    var asset = assets[i];
-                    if (asset == null) continue;
-                    var name = asset["name"] != null ? (asset["name"].AsString ?? "") : "";
-                    if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                    {
-                        chosen = asset;
-                        break;
-                    }
-                }
-            }
-
             if (chosen == null) return null;
 
             var url = chosen["browser_download_url"] != null ? (chosen["browser_download_url"].AsString ?? "") : "";
@@ -306,23 +290,7 @@ internal static class Updater
         }
     }
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint GetShortPathName(string longPath, StringBuilder shortPath, uint size);
-
-    private static string ShortPath(string path)
-    {
-        if (string.IsNullOrEmpty(path)) return "";
-        try
-        {
-            var buffer = new StringBuilder(4096);
-            var length = GetShortPathName(path, buffer, (uint)buffer.Capacity);
-            return length > 0 && length < buffer.Capacity ? buffer.ToString() : path;
-        }
-        catch
-        {
-            return path;
-        }
-    }
+    // ---- 结束 ----
 
     /// <summary>
     /// 用一个延迟批处理完成「等本进程退出 → 静默安装 → 重新拉起」。
@@ -335,27 +303,22 @@ internal static class Updater
         var exePath = Path.Combine(installDir, "MusicToppin.exe");
         var script = Path.Combine(Path.GetTempPath(), "musictoppin-update.cmd");
 
-        // cmd 批处理按 ANSI 读取路径；含中文/emoji 的路径取 8.3 短路径，取不到就退回原路径
-        var setupArg = ShortPath(setupPath);
-        var dirArg = ShortPath(installDir);
-        var appArg = ShortPath(appPath);
-        var exeArg = ShortPath(exePath);
-
+        // 路径通过环境变量传给 cmd（Unicode，不受批处理 ANSI/8.3 短名限制）
         var content =
             "@echo off\r\n" +
             "timeout /t 2 /nobreak >nul\r\n" +
-            "\"" + setupArg + "\" /S /DIR=\"" + dirArg + "\"\r\n" +
+            "\"%MT_SETUP%\" /S /DIR=\"%MT_DIR%\"\r\n" +
             "if errorlevel 1 (\r\n" +
             "  echo update failed %date% %time% > \"%TEMP%\\musictoppin-update-error.log\"\r\n" +
-            "  start \"\" \"" + appArg + "\"\r\n" +
+            "  start \"\" \"%MT_APP%\"\r\n" +
             "  del \"%~f0\"\r\n" +
             "  exit /b\r\n" +
             ")\r\n" +
             "timeout /t 1 /nobreak >nul\r\n" +
-            "start \"\" \"" + exeArg + "\"\r\n" +
+            "start \"\" \"%MT_EXE%\"\r\n" +
             "del \"%~f0\"\r\n";
 
-        File.WriteAllText(script, content, Encoding.Default);
+        File.WriteAllText(script, content, Encoding.ASCII);
 
         var info = new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"")
         {
@@ -364,6 +327,10 @@ internal static class Updater
             WindowStyle = ProcessWindowStyle.Hidden,
             WorkingDirectory = Path.GetTempPath()
         };
+        info.EnvironmentVariables["MT_SETUP"] = setupPath;
+        info.EnvironmentVariables["MT_DIR"] = installDir;
+        info.EnvironmentVariables["MT_APP"] = appPath;
+        info.EnvironmentVariables["MT_EXE"] = exePath;
 
         Process.Start(info);
     }

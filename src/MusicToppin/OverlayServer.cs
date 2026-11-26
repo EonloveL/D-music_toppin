@@ -328,6 +328,12 @@ internal sealed class OverlayServer : IDisposable
             return;
         }
 
+        if (!IsValidBvid(bvid))
+        {
+            WriteResponse(client, "400 Bad Request", "text/plain; charset=utf-8", "invalid bvid");
+            return;
+        }
+
         var url = GetVideoUrl(bvid);
         if (string.IsNullOrEmpty(url))
         {
@@ -335,6 +341,7 @@ internal sealed class OverlayServer : IDisposable
             return;
         }
 
+        var headerSent = false;
         try
         {
             var req = (HttpWebRequest)WebRequest.Create(url);
@@ -362,6 +369,7 @@ internal sealed class OverlayServer : IDisposable
 
                 var headerBytes = Encoding.ASCII.GetBytes(header.ToString());
                 client.Write(headerBytes, 0, headerBytes.Length);
+                headerSent = true;
 
                 if (!string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase))
                 {
@@ -378,7 +386,32 @@ internal sealed class OverlayServer : IDisposable
         catch (Exception ex)
         {
             Logger.Write("video proxy: " + ex.Message);
+            if (!headerSent)
+            {
+                try
+                {
+                    WriteResponse(client, "502 Bad Gateway", "text/plain; charset=utf-8",
+                        "video upstream failed");
+                }
+                catch { }
+            }
         }
+    }
+
+    /// <summary>只接受 BV1 + 10 位字母数字，避免任意字符串拼进 B 站接口。</summary>
+    private static bool IsValidBvid(string bvid)
+    {
+        if (bvid == null || bvid.Length != 12) return false;
+        if (bvid[0] != 'B' && bvid[0] != 'b') return false;
+        if (bvid[1] != 'V' && bvid[1] != 'v') return false;
+
+        for (var i = 2; i < bvid.Length; i++)
+        {
+            var c = bvid[i];
+            if (!char.IsLetterOrDigit(c) || c > 127) return false;
+        }
+
+        return true;
     }
 
     private static void WriteResponse(Stream stream, string status, string contentType, string body, bool includeBody = true)
@@ -624,10 +657,10 @@ internal sealed class OverlayServer : IDisposable
 <title>Music Toppin Video</title>
 <style>
   html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;}
-  #stage{position:fixed;left:0;top:0;right:0;bottom:0;display:none;border-radius:12px;overflow:hidden;
-    background:#000;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 40px rgba(0,0,0,.55);}
+  #stage{position:absolute;left:0;top:0;width:100%;height:100%;display:none;border-radius:12px;overflow:hidden;
+    box-sizing:border-box;background:transparent;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 40px rgba(0,0,0,.55);}
   #stage.on{display:block;}
-  #player{width:100%;height:100%;border:0;display:block;object-fit:contain;background:#000;}
+  #player{width:100%;height:100%;border:0;display:block;object-fit:contain;background:transparent;}
   #fallback{width:100%;height:100%;border:0;display:none;background:#000;}
 </style>
 </head>
@@ -644,6 +677,27 @@ internal sealed class OverlayServer : IDisposable
   var current='';
   var currentBv='';
   var currentSound=true;
+  function fitStage(){
+    // 按视频真实宽高比缩放到浏览器源内，留白保持透明，避免 letterbox 黑边
+    var vw=player.videoWidth||0, vh=player.videoHeight||0;
+    if(!vw||!vh) return;
+    var W=window.innerWidth||480, H=window.innerHeight||270;
+    var scale=Math.min(W/vw,H/vh);
+    var w=Math.max(1,Math.round(vw*scale));
+    var h=Math.max(1,Math.round(vh*scale));
+    stage.style.width=w+'px';
+    stage.style.height=h+'px';
+    stage.style.left=Math.round((W-w)/2)+'px';
+    stage.style.top=Math.round((H-h)/2)+'px';
+  }
+  function resetStage(){
+    stage.style.left='0px';
+    stage.style.top='0px';
+    stage.style.width='100%';
+    stage.style.height='100%';
+  }
+  player.addEventListener('loadedmetadata',fitStage);
+  window.addEventListener('resize',fitStage);
   function hideFallback(){
     fallback.style.display='none';
     fallback.removeAttribute('src');
@@ -651,6 +705,7 @@ internal sealed class OverlayServer : IDisposable
   }
   function showFallback(){
     if(!currentBv) return;
+    resetStage();
     fallback.src='https://player.bilibili.com/player.html?bvid='+encodeURIComponent(currentBv)+
       '&p=1&autoplay=1&muted='+(currentSound?'0':'1')+'&danmaku=0&high_quality=1&as_wide=1';
     fallback.style.display='block';
@@ -665,8 +720,9 @@ internal sealed class OverlayServer : IDisposable
     current=key;
     currentBv=bv;
     currentSound=sound;
-    if(!bv){stage.className='';try{player.pause();}catch(e){}player.removeAttribute('src');player.load();hideFallback();return;}
+    if(!bv){stage.className='';resetStage();try{player.pause();}catch(e){}player.removeAttribute('src');player.load();hideFallback();return;}
     stage.className='on';
+    resetStage();
     hideFallback();
     player.muted=!sound;
     player.src='/video/stream?bvid='+encodeURIComponent(bv);

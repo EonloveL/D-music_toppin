@@ -51,6 +51,7 @@ internal sealed class HudForm : Form
 
     private Bitmap _bmp;
     private HudLayout _layout;
+    private RingLayout _ringLayout;
     private NowPlaying _state = NowPlaying.Empty;
     private bool _compact;
     private bool _ring;
@@ -68,6 +69,7 @@ internal sealed class HudForm : Form
     private string _signature = "";
 
     public event Action PrevRequested;
+    public event Action NextRequested;
     public event Action ToggleLockRequested;
     public event Action MenuRequested;
     public event Action DragFinished;
@@ -374,6 +376,7 @@ internal sealed class HudForm : Form
                 width = ringLayout.Width;
                 height = ringLayout.Height;
                 _layout = null;
+                _ringLayout = ringLayout;
             }
             else
             {
@@ -381,6 +384,7 @@ internal sealed class HudForm : Form
                 width = layout.Width;
                 height = layout.Height;
                 _layout = layout;
+                _ringLayout = null;
             }
 
             if (_bmp == null || _bmp.Width != width || _bmp.Height != height)
@@ -571,9 +575,8 @@ internal sealed class HudForm : Form
     {
         if (e.Button == MouseButtons.Left)
         {
-            // 双击导航行会先触发一次切歌，这里只对非导航区域响应
-            var layout = _layout;
-            if (layout == null || !layout.NavPrev.Contains(e.Location))
+            // 双击导航卡片会先触发一次切歌，这里只对非导航区域响应
+            if (!IsNavHit(e.Location))
             {
                 ToggleLockRequested?.Invoke();
             }
@@ -581,8 +584,31 @@ internal sealed class HudForm : Form
         base.OnMouseDoubleClick(e);
     }
 
+    private bool IsNavHit(Point point)
+    {
+        if (_ring)
+        {
+            var ring = _ringLayout;
+            return ring != null &&
+                   ((ring.HasPrev && ring.PrevRect.Contains(point)) ||
+                    (ring.HasNext && ring.NextRect.Contains(point)));
+        }
+
+        var layout = _layout;
+        return layout != null && layout.NavPrev.Contains(point);
+    }
+
     private void HitTestClick(Point point)
     {
+        if (_ring)
+        {
+            var ring = _ringLayout;
+            if (ring == null) return;
+            if (ring.HasPrev && ring.PrevRect.Contains(point)) PrevRequested?.Invoke();
+            else if (ring.HasNext && ring.NextRect.Contains(point)) NextRequested?.Invoke();
+            return;
+        }
+
         var layout = _layout;
         if (layout == null) return;
         // V1 只有「上一首」可点，「下一首」留到点歌机版本

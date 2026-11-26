@@ -37,7 +37,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 ### 2. 版本号与更新日志
 
 已补 `src/MusicToppin/VersionInfo.cs`（当前 `AssemblyVersion 1.4.0.0`），安装器常量同步为 `1.4.0`。
-每次发版改这三处：`VersionInfo.cs`、`installer/Installer.cs` 的 `Version`、README 的更新记录。
+每次发版改这几处：`src/MusicToppin/VersionInfo.cs`、`installer/Installer.cs` 的 `Version`、`CHANGELOG.md`（`MusicToppin.csproj` 仅历史兼容，顺手同步即可）。
 
 ### 3. 杀软白名单（决定"装完还能不能跑"）
 
@@ -48,12 +48,13 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 - Microsoft WDSI：`https://www.microsoft.com/en-us/wdsi/filesubmission`
 - 火绒：论坛或邮件
 
-申诉时附上：安装包、SHA256、程序用途说明（"只读取本机媒体元信息，不联网上传，不含音源"）。
+申诉时附上：安装包、SHA256、程序用途说明（"读取本机媒体元信息及用户已登录客户端的本地会话，仅向对应音乐平台发起取流请求，不含音源"）。
 
 ### 4. 隐私与免责说明（放在下载页）
 
-- 读取：本机 SMTC / 窗口标题 / 音频会话状态 → **不联网、不上传**
-- 更新检查（如启用）：只上报当前版本号
+- 读取：本机 SMTC / 窗口标题 / 音频会话状态，仅用于本机显示与切歌
+- 登录：网易云 / QQ 音乐客户端本地会话只保存在本机（DPAPI 加密）；使用对应平台播放/歌单时会随请求发往该平台
+- 联网：点歌、默认歌单、视频小窗会访问网易云 / QQ 音乐 / B 站接口；更新检查只上报当前版本号
 - 不含任何音乐内容，只显示元信息；请遵守各直播平台规则
 
 ---
@@ -63,7 +64,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 | 渠道 | 作用 | 优点 | 代价 |
 |---|---|---|---|
 | **自己的落地页**（主） | 下载 + 教程 + 更新说明 | 完全可控、可埋统计、可放 30 秒上手视频 | 要域名/备案（国内服务器） |
-| **蓝奏云**（备） | 国内免登录直链 | 约 825 KB 秒传秒下，最适合小白 | 单文件 100MB 内、偶尔限速 |
+| **蓝奏云**（备） | 国内免登录直链 | 约 827 KB 秒传秒下，最适合小白 | 单文件 100MB 内、偶尔限速 |
 | **GitHub Releases** | 更新源 + 技术用户 | 免费、有 API、可放校验值 | 国内访问慢，需镜像 |
 | **QQ 群 / 微信群** | 种子用户、反馈 | 传播快、能直接收到崩溃反馈 | 人工维护 |
 | **winget** | 技术受众 | `winget install` 一条命令 | 需 PR 到 winget-pkgs，审核慢 |
@@ -113,8 +114,9 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 - 自动检查失败是静默的（只写日志），手动检查才会弹提示，避免打扰
 ## 四、每次发版的 checklist
 
-1. 改版本号（`VersionInfo.cs` / `Installer.cs`）
-2. `powershell -ExecutionPolicy Bypass -File .\build.ps1`
+1. 改版本号（`VersionInfo.cs` / `Installer.cs`，顺手同步 `csproj` 与 `CHANGELOG.md`）
+2. `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`
+3. `powershell -ExecutionPolicy Bypass -File .\build.ps1`
 3. 手测：安装 → 首启向导 → 播放显示 → 穿透 → 卸载
 4. 签名 `MusicToppin.exe`（重新打包）→ 签名 `MusicToppin-Setup.exe`
 5. `Get-FileHash build\MusicToppin-Setup.exe -Algorithm SHA256`
@@ -128,7 +130,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 
 > **Music Toppin** —— 开播时自动把「正在播放」显示在画面上。
 >
-> 约 825 KB，免安装运行时，支持网易云 / QQ音乐 / Apple Music / Spotify / 浏览器。
+> 约 827 KB，免安装运行时，支持网易云 / QQ音乐 / Apple Music / Spotify / 浏览器。
 >
 > 1. 双击安装
 > 2. 打开你常用的音乐软件放歌
@@ -151,4 +153,4 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 | 平台规则 | — | 直播间挂链接有风险，走粉丝群/简介 |
 | 版权 | — | 只显示元信息，不碰音源；若 V2 内置播放要另外评估 |
 
-**体积是优势**：约 825 KB 的安装包在群文件、网盘、邮件里都几乎瞬传，比动辄 70 MB 的 Electron 方案更容易传播。
+**体积是优势**：约 827 KB 的安装包在群文件、网盘、邮件里都几乎瞬传，比动辄 70 MB 的 Electron 方案更容易传播。

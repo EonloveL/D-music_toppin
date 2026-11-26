@@ -308,6 +308,7 @@ internal static class QQMusic
             request.Timeout = 12000;
             request.ReadWriteTimeout = 12000;
             request.AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate;
+            if (!string.IsNullOrWhiteSpace(Cookie)) request.Headers["Cookie"] = Cookie;
 
             using (var response = (System.Net.HttpWebResponse)request.GetResponse())
             using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))

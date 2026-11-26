@@ -16,8 +16,8 @@ internal sealed class ClientStatus
 /// <summary>
 /// 检测本机音乐客户端：已安装 / 运行中 / 是否登录（网易云、QQ 音乐；酷狗按需求先移除）。
 ///
-/// 登录态信号（都用客户端自己的本地记录，不联网、不猜密码）：
-///   网易云  —— 客户端 CEF 的 cookie（MUSIC_U），NeteaseClient 负责解密
+/// 登录态信号（本地记录为主，不猜密码）：
+///   网易云  —— 客户端 CEF 的 cookie（MUSIC_U），NeteaseClient 负责解密；检查昵称时会联网
 ///   QQ 音乐 —— 内嵌 chromium 的 cookie（pt2gguin），兼容 ComData\qmcomdata.ini
 /// </summary>
 internal static class SourceCheck

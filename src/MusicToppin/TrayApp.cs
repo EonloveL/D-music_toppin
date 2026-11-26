@@ -91,6 +91,7 @@ internal sealed class TrayApp : ApplicationContext
         _hud.SetLocked(_settings.Locked);
         _hud.SetEditing(!_settings.Locked);
         _hud.PrevRequested += () => _ = SkipAsync(previous: true);
+        _hud.NextRequested += () => _ = SkipAsync(previous: false);
         _hud.ToggleLockRequested += ToggleLock;
         _hud.MenuRequested += ShowMenuAtCursor;
         _hud.HotkeyPressed += OnHotkey;
@@ -592,6 +593,22 @@ internal sealed class TrayApp : ApplicationContext
     private string _defaultPlaylistLoadedKey = "";
     private string _defaultPlaylistLoadedName = "";
     private Task<bool> _defaultPlaylistLoadTask;
+    private string _defaultPlaylistFailedKey = "";
+    private DateTime _defaultPlaylistFailedUtc;
+    private DateTime _defaultPlaylistPauseUntil;
+    private int _defaultPlaylistFailStreak;
+    private bool _manualPlaybackPending;
+
+    /// <summary>是否有应用自己的播放（点歌 / 默认歌单 / 视频 / 手动 BV）。</summary>
+    private bool HasOwnPlayback
+    {
+        get
+        {
+            return _manualPlaybackPending || _playingFromQueue || _playingDefaultPlaylist ||
+                   _videoBvid.Length > 0 || _videoSong != null ||
+                   (_player != null && _player.Current != null);
+        }
+    }
     private int _idleTicks;
     private int _danmakuReceived;
     private readonly List<string> _recentDanmaku = new List<string>();
@@ -1007,17 +1024,21 @@ internal sealed class TrayApp : ApplicationContext
 
     private async Task PlayBvidAsync(string bvid)
     {
+        var generation = 0;
         try
         {
-            // 单播放：手动点播前先停掉队列/默认歌单里正在放的那首
-            if (_playingFromQueue || _playingDefaultPlaylist) StopOwnPlayback();
+            // 单播放：手动点播前先停掉队列/默认歌单/视频里正在放的那首
+            if (HasOwnPlayback) StopOwnPlayback();
+            _manualPlaybackPending = true;
+            generation = ++_playGeneration;
 
             _tray.ShowBalloonTip(1500, "Music Toppin", "正在解析 " + bvid + " …", ToolTipIcon.Info);
 
             var song = await Task.Run(() => Bilibili.Resolve(bvid));
+            if (generation != _playGeneration) return;
             if (song == null)
             {
-                _tray.ShowBalloonTip(3000, "Music Toppin", "解析失败：可能需要在 B 站登录后才能播放高码率", ToolTipIcon.Warning);
+                _tray.ShowBalloonTip(3000, "Music Toppin", "解析失败：视频不存在、需要登录或当前网络取不到直链", ToolTipIcon.Warning);
                 return;
             }
 
@@ -1031,12 +1052,18 @@ internal sealed class TrayApp : ApplicationContext
             }
 
             await EnsurePlayer().PlayAsync(song);
+            if (generation != _playGeneration) return;
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
         }
         catch (Exception ex)
         {
             Logger.Write("play bv: " + ex.Message);
             _tray.ShowBalloonTip(4000, "Music Toppin", ex.Message, ToolTipIcon.Warning);
+            if (generation == _playGeneration) StopOwnPlayback();
+        }
+        finally
+        {
+            if (generation == _playGeneration) _manualPlaybackPending = false;
         }
     }
 
@@ -1049,8 +1076,8 @@ internal sealed class TrayApp : ApplicationContext
             // 只处理「当前这首」的结束，避免重复 Ended 把下一首也切掉
             if (song == null || song != _activeSong) return;
 
-            // 一首放完：点歌队列优先，空了再回默认歌单
-            StopOwnPlayback();
+            // 一首放完：点歌队列优先，空了再回默认歌单；切歌间隙保留上一份显示，避免 OBS 闪白
+            StopOwnPlayback(keepDisplayed: true);
             ContinuePlayback();
             return;
         }
@@ -1089,17 +1116,18 @@ internal sealed class TrayApp : ApplicationContext
         RefreshOverlaySnapshot();
     }
 
-    private void StopOwnPlayback()
+    private void StopOwnPlayback(bool keepDisplayed = false)
     {
         _playingFromQueue = false;
         _playingDefaultPlaylist = false;
+        _manualPlaybackPending = false;
         _playGeneration++;
         _activeSong = null;
         _videoBvid = "";
         StopVideoTimer();
         _queue.ClearCurrent();
         try { if (_player != null) _ = _player.StopAsync(); } catch { }
-        if (_service != null) _service.SetOwnPlayback(null);
+        if (!keepDisplayed && _service != null) _service.SetOwnPlayback(null);
         UpdateQueueMenu();
         UpdateDefaultPlaylistMenu();
     }
@@ -1420,6 +1448,9 @@ internal sealed class TrayApp : ApplicationContext
         _defaultPlaylistLoadedKey = "";
         _defaultPlaylistLoadedName = "";
         _defaultPlaylistLoadTask = null;
+        _defaultPlaylistFailedKey = "";
+        _defaultPlaylistPauseUntil = DateTime.MinValue;
+        _defaultPlaylistFailStreak = 0;
     }
 
     private async Task<bool> EnsureDefaultPlaylistAsync()
@@ -1431,6 +1462,12 @@ internal sealed class TrayApp : ApplicationContext
         var key = PlaylistKey(source, id);
         if (string.Equals(_defaultPlaylistLoadedKey, key, StringComparison.Ordinal) && _defaultPlaylistTracks.Count > 0)
             return true;
+
+        if (string.Equals(_defaultPlaylistFailedKey, key, StringComparison.Ordinal) &&
+            (DateTime.UtcNow - _defaultPlaylistFailedUtc).TotalSeconds < 60)
+        {
+            return false;
+        }
 
         if (_defaultPlaylistLoadTask != null && !_defaultPlaylistLoadTask.IsCompleted)
             return await _defaultPlaylistLoadTask;
@@ -1460,7 +1497,12 @@ internal sealed class TrayApp : ApplicationContext
 
         if (data == null || data.Tracks.Count == 0)
         {
+            _defaultPlaylistFailedKey = key;
+            _defaultPlaylistFailedUtc = DateTime.UtcNow;
             Logger.Write("default playlist load failed: " + source + " " + id);
+            _lastRequestResult = "默认歌单读取失败（检查歌单 ID、可见性或登录状态）";
+            LiveNotify("Music Toppin", _lastRequestResult, ToolTipIcon.Warning);
+            ShowOverlayToast("默认歌单读取失败");
             return false;
         }
 
@@ -1472,6 +1514,8 @@ internal sealed class TrayApp : ApplicationContext
         _defaultPlaylistIndex = 0;
         _defaultPlaylistLoadedKey = key;
         _defaultPlaylistLoadedName = string.IsNullOrWhiteSpace(data.Name) ? id : data.Name;
+        _defaultPlaylistFailedKey = "";
+        _defaultPlaylistFailStreak = 0;
 
         if (source == PlaylistSource.Netease) _settings.NeteasePlaylistName = _defaultPlaylistLoadedName;
         else if (source == PlaylistSource.QQMusic) _settings.QQPlaylistName = _defaultPlaylistLoadedName;
@@ -1485,8 +1529,8 @@ internal sealed class TrayApp : ApplicationContext
     private async Task StartDefaultPlaylistAsync()
     {
         if (_demo || !_settings.DefaultPlaylistEnabled) return;
-        if (_playingFromQueue || _playingDefaultPlaylist) return;
-        if (_videoBvid.Length > 0 || (_player != null && _player.Current != null)) return;
+        if (DateTime.UtcNow < _defaultPlaylistPauseUntil) return;
+        if (HasOwnPlayback) return;
 
         if (_queue.Count > 0)
         {
@@ -1495,7 +1539,7 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         if (!await EnsureDefaultPlaylistAsync()) return;
-        if (_queue.Count > 0 || _playingFromQueue || (_player != null && _player.Current != null)) return;
+        if (_queue.Count > 0 || HasOwnPlayback) return;
 
         await StartNextDefaultSongAsync();
     }
@@ -1551,11 +1595,13 @@ internal sealed class TrayApp : ApplicationContext
                 PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
                 Logger.Write("default playlist play: " + song.Title +
                              (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist));
+                _defaultPlaylistFailStreak = 0;
                 return;
             }
             catch (Exception ex)
             {
                 Logger.Write("default playlist play failed: " + ex.Message);
+                _defaultPlaylistFailStreak++;
                 _activeSong = null;
             }
         }
@@ -1585,13 +1631,17 @@ internal sealed class TrayApp : ApplicationContext
             !string.IsNullOrWhiteSpace(PlaylistId(CurrentPlaylistSource)))
         {
             _ = StartDefaultPlaylistAsync();
+            return;
         }
+
+        // 没有后续播放源：清掉切歌间隙保留的上一首显示
+        if (_service != null) _service.SetOwnPlayback(null);
     }
 
     private void StopAllPlayback()
     {
-        _settings.DefaultPlaylistEnabled = false;
-        _settings.Save();
+        // 只停止当前曲目，不修改「默认歌单已启用」这个配置；
+        // 要关闭自动续播请用「默认歌单 → 暂停」。
         StopOwnPlayback();
         UpdateDefaultPlaylistMenu();
     }
@@ -1806,7 +1856,7 @@ internal sealed class TrayApp : ApplicationContext
         if (_videoDuration > TimeSpan.Zero && position >= _videoDuration - TimeSpan.FromSeconds(1))
         {
             Logger.Write("video ended: " + _videoSong.Title);
-            StopOwnPlayback();
+            StopOwnPlayback(keepDisplayed: true);
             ContinuePlayback();
             return;
         }
@@ -1856,8 +1906,28 @@ internal sealed class TrayApp : ApplicationContext
         if (_playingFromQueue || _playingDefaultPlaylist) LiveNotify("Music Toppin", message, ToolTipIcon.Warning);
         else _tray.ShowBalloonTip(4000, "Music Toppin", message, ToolTipIcon.Warning);
 
+        // 默认歌单连续失败时暂停一段时间，避免直链 403/版权问题无限重试
+        var keepDisplayed = true;
+        if (_playingDefaultPlaylist)
+        {
+            _defaultPlaylistFailStreak++;
+            if (_defaultPlaylistFailStreak >= 3)
+            {
+                _defaultPlaylistFailStreak = 0;
+                _defaultPlaylistPauseUntil = DateTime.UtcNow.AddMinutes(5);
+                keepDisplayed = false;
+                LiveNotify("Music Toppin", "默认歌单连续 3 首失败，已暂停 5 分钟；请检查歌单/登录状态。",
+                    ToolTipIcon.Warning);
+                ShowOverlayToast("默认歌单已暂停（连续失败）");
+            }
+        }
+        else
+        {
+            _defaultPlaylistFailStreak = 0;
+        }
+
         // 失败也按同一套顺序继续：点歌队列优先，空了回默认歌单
-        StopOwnPlayback();
+        StopOwnPlayback(keepDisplayed: keepDisplayed);
         ContinuePlayback();
     }
 
@@ -2514,9 +2584,7 @@ internal sealed class TrayApp : ApplicationContext
             return true;
         }
 
-        var hasOwnPlayback = _playingFromQueue || _videoBvid.Length > 0 ||
-                             (_player != null && _player.Current != null);
-        if (!hasOwnPlayback)
+        if (!HasOwnPlayback)
         {
             Logger.Write("danmaku skip: nothing playing | " + message.UserName);
             return true;
@@ -2642,7 +2710,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemQueueList.Text = count > 0 ? "点歌队列（" + count + " 首）" : "点歌队列：空";
         }
 
-        RebuildQueueList();
+        // 列表内容在 DropDownOpening 时重建即可，避免每次队列变化都新建控件
         UpdateDefaultPlaylistMenu();
         RefreshLiveStatus();
         RefreshOverlaySnapshot();
@@ -2662,17 +2730,13 @@ internal sealed class TrayApp : ApplicationContext
         else
         {
             var index = 1;
-            var preview = new List<string>();
             foreach (var item in _queue.Items.Take(10))
             {
                 var text = index + ". " + item.DisplayName +
                            (string.IsNullOrWhiteSpace(item.Requester) ? "" : "  ·  " + item.Requester);
                 _itemQueueList.DropDownItems.Add(new ToolStripMenuItem(text) { Enabled = false });
-                preview.Add(text);
                 index++;
             }
-
-            Logger.Write("queue list: " + string.Join(" | ", preview));
 
             if (_queue.Count > 10)
             {
@@ -2687,10 +2751,7 @@ internal sealed class TrayApp : ApplicationContext
 
     private async void StartNextQueuedSong()
     {
-        if (_playingFromQueue || _playingDefaultPlaylist) return;
-
-        // 手动点播/默认歌单还在放：等它结束，避免两路同时出声
-        if (_player != null && _player.Current != null) return;
+        if (HasOwnPlayback) return;
 
         var item = _queue.TakeNext();
         if (item == null) return;
@@ -2773,7 +2834,7 @@ internal sealed class TrayApp : ApplicationContext
             _lastRequestResult = "播放失败：" + song.Title + "（" + ex.Message + "）";
             LiveNotify("Music Toppin", ex.Message, ToolTipIcon.Warning);
 
-            StopOwnPlayback();
+            StopOwnPlayback(keepDisplayed: true);
             ContinuePlayback();
         }
     }
@@ -2910,11 +2971,12 @@ internal sealed class TrayApp : ApplicationContext
         RefreshOverlaySnapshot();
 
         var url = _overlay.Url;
-        try { Clipboard.SetText(url); } catch { }
         Logger.Write("overlay url: " + url);
 
-        // 启动时自动恢复的叠加层不弹气泡（直播/开机时不想被通知打扰），只在手动开启时提示
+        // 启动时自动恢复的叠加层不弹气泡、也不覆盖剪贴板；手动开启才复制地址并提示
         if (!notify) return;
+
+        try { Clipboard.SetText(url); } catch { }
 
         _tray.ShowBalloonTip(6000, "Music Toppin",
             "叠加层地址已复制：" + url + "\n在 OBS 添加「浏览器源」，宽 400 高 320。\n" +
@@ -3463,12 +3525,7 @@ internal sealed class TrayApp : ApplicationContext
 
     private static void Log(string message)
     {
-        try
-        {
-            File.AppendAllText(Path.Combine(Path.GetTempPath(), "musictoppin.log"),
-                DateTime.Now.ToString("HH:mm:ss") + "  " + message + Environment.NewLine);
-        }
-        catch { }
+        Logger.Write(message);
     }
 
     private void OnHotkey(int id)
@@ -3500,13 +3557,13 @@ internal sealed class TrayApp : ApplicationContext
             {
                 // 切歌：停掉当前（视频/音乐），点歌队列优先，空了回默认歌单
                 Logger.Write("skip: next (own playback)");
-                StopOwnPlayback();
+                StopOwnPlayback(keepDisplayed: true);
                 ContinuePlayback();
                 return;
             }
 
             // 上一首：音乐回到开头；视频重开（计时器 + iframe 一起重置）
-            if (_videoBvid.Length > 0)
+            if (_videoSong != null)
             {
                 Logger.Write("skip: restart video");
                 RestartVideo();

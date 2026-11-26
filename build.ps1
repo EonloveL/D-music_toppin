@@ -51,7 +51,7 @@ if (-not (Test-Path $icon)) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'src\MusicToppin\Assets\gen-icon.ps1')
 }
 
-Write-Host "== [2/5] 编译主程序（.NET Framework 4.8，产物几十 KB）" -ForegroundColor Cyan
+Write-Host "== [2/5] 编译主程序（.NET Framework 4.8，产物约 335 KB）" -ForegroundColor Cyan
 $refs = @(Get-FrameworkRefArgs) + @(Get-WinmdRefArgs)
 
 $brotli = Join-Path $root 'src\MusicToppin\lib\BrotliSharpLib.dll'
@@ -92,9 +92,9 @@ if (Test-Path (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll'))
         $webView2Loader = Join-Path $cacheRoot 'webview2\runtimes\win-x64\native\WebView2Loader.dll'
     }
     Copy-Item $webView2Loader $appOut -Force
+}
 Copy-Item $brotli $appOut -Force
 Copy-Item $unsafe $appOut -Force
-}
 Write-Host ("   MusicToppin.exe = " + [math]::Round((Get-Item $appExe).Length / 1KB, 1) + " KB")
 
 Write-Host "== [3/5] 编译卸载器" -ForegroundColor Cyan

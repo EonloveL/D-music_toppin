@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Threading;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -45,7 +46,12 @@ internal sealed class WebView2Player : IDisposable
     private DateTime _lastProgressUtc = DateTime.MinValue;
     private TimeSpan _lastPosition;
     private Task _stopTask;
+    private int _playToken;
+    private int _lastStopToken;
+    private int _lastPlayToken;
+    private bool _polling;
     private readonly object _gate = new object();
+    private readonly SemaphoreSlim _playGate = new SemaphoreSlim(1, 1);
 
     public event Action<PlaybackState> StateChanged;
     public event Action<string> Failed;
@@ -101,7 +107,8 @@ internal sealed class WebView2Player : IDisposable
             var dataDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "MusicToppin", "WebView2");
-            var environment = await CoreWebView2Environment.CreateAsync(null, dataDir);
+            var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
+            var environment = await CoreWebView2Environment.CreateAsync(null, dataDir, options);
             await _web.EnsureCoreWebView2Async(environment);
 
             var core = _web.CoreWebView2;
@@ -144,7 +151,9 @@ internal sealed class WebView2Player : IDisposable
             if (uri.IndexOf("bilivideo", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 uri.IndexOf("bilibili.com", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 uri.IndexOf("mountaintoys", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                uri.IndexOf("hdslb", StringComparison.OrdinalIgnoreCase) >= 0)
+                uri.IndexOf("hdslb", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                uri.IndexOf("akamaized", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                uri.IndexOf("szbdyd.com", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 e.Request.Headers.SetHeader("Referer", "https://www.bilibili.com");
                 e.Request.Headers.SetHeader("Origin", "https://www.bilibili.com");
@@ -162,6 +171,23 @@ internal sealed class WebView2Player : IDisposable
     {
         if (song == null || string.IsNullOrWhiteSpace(song.AudioUrl)) return;
 
+        // 串行化起播：避免两次 PlayAsync 的 playAudio 交错执行，后发的旧歌盖住新歌。
+        await _playGate.WaitAsync();
+        try
+        {
+            await PlayCoreAsync(song);
+        }
+        finally
+        {
+            _playGate.Release();
+        }
+    }
+
+    private async Task PlayCoreAsync(ResolvedSong song)
+    {
+        var token = Interlocked.Increment(ref _playToken);
+        Volatile.Write(ref _lastPlayToken, token);
+
         // 等上一次 StopAsync 真正执行完 stopAudio，避免旧脚本把新歌停掉
         var stopTask = _stopTask;
         if (stopTask != null)
@@ -169,7 +195,10 @@ internal sealed class WebView2Player : IDisposable
             try { await stopTask; } catch { }
         }
 
+        if (token != Volatile.Read(ref _playToken)) return;
+
         await EnsureReadyAsync();
+        if (token != Volatile.Read(ref _playToken)) return;
 
         _poll.Stop();
         _current = null;
@@ -177,7 +206,19 @@ internal sealed class WebView2Player : IDisposable
         _failureReported = false;
 
         await ApplyVolumeAsync();
+        if (token != Volatile.Read(ref _playToken)) return;
+
         await _web.CoreWebView2.ExecuteScriptAsync("playAudio(" + ToJsString(song.AudioUrl) + ")");
+        if (token != Volatile.Read(ref _playToken))
+        {
+            // 起播期间被停止/切歌：如果最后发生的是「停止」，补一次 stopAudio，
+            // 避免已经发出的 playAudio 在停止之后才真正开始出声。
+            if (Volatile.Read(ref _lastStopToken) > Volatile.Read(ref _lastPlayToken))
+            {
+                try { await _web.CoreWebView2.ExecuteScriptAsync("stopAudio()"); } catch { }
+            }
+            return;
+        }
 
         _current = song;
         _lastProgressUtc = DateTime.UtcNow;
@@ -187,6 +228,9 @@ internal sealed class WebView2Player : IDisposable
 
     public Task StopAsync()
     {
+        var token = Interlocked.Increment(ref _playToken);
+        Volatile.Write(ref _lastStopToken, token);
+
         // 先清当前项，避免「停止」的异步收尾把下一首的 Current 抹掉
         _current = null;
         _failureReported = false;
@@ -240,11 +284,15 @@ internal sealed class WebView2Player : IDisposable
 
     private async void PollState()
     {
-        if (!_ready || _web == null) return;
+        if (!_ready || _web == null || _polling) return;
+        _polling = true;
         try
         {
+            var token = Volatile.Read(ref _playToken);
+            var song = _current;
             var json = await _web.CoreWebView2.ExecuteScriptAsync("getState()");
             if (string.IsNullOrEmpty(json)) return;
+            if (token != Volatile.Read(ref _playToken) || !ReferenceEquals(song, _current)) return;
 
             // ExecuteScriptAsync 返回的是 JSON 字符串字面量，先解一层
             json = json.Trim();
@@ -281,6 +329,9 @@ internal sealed class WebView2Player : IDisposable
                     try { failed("音频加载失败（直链可能已过期，或这一条需要登录 B 站）"); }
                     catch (Exception ex) { Logger.Write("player failed handler: " + ex.Message); }
                 }
+
+                // 上层收到 Failed 后会停止/切歌；本拍状态已过期，不再推送
+                if (token != Volatile.Read(ref _playToken)) return;
             }
 
             var now = DateTime.UtcNow;
@@ -304,6 +355,8 @@ internal sealed class WebView2Player : IDisposable
                         : "音频播放卡住（网络或 WebView2 无响应）"); }
                     catch (Exception ex) { Logger.Write("player failed handler: " + ex.Message); }
                 }
+
+                if (token != Volatile.Read(ref _playToken)) return;
             }
 
             var state = new PlaybackState
@@ -318,6 +371,10 @@ internal sealed class WebView2Player : IDisposable
             if (handler != null) handler(state);
         }
         catch { }
+        finally
+        {
+            _polling = false;
+        }
     }
 
     private static string ToJsString(string value)

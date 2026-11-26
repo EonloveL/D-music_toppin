@@ -123,6 +123,14 @@ internal sealed class RequestQueue
                     return Reject(QueueRejectReason.Duplicate, "队列里已经有这首歌了");
                 }
             }
+
+            // 正在播的这首也要算：解析后 Source 会从 Auto 改成实际平台，
+            // 只用 _items 会漏掉「Auto 点歌 → 已解析为网易云」的重复点歌。
+            if (Current != null && Current.Request != null &&
+                string.Equals(Current.Request.DedupeKey, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return Reject(QueueRejectReason.Duplicate, "这首歌正在播放");
+            }
         }
 
         if (_items.Count >= MaxSize)

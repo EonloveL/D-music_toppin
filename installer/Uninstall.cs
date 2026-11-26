@@ -66,6 +66,19 @@ internal static class UninstallProgram
     {
         var dir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
 
+        // 只允许卸载真正的安装目录：装有本产品 MusicToppin.exe，或注册表登记的 InstallLocation。
+        // 卸载器被复制/挪到别处运行时直接退出，避免误删任意目录。
+        if (!IsOurInstallDir(dir))
+        {
+            WriteLog("拒绝卸载：不是 Music Toppin 安装目录：" + dir);
+            if (!silent)
+            {
+                MessageBox.Show("这个目录不是 Music Toppin 的安装目录，已停止卸载。", AppName,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            return;
+        }
+
         foreach (var p in Process.GetProcessesByName("MusicToppin"))
         {
             try { p.Kill(); p.WaitForExit(3000); } catch { }
@@ -126,18 +139,15 @@ internal static class UninstallProgram
         }
 
         // 自删除：cmd 等本进程退出后清目录（提权运行时 cmd 也继承管理员权限）
-        // 只在「确实是安装目录」时执行，避免卸载器被挪到别处运行时删掉那个目录
         try
         {
-            var isInstallDir = File.Exists(Path.Combine(dir, "MusicToppin.exe")) ||
-                               File.Exists(Path.Combine(dir, "Uninstall.exe"));
             var root = Path.GetPathRoot(dir);
             var isRoot = !string.IsNullOrEmpty(root) &&
                          string.Equals(dir.TrimEnd('\\'), root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
 
-            if (!isInstallDir || isRoot)
+            if (isRoot)
             {
-                WriteLog("跳过删除目录（不是安装目录或磁盘根）：" + dir);
+                WriteLog("跳过删除目录（磁盘根）：" + dir);
                 return;
             }
 
@@ -150,6 +160,39 @@ internal static class UninstallProgram
             });
         }
         catch { }
+    }
+
+    /// <summary>安装目录判定：必须有本产品 exe，或与卸载注册项登记的 InstallLocation 一致。</summary>
+    private static bool IsOurInstallDir(string dir)
+    {
+        try
+        {
+            var exe = Path.Combine(dir, "MusicToppin.exe");
+            if (File.Exists(exe))
+            {
+                var info = FileVersionInfo.GetVersionInfo(exe);
+                if (string.Equals((info.ProductName ?? "").Trim(), AppName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch { }
+
+        try
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(UninstallKey))
+            {
+                var location = key == null ? null : key.GetValue("InstallLocation") as string;
+                if (!string.IsNullOrWhiteSpace(location))
+                {
+                    var a = Path.GetFullPath(location).TrimEnd('\\');
+                    var b = Path.GetFullPath(dir).TrimEnd('\\');
+                    if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+            }
+        }
+        catch { }
+
+        return false;
     }
 
     private static bool CanWriteDirectory(string dir)

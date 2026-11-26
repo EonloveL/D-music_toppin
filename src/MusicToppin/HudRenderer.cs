@@ -56,6 +56,8 @@ internal sealed class RingLayout
     public bool HasPrev;
     public bool HasNext;
     public bool HasTimeline;
+    public RectangleF PrevRect;
+    public RectangleF NextRect;
     public string PrevTitle = "";
     public string PrevArtist = "";
     public string NextTitle = "";
@@ -355,7 +357,7 @@ internal static class HudRenderer
         var nextH = RingSideHeight(g, s, layout.NextTitle, layout.NextArtist, sideInner);
         layout.SideHeight = Math.Max(70f * s, Math.Max(prevH, nextH));
 
-        layout.Width = (int)Math.Ceiling((horizontal ? 680f : 310f) * s);
+        layout.Width = (int)Math.Ceiling((horizontal ? 688f : 310f) * s);
         layout.Height = horizontal
             ? (int)Math.Ceiling(Math.Max(210f * s, layout.CurrentHeight + 90f * s))
             : (int)Math.Ceiling(560f * s);
@@ -388,6 +390,21 @@ internal static class HudRenderer
             layout.RollSign = side == 2 ? 1f : -1f;
             layout.CenterX = side == 2 ? currentCenterX - layout.Radius : currentCenterX + layout.Radius;
         }
+
+        // 侧边卡片静止时的命中区（动画期间只用于点击，不跟随瞬时角度）
+        var prevRadians = layout.PrevAngle * (float)Math.PI / 180f;
+        var nextRadians = layout.NextAngle * (float)Math.PI / 180f;
+        var prevCenterX = layout.CenterX + layout.Radius * (float)Math.Cos(prevRadians);
+        var prevCenterY = layout.CenterY + layout.Radius * (float)Math.Sin(prevRadians);
+        var nextCenterX = layout.CenterX + layout.Radius * (float)Math.Cos(nextRadians);
+        var nextCenterY = layout.CenterY + layout.Radius * (float)Math.Sin(nextRadians);
+
+        layout.PrevRect = new RectangleF(
+            prevCenterX - layout.SideWidth / 2f, prevCenterY - layout.SideHeight / 2f,
+            layout.SideWidth, layout.SideHeight);
+        layout.NextRect = new RectangleF(
+            nextCenterX - layout.SideWidth / 2f, nextCenterY - layout.SideHeight / 2f,
+            layout.SideWidth, layout.SideHeight);
 
         return layout;
     }
