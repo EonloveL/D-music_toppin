@@ -633,6 +633,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly List<OwnHistoryEntry> _ownHistory = new List<OwnHistoryEntry>();
     private readonly List<OwnHistoryEntry> _forwardOwn = new List<OwnHistoryEntry>();
     private bool _suppressOwnHistory;
+    private bool _ringReverseOnce;
     private int _ownPlayedCount;
     private volatile OverlayState _overlaySnapshot;
     private volatile bool _exiting;
@@ -1068,6 +1069,7 @@ internal sealed class TrayApp : ApplicationContext
             if (HasOwnPlayback) StopOwnPlayback();
             _manualPlaybackPending = true;
             _forwardOwn.Clear();
+            _ringReverseOnce = false;
             generation = ++_playGeneration;
 
             _tray.ShowBalloonTip(1500, "Music Toppin", "正在解析 " + bvid + " …", ToolTipIcon.Info);
@@ -1156,6 +1158,7 @@ internal sealed class TrayApp : ApplicationContext
             state.Duration > TimeSpan.Zero ? state.Duration : song.Duration,
             state.Playing, true,
             prevTitles, prevArtists, prevCount, _ownPlayedCount);
+        np.RingReverse = _ringReverseOnce;
 
         // 侧卡「下一首」优先显示前进栈里的歌（回退后点下一首会回到它）
         var forward = _forwardOwn.Count > 0 ? _forwardOwn[_forwardOwn.Count - 1] : null;
@@ -1192,6 +1195,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (!_suppressOwnHistory) RememberOwnEntry(_currentOwnEntry);
         _currentOwnEntry = null;
+        _ringReverseOnce = false;
 
         _playingFromQueue = false;
         _playingDefaultPlaylist = false;
@@ -1633,6 +1637,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (!_settings.DefaultPlaylistEnabled || _defaultPlaylistTracks.Count == 0) return;
         _forwardOwn.Clear();
+        _ringReverseOnce = false;
 
         if (_queue.Count > 0)
         {
@@ -2852,6 +2857,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (HasOwnPlayback) return;
         _forwardOwn.Clear();
+        _ringReverseOnce = false;
 
         var item = _queue.TakeNext();
         if (item == null) return;
@@ -3786,6 +3792,9 @@ internal sealed class TrayApp : ApplicationContext
             StopOwnPlayback(keepDisplayed: true);
         }
 
+        // StopOwnPlayback 会清方向；在停止之后再设置本次起播方向
+        _ringReverseOnce = goingBack;
+
         var generation = ++_playGeneration;
         _activeSong = entry.Song;
         _currentOwnEntry = entry;
@@ -3827,6 +3836,7 @@ internal sealed class TrayApp : ApplicationContext
 
         if (entry.Song == null || string.IsNullOrWhiteSpace(entry.Song.AudioUrl))
         {
+            _ringReverseOnce = false;
             StopOwnPlayback();
             LiveNotify("Music Toppin", "这首歌暂时放不了", ToolTipIcon.Warning);
             return true;
@@ -3855,6 +3865,7 @@ internal sealed class TrayApp : ApplicationContext
         {
             Logger.Write("history play failed: " + ex.Message);
             entry.Started = false;
+            _ringReverseOnce = false;
             StopOwnPlayback();
             LiveNotify("Music Toppin", "这首歌暂时放不了：" + entry.Song.Title, ToolTipIcon.Warning);
 

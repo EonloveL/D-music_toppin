@@ -57,6 +57,7 @@ internal sealed class HudForm : Form
     private bool _compact;
     private bool _ring;
     private int _ringSide = 1;
+    private bool _ringReverse;
     private bool _classicLeft;
     private bool _green;
     private bool _locked;
@@ -141,6 +142,7 @@ internal sealed class HudForm : Form
         if (trackChanged)
         {
             _lastTitle = np.Title;
+            _ringReverse = np.RingReverse;
             if (animate && np.HasSession && np.Title.Length > 0)
             {
                 _anim = 0f;
@@ -427,7 +429,7 @@ internal sealed class HudForm : Form
                 g.Clear(Color.Transparent);
                 if (_ring)
                 {
-                    HudRenderer.DrawRing(g, s, _state, ringLayout, _green, _editing, _anim);
+                    HudRenderer.DrawRing(g, s, _state, ringLayout, _green, _editing, _anim, _ringReverse);
                 }
                 else
                 {

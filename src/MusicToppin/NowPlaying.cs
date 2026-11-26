@@ -29,6 +29,9 @@ internal struct NowPlaying
     /// <summary>队列里还排着几首（含下一首）；0 = 没有队列。</summary>
     public int QueueCount;
 
+    /// <summary>本应用回退到上一首时为 true，环状动画反向滚动。</summary>
+    public bool RingReverse;
+
     public NowPlaying(bool hasSession, string title, string artist, TimeSpan position, TimeSpan duration,
         bool playing, bool hasTimeline, string[] prevTitles, string[] prevArtists, int prevCount, int playedCount)
     {

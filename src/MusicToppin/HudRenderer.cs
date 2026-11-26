@@ -444,7 +444,7 @@ internal static class HudRenderer
         return 10f * s + 14f * s + 5f * s + titleH + (artistH > 0f ? 3f * s + artistH : 0f) + 8f * s;
     }
 
-    public static void DrawRing(Graphics g, float s, NowPlaying np, RingLayout layout, bool green, bool editing, float anim)
+    public static void DrawRing(Graphics g, float s, NowPlaying np, RingLayout layout, bool green, bool editing, float anim, bool reverse)
     {
         if (layout == null) return;
 
@@ -461,12 +461,12 @@ internal static class HudRenderer
         // 二次缓出：起步比线性柔和，又不会像三次缓出那样第一帧走太多
         var t = 1f - (1f - raw) * (1f - raw);
         var fade = 0.55f + 0.45f * t;
-        var offset = layout.RollSign * (1f - t) * layout.Theta;
+        var direction = reverse ? -1f : 1f;
+        var offset = direction * layout.RollSign * (1f - t) * layout.Theta;
 
-        // 旧的「上一首」在原槽位淡出：窗口边缘没有额外空间让它完整滚出，
-        // 硬滚会被位图边界裁成一条竖线；淡出更轻，也不会穿帮。
-        // 绿幕模式卡片不透明、无法自然淡出，直接跳过。
-        if (layout.HasOutPrev && !green && raw < 1f)
+        // 正向切歌时旧的「上一首」在原槽位淡出；回退时新的上一首从外侧滚入，
+        // 不再额外画淡出卡，避免方向冲突。绿幕模式无法自然淡出，也跳过。
+        if (layout.HasOutPrev && !green && !reverse && raw < 1f)
         {
             var outAlpha = (int)(205f * (1f - raw));
             if (outAlpha > 14)
@@ -480,10 +480,11 @@ internal static class HudRenderer
 
         if (layout.HasPrev)
         {
+            var prevAlpha = reverse ? (int)(205f * t) : (int)(205f * fade);
             DrawRingCard(g, s, layout, layout.PrevTitle, layout.PrevArtist,
                 "上一首", layout.PrevAngle - offset, false, false, false,
                 TimeSpan.Zero, TimeSpan.Zero, false,
-                (int)(205f * fade), green, layout.Side == 3 || layout.Side <= 1);
+                prevAlpha, green, layout.Side == 3 || layout.Side <= 1);
         }
 
         if (layout.HasNext)
