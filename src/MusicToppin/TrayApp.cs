@@ -100,10 +100,13 @@ internal sealed class TrayApp : ApplicationContext
             _anchor = "";
             _settings.Anchor = "";
 
-            // 环状样式按拖到的边缘换方向；尺寸变化后再夹回工作区
-            UpdateRingSide();
+            // 先夹回工作区，再按最终位置判断贴边方向
             var clamped = ClampToWorkArea(_hud.Bounds);
             _hud.Location = clamped.Location;
+            UpdateRingSide();
+
+            // 环状方向可能改变窗口尺寸，再夹一次
+            if (_hud.IsRing) _hud.Location = ClampToWorkArea(_hud.Bounds).Location;
 
             _settings.X = _hud.Left;
             _settings.Y = _hud.Top;
@@ -702,7 +705,7 @@ internal sealed class TrayApp : ApplicationContext
         menu.DropDownItems.Add(new ToolStripSeparator());
 
         _itemAccentColor = MakeColorItem(
-            "主题色（红点 / 正在播放 / 进度条 / 左侧竖条）",
+            "主题色（红点 / 正在播放 / 进度条 / 强调竖条，贴左时在右）",
             Color.FromArgb(_settings.AccentColor),
             color => { _settings.AccentColor = color.ToArgb(); _settings.Save(); ApplyTheme(); });
         menu.DropDownItems.Add(_itemAccentColor);
@@ -815,60 +818,53 @@ internal sealed class TrayApp : ApplicationContext
 
     private void UpdateRingSide()
     {
+        // 离屏采集时窗口在屏幕外，按屏幕坐标判方向没有意义；退出离屏时会重算
+        if (_settings.CaptureOffscreen || _hud.IsOffscreen) return;
+
         int side;
+        bool left;
+
         switch (_settings.Anchor)
         {
             case "tl":
+                side = 0;
+                left = true;
+                break;
             case "tr":
                 side = 0;
+                left = false;
                 break;
             case "bl":
+                side = 1;
+                left = true;
+                break;
             case "br":
             case "center":
                 side = 1;
+                left = false;
                 break;
             case "left":
                 side = 2;
+                left = true;
                 break;
             case "right":
                 side = 3;
+                left = false;
                 break;
             default:
-                side = NearestRingSide();
+                var bounds = _hud.Bounds;
+                var area = Screen.FromRectangle(bounds).WorkingArea;
+                side = NearestRingSide(bounds, area);
+                left = bounds.Left + bounds.Width / 2f < area.Left + area.Width / 2f;
                 break;
         }
 
         _hud.SetRingSide(side);
-
-        // 经典/极简样式：贴左侧时灰卡左对齐、强调条在右、动画从左侧进入；
-        // 贴右侧保持原来的右对齐。四角按水平方向判断，自由拖动按窗口中心。
-        bool left;
-        switch (_settings.Anchor)
-        {
-            case "left":
-            case "tl":
-            case "bl":
-                left = true;
-                break;
-            case "right":
-            case "tr":
-            case "br":
-            case "center":
-                left = false;
-                break;
-            default:
-                var area = Screen.FromRectangle(_hud.Bounds).WorkingArea;
-                left = _hud.Bounds.Left + _hud.Bounds.Width / 2f < area.Left + area.Width / 2f;
-                break;
-        }
-
-        _hud.SetClassicSide(left ? 2 : 3);
+        _hud.SetClassicLeft(left);
     }
 
-    private int NearestRingSide()
+    private static int NearestRingSide(Rectangle bounds, Rectangle area)
     {
-        var bounds = _hud.Bounds;
-        var area = Screen.FromRectangle(bounds).WorkingArea;
         var top = bounds.Top - area.Top;
         var bottom = area.Bottom - bounds.Bottom;
         var left = bounds.Left - area.Left;
@@ -3093,6 +3089,7 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         _hud.SetCaptureOffscreen(false);
+        UpdateRingSide();
         _tray.ShowBalloonTip(2500, "Music Toppin", "浮窗已回到屏幕", ToolTipIcon.Info);
     }
     private void ShowWizard()
@@ -3252,9 +3249,13 @@ internal sealed class TrayApp : ApplicationContext
             _hud.Show();
         }
 
+        // 先按最终位置落位，再判断贴边方向（自由拖动时方向取决于落位后的中心）
+        if (!_settings.CaptureOffscreen) PlaceHud();
         UpdateRingSide();
         _hud.Render();
-        if (!_settings.CaptureOffscreen) PlaceHud();
+
+        // 环状方向可能改变窗口尺寸，再落位一次
+        if (!_settings.CaptureOffscreen && _hud.IsRing) PlaceHud();
 
         if (_settings.CaptureOccluded) _hud.SetCaptureOccluded(true);
         else _hud.TopMost = true;
@@ -3358,15 +3359,16 @@ internal sealed class TrayApp : ApplicationContext
         _itemRing.Checked = style == 2;
         _settings.Save();
 
-        UpdateRingSide();
         if (!string.IsNullOrEmpty(_anchor))
         {
             MoveHudTo(_anchor, fromUser: false);
         }
-        else
+        else if (!_settings.CaptureOffscreen)
         {
             var clamped = ClampToWorkArea(_hud.Bounds);
             _hud.Location = clamped.Location;
+            UpdateRingSide();
+            if (_hud.IsRing) _hud.Location = ClampToWorkArea(_hud.Bounds).Location;
         }
     }
 

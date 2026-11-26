@@ -56,7 +56,7 @@ internal sealed class HudForm : Form
     private bool _compact;
     private bool _ring;
     private int _ringSide = 1;
-    private int _classicSide = 3;
+    private bool _classicLeft;
     private bool _green;
     private bool _locked;
     private bool _editing;
@@ -200,16 +200,25 @@ internal sealed class HudForm : Form
         side = Math.Max(0, Math.Min(3, side));
         if (_ringSide == side) return;
         _ringSide = side;
-        Render();
+        if (_ring) Render();
     }
 
-    /// <summary>经典样式/极简样式的贴边方向：2 左、3 右（灰卡对齐与切歌动画方向）。</summary>
-    public void SetClassicSide(int side)
+    /// <summary>经典/极简样式贴左侧：灰卡左对齐、强调条在右、动画向左滑入。</summary>
+    public void SetClassicLeft(bool left)
     {
-        side = side == 2 ? 2 : 3;
-        if (_classicSide == side) return;
-        _classicSide = side;
-        if (!_ring) Render();
+        if (_classicLeft == left) return;
+        _classicLeft = left;
+
+        if (_ring) return;
+
+        // 动画进行中换边会瞬移，直接收敛到最终状态
+        if (_anim < 1f)
+        {
+            _animTimer.Stop();
+            _anim = 1f;
+        }
+
+        Render();
     }
 
     public bool IsRing
@@ -390,7 +399,7 @@ internal sealed class HudForm : Form
             }
             else
             {
-                layout = HudRenderer.Measure(_measureG, s, _state, _compact, _green, _classicSide);
+                layout = HudRenderer.Measure(_measureG, s, _state, _compact, _green, _classicLeft);
                 width = layout.Width;
                 height = layout.Height;
                 _layout = layout;

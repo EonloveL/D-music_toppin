@@ -246,5 +246,5 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - `main`：唯一开发线，已用 merge 提交把 **v1.1.1**（叠加层 / 离屏采集 / 遮挡模式）合进来，冲突点都在
   `TrayApp.cs`（菜单项/字段）、`Settings.cs`（注册表项）、`CHANGELOG.md`，处理原则是**两边都保留**。
 - `fix/v1`：停在 v1.1.1 发布点，只做 V1 修复；不要在这里加 V2 功能。
-- **版本号 1.4.0**（`VersionInfo.cs` + `installer/Installer.cs`）。
+- **版本号 1.4.1**（`VersionInfo.cs` + `installer/Installer.cs`）。
   发版时确认 GitHub Release 的 tag 与之一致，否则更新器会比对失败。

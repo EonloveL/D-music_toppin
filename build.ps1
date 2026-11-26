@@ -42,6 +42,32 @@ $icon = Join-Path $root 'src\MusicToppin\Assets\app.ico'
 $manifest = Join-Path $root 'src\MusicToppin\app.manifest'
 $appExe = Join-Path $appOut 'MusicToppin.exe'
 
+# 版本一致性检查：避免 tag/安装器/主程序不一致导致更新器反复提示
+$versionSource = Get-Content (Join-Path $root 'src\MusicToppin\VersionInfo.cs') -Raw
+$versionMatch = [regex]::Match($versionSource, 'AssemblyInformationalVersion\("([0-9.]+)"\)')
+$assemblyMatch = [regex]::Match($versionSource, 'AssemblyVersion\("([0-9.]+)"\)')
+$fileMatch = [regex]::Match($versionSource, 'AssemblyFileVersion\("([0-9.]+)"\)')
+$installerSource = Get-Content (Join-Path $root 'installer\Installer.cs') -Raw
+$installerMatch = [regex]::Match($installerSource, 'const string Version = "([0-9.]+)"')
+if (-not $versionMatch.Success -or -not $assemblyMatch.Success -or -not $fileMatch.Success -or -not $installerMatch.Success)
+{
+    throw '无法读取版本号（VersionInfo.cs / Installer.cs）'
+}
+$infoVersion = [Version]$versionMatch.Groups[1].Value
+foreach ($pair in @(
+    @{ Name = 'AssemblyVersion'; Value = [Version]$assemblyMatch.Groups[1].Value },
+    @{ Name = 'AssemblyFileVersion'; Value = [Version]$fileMatch.Groups[1].Value },
+    @{ Name = 'Installer.Version'; Value = [Version]$installerMatch.Groups[1].Value }))
+{
+    if ($pair.Value.Major -ne $infoVersion.Major -or
+        $pair.Value.Minor -ne $infoVersion.Minor -or
+        $pair.Value.Build -ne $infoVersion.Build)
+    {
+        throw ("版本号不一致：" + $pair.Name + "=" + $pair.Value + "，InformationalVersion=" + $infoVersion)
+    }
+}
+Write-Host ("== 版本 " + $versionMatch.Groups[1].Value) -ForegroundColor Cyan
+
 # 先清空输出目录，避免上一次的残留被打进 payload
 if (Test-Path $appOut) { Remove-Item $appOut -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force -Path $appOut | Out-Null
@@ -116,6 +142,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 Write-Host ("   payload.zip = " + [math]::Round((Get-Item $payload).Length / 1KB, 1) + " KB")
 
 Write-Host "== [5/5] 编译安装器" -ForegroundColor Cyan
+if (Test-Path $setup) { Remove-Item $setup -Force -ErrorAction SilentlyContinue }
 $setupArgs = @(
     '/target:winexe',
     "/out:`"$setup`"",

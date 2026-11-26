@@ -19,7 +19,7 @@ internal sealed class HudLayout
 {
     public int Width;
     public int Height;
-    public int Side;       // 0 上 / 1 下 / 2 左 / 3 右（经典样式用于贴边镜像）
+    public bool LeftAligned;   // 经典样式贴左侧：灰卡左对齐、强调条在右、动画向左滑入
 
     public RectangleF Card;
     public RectangleF Header;
@@ -183,12 +183,11 @@ internal static class HudRenderer
         }
     }
 
-    public static HudLayout Measure(Graphics g, float s, NowPlaying np, bool compact, bool green, int side)
+    public static HudLayout Measure(Graphics g, float s, NowPlaying np, bool compact, bool green, bool leftAligned)
     {
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-        side = Math.Max(0, Math.Min(3, side));
-        var layout = new HudLayout { Side = side };
+        var layout = new HudLayout { LeftAligned = leftAligned };
         var width = MF.Round(DesignWidth * s);
         var innerW = width - (PadX * 2 + AccentW) * s;
 
@@ -261,8 +260,8 @@ internal static class HudRenderer
 
             var card = new PrevCardLayout
             {
-                // 贴左侧时灰卡向左对齐，贴右侧时保持原来的右对齐；动画也从对应边缘进入
-                Card = new RectangleF(side == 2 ? 0f : width - cardW, totalH + gap, cardW, h),
+                // 贴左侧时灰卡向左对齐，贴右侧时保持原来的右对齐
+                Card = new RectangleF(leftAligned ? 0f : width - cardW, totalH + gap, cardW, h),
                 Alpha = PrevAlpha(i),
                 Scale = scale
             };
@@ -675,7 +674,7 @@ internal static class HudRenderer
         var cardBg = green
             ? C_CardOpaque
             : HudTheme.WithAlpha(Theme.Card, (int)(255f * MF.Clamp(Theme.CardOpacity, 0.05f, 1f)));
-        DrawCard(g, s, l.Card, cardBg, border, true, l.Side == 2);
+        DrawCard(g, s, l.Card, cardBg, border, true, l.LeftAligned);
 
         var header = l.Header;
         var accent = np.Playing ? C_Accent : Color.FromArgb(255, 124, 134, 148);
@@ -751,8 +750,8 @@ internal static class HudRenderer
     }
 
     /// <summary>
-    /// 画一层灰卡。动画期间：新卡从上方滑入，旧卡顺移到下一槽位并缩小变淡，
-    /// 被挤出的一张（ghost）继续下移并淡出。
+    /// 画一层灰卡。动画期间：新卡从上方滑入（贴左侧时从内侧向左滑入），
+    /// 旧卡顺移到下一槽位并缩小变淡，被挤出的一张（ghost）继续下移并淡出。
     /// </summary>
     private static void DrawPrevCard(Graphics g, float s, NowPlaying np, HudLayout layout, int index,
         bool ghost, Color border, bool green, float anim)
@@ -766,9 +765,13 @@ internal static class HudRenderer
         {
             fromRect = new RectangleF(card.Card.X, card.Card.Y - 16f * s, card.Card.Width, card.Card.Height);
 
-            // 贴右/贴左时，新灰卡从对应屏幕边缘滑入；上/下保持从上方进入
-            if (layout.Side == 2) fromRect.X = card.Card.X - 24f * s;
-            else if (layout.Side == 3) fromRect.X = card.Card.X + 24f * s;
+            // 贴左侧时从右侧向内展开/左移：右缘保持不动，左缘向左展开，不会超出窗口
+            if (layout.LeftAligned)
+            {
+                var dx = 24f * s;
+                fromRect.X = card.Card.X + dx;
+                fromRect.Width = Math.Max(1f, card.Card.Width - dx);
+            }
 
             fromScale = card.Scale;
             fromAlpha = 0f;
@@ -814,7 +817,7 @@ internal static class HudRenderer
 
         var fill = green ? C_CardOpaque : HudTheme.WithAlpha(Theme.Card, (int)(alpha * MF.Clamp(Theme.CardOpacity, 0.05f, 1f)));
         var borderColor = Color.FromArgb((int)(border.A * alpha / 255f), border.R, border.G, border.B);
-        DrawCard(g, s, rect, fill, borderColor, false, layout.Side == 2);
+        DrawCard(g, s, rect, fill, borderColor, false, false);
 
         var title = np.PrevTitles != null && index < np.PrevTitles.Length ? np.PrevTitles[index] : "";
         var artist = np.PrevArtists != null && index < np.PrevArtists.Length ? np.PrevArtists[index] : "";

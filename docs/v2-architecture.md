@@ -4,7 +4,7 @@
 > 本文回答两件事：**能不能在当前架构上做**，以及 **BV 点播会把架构推向哪里**。
 >
 > **说明**：本文是 V2 立项时的评估快照，里面的体积、测试数量和弹幕链路（当时还是 getConf + zlib）已被后续版本更新。
-> 最新数据与实现请以 [README](../README.md)、[CHANGELOG](../CHANGELOG.md)、[v2-handoff](v2-handoff.md) 为准（当前版本 1.4.0）。
+> 最新数据与实现请以 [README](../README.md)、[CHANGELOG](../CHANGELOG.md)、[v2-handoff](v2-handoff.md) 为准（当前版本 1.4.1）。
 
 ---
 
@@ -202,6 +202,6 @@ view API（拿 cid/标题/时长，无需 cookie）
 
 1. S3 剩余：Apple Music（只有试听）；QQ 音乐 / B 站 BV 已接入
 2. S5 已完成（「下一首 / 队列」已进 HUD，点歌成功/失败有叠加层提示）
-3. 发布前确认版本号（当前 1.4.0）与 GitHub Release tag 一致
+3. 发布前确认版本号（当前 1.4.1）与 GitHub Release tag 一致
 
 本仓库当前状态：V1.1.1 已发布并合入 main；V2 的 S1（队列）、S2（弹幕）、S3（网易云 / QQ 音乐）、S4（BV 播放）、S5（下一首 / 队列 / 视频小窗）以及 v1.3 权限、v1.4 环状毛玻璃与上屏向导均已完成，带 186 项单元测试。

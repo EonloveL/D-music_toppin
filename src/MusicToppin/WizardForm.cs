@@ -794,7 +794,7 @@ internal sealed class WizardForm : Form
 
         AddRich(box, "三、卡片显示", _h1, Ink);
         AddRich(box, "· 主卡片：完整歌名、完整歌手（自动换行）、上一首、播放进度。", _body, BodyInk);
-        AddRich(box, "· 下方灰卡：「播放完毕」和「更早播放」各一张，宽度递减、透明度递减，切歌时做 200ms 堆叠动画。", _body, BodyInk);
+        AddRich(box, "· 下方灰卡：「播放完毕」和「更早播放」各一张，宽度递减、透明度递减，切歌时做 200ms 堆叠动画；贴左侧时灰卡向左展开，贴右侧保持纵向堆叠。", _body, BodyInk);
         AddRich(box, "· 暂停时红点转灰并显示「已暂停」；没有会话时自动隐藏。", _body, BodyInk);
         AddRich(box, "· 点歌播放时多一行「下一首 ↓」和队列长度，队列空了自动收起。", _body, BodyInk);
         AddRich(box, "", _body, BodyInk);

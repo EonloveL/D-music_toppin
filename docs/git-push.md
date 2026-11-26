@@ -36,12 +36,13 @@ git push -u origin main
 # 1. 改版本号：src/MusicToppin/VersionInfo.cs + installer/Installer.cs
 # 2. 构建
 powershell -ExecutionPolicy Bypass -File .\build.ps1
-# 3. 提交 + 打 tag
+# 3. 提交 + 打 tag（tag 必须指向版本提交）
 git add -A
-git commit -m "release: v1.4.0"
-git tag v1.4.0
+git commit -m "release: v1.4.1"
+git tag -a v1.4.1 -m "Music Toppin v1.4.1"
 git push origin main --tags
-# 4. 在 GitHub 上建 Release，把 build\MusicToppin-Setup.exe 传上去
+# 4. 在 GitHub 上建 Release（已发布、Latest、不能 draft/prerelease）
+#    只传 build\MusicToppin-Setup.exe，并确认 asset digest 为 sha256:… 非空
 ```
 
 内置更新器默认读 `https://api.github.com/repos/EonloveL/D-music_toppin/releases/latest`，
