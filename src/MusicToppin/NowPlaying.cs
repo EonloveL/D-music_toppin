@@ -8,6 +8,9 @@ internal struct NowPlaying
     public bool HasSession;
     public string Title;
     public string Artist;
+
+    /// <summary>点歌人（非点歌播放时为空）。</summary>
+    public string Requester;
     public TimeSpan Position;
     public TimeSpan Duration;
     public bool Playing;

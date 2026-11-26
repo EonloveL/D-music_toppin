@@ -1161,6 +1161,9 @@ internal sealed class TrayApp : ApplicationContext
             state.Playing, true,
             prevTitles, prevArtists, prevCount, _ownPlayedCount);
         np.RingReverse = _ringReverseOnce;
+        np.Requester = _currentOwnEntry != null && _currentOwnEntry.QueueItem != null
+            ? _currentOwnEntry.QueueItem.Requester
+            : "";
 
         // 侧卡「下一首」优先显示前进栈里的歌（回退后点下一首会回到它）
         var forward = _forwardOwn.Count > 0 ? _forwardOwn[_forwardOwn.Count - 1] : null;
@@ -3010,6 +3013,7 @@ internal sealed class TrayApp : ApplicationContext
         {
             Title = np.HasSession ? np.Title : "",
             Artist = np.HasSession ? np.Artist : "",
+            Requester = np.Requester ?? "",
             Playing = np.Playing,
             Position = np.Position.TotalSeconds,
             Duration = np.Duration.TotalSeconds,

@@ -9,6 +9,7 @@ internal sealed class OverlayState
 {
     public string Title = "";
     public string Artist = "";
+    public string Requester = "";
     public bool Playing;
     public double Position;
     public double Duration;
@@ -46,6 +47,7 @@ internal sealed class OverlayState
         builder.Append('{');
         AppendString(builder, "title", Title);
         AppendString(builder, "artist", Artist);
+        AppendString(builder, "requester", Requester);
         AppendString(builder, "accent", Accent);
         AppendString(builder, "titleColor", TitleColor);
         AppendString(builder, "artistColor", ArtistColor);
@@ -649,6 +651,8 @@ internal sealed class OverlayServer : IDisposable
   .time{margin-left:auto;font-family:Consolas,monospace;font-size:11px;color:rgba(159,176,198,.62);}
   .title{font-size:19px;line-height:1.36;font-weight:600;color:var(--title);word-break:break-word;}
   .artist{margin-top:5px;font-size:14px;line-height:1.4;color:var(--artist);word-break:break-word;}
+  .req{margin-top:4px;font-size:11.5px;line-height:1.4;color:rgba(159,176,198,.78);word-break:break-word;}
+  .req:empty{display:none;}
   .divider{height:1px;background:rgba(255,255,255,.08);margin:11px 0 9px;}
   .nav{display:flex;align-items:baseline;gap:7px;font-size:12.5px;color:rgba(245,248,252,.86);}
   .nav .k{font-size:10px;letter-spacing:.1em;color:rgba(159,176,198,.62);}
@@ -679,6 +683,7 @@ internal sealed class OverlayServer : IDisposable
     </div>
     <div class=""title"" id=""title""></div>
     <div class=""artist"" id=""artist""></div>
+    <div class=""req"" id=""req""></div>
     <div class=""divider"" id=""divider""></div>
     <div class=""nav""><span class=""k"">上一首</span><span class=""v"" id=""prev"">—</span></div>
     <div class=""nav next"" id=""nextRow""><span class=""k"">下一首</span><span class=""v"" id=""next"">—</span></div>
@@ -716,6 +721,7 @@ internal sealed class OverlayServer : IDisposable
     document.querySelector('.dot').style.background=st.playing?(st.accent||'#FF3B30'):'#7C8694';
     document.getElementById('title').textContent=st.title||'';
     document.getElementById('artist').textContent=st.artist||'';
+    document.getElementById('req').textContent=st.requester?('点歌人：'+st.requester):'';
     document.getElementById('time').textContent=st.hasTimeline?fmt(st.position)+' / '+fmt(st.duration):'';
     var bar=document.getElementById('bar');
     if(st.hasTimeline&&st.duration>0){bar.style.display='block';document.getElementById('fill').style.width=Math.min(100,st.position/st.duration*100)+'%';}

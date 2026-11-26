@@ -25,6 +25,7 @@ internal sealed class HudLayout
     public RectangleF Header;
     public RectangleF Title;
     public RectangleF Artist;
+    public RectangleF Requester;
     public float DividerY;
     public RectangleF NavPrev;
     public RectangleF NavNext;
@@ -102,6 +103,7 @@ internal static class HudRenderer
     private static Color C_Accent { get { return Theme.Accent; } }
     private static Color C_Title { get { return Theme.Title; } }
     private static Color C_Artist { get { return Theme.Artist; } }
+    private static Color C_Requester { get { return HudTheme.Blend(Theme.Artist, Theme.Card, 0.72f); } }
     private static Color C_Muted { get { return HudTheme.Blend(Theme.Artist, Theme.Card, 0.62f); } }
     private static Color C_NavInk { get { return HudTheme.Blend(Theme.Title, Theme.Card, 0.86f); } }
     private static Color C_DimTitle { get { return HudTheme.Blend(Theme.Title, Theme.Card, 0.55f); } }
@@ -126,6 +128,7 @@ internal static class HudRenderer
 
     private static Font TitleFont(float s, bool compact) { return F("Microsoft YaHei UI", (compact ? 16f : 19f) * s, FontStyle.Bold); }
     private static Font ArtistFont(float s, bool compact) { return F("Microsoft YaHei UI", (compact ? 12.5f : 14f) * s, FontStyle.Regular); }
+    private static Font RequesterFont(float s, bool compact) { return F("Microsoft YaHei UI", (compact ? 10.5f : 11.5f) * s, FontStyle.Regular); }
     private static Font TagFont(float s) { return F("Microsoft YaHei UI", 11f * s, FontStyle.Bold); }
     private static Font NavFont(float s) { return F("Microsoft YaHei UI", 12.5f * s, FontStyle.Regular); }
     private static Font NavKeyFont(float s) { return F("Microsoft YaHei UI", 10f * s, FontStyle.Regular); }
@@ -201,6 +204,8 @@ internal static class HudRenderer
         var artistH = string.IsNullOrWhiteSpace(np.Artist)
             ? 0f
             : MF.Max(ArtistFont(s, compact).Height, MeasureWrapped(g, np.Artist, ArtistFont(s, compact), innerW));
+        var hasRequester = !string.IsNullOrWhiteSpace(np.Requester);
+        var requesterH = hasRequester ? RequesterFont(s, compact).Height : 0f;
 
         var headerH = 14f * s;
         var navRowH = 17f * s;
@@ -213,6 +218,7 @@ internal static class HudRenderer
 
         var cardH = PadY * s * 2 + headerH + 8f * s + titleH + 5f * s + artistH
                     + (string.IsNullOrWhiteSpace(np.Artist) ? 0 : 4f * s)
+                    + (hasRequester ? 3f * s + requesterH : 0f)
                     + 11f * s + navBlockH
                     + (hasTimeline ? 5f * s : 0f);
 
@@ -226,6 +232,17 @@ internal static class HudRenderer
         y += titleH + 5f * s;
         layout.Artist = new RectangleF(PadX * s + AccentW * s, y, innerW, artistH);
         if (artistH > 0) y += artistH + 4f * s;
+
+        if (hasRequester)
+        {
+            layout.Requester = new RectangleF(PadX * s + AccentW * s, y, innerW, requesterH);
+            y += requesterH + 3f * s;
+        }
+        else
+        {
+            layout.Requester = RectangleF.Empty;
+        }
+
         y += 11f * s;
         layout.DividerY = y;
         y += 2f * s;
@@ -496,8 +513,11 @@ internal static class HudRenderer
                 (int)(205f * fade), green, layout.Side == 3);
         }
 
+        var ringTag = editing ? "编辑中" : (np.Playing ? "正在播放" : "已暂停");
+        if (!string.IsNullOrWhiteSpace(np.Requester)) ringTag += " · " + np.Requester;
+
         DrawRingCard(g, s, layout, np.Title, np.Artist,
-            editing ? "编辑中" : (np.Playing ? "正在播放" : "已暂停"),
+            ringTag,
             layout.CurrentAngle - offset, true, np.Playing, editing,
             np.Position, np.Duration, layout.HasTimeline,
             (int)(255f * fade), green, false);
@@ -740,6 +760,13 @@ internal static class HudRenderer
             using (var b = new SolidBrush(C_Artist))
             using (var sf = WrapFormat())
                 g.DrawString(np.Artist, ArtistFont(s, compact), b, l.Artist, sf);
+        }
+
+        if (!string.IsNullOrWhiteSpace(np.Requester) && l.Requester.Height > 0)
+        {
+            using (var b = new SolidBrush(C_Requester))
+            using (var sf = EllipsisFormat())
+                g.DrawString("点歌人：" + np.Requester, RequesterFont(s, compact), b, l.Requester, sf);
         }
 
         var lineY = l.DividerY + 0.5f;
