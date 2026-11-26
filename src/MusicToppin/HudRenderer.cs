@@ -19,6 +19,7 @@ internal sealed class HudLayout
 {
     public int Width;
     public int Height;
+    public int Side;       // 0 上 / 1 下 / 2 左 / 3 右（经典样式用于贴边镜像）
 
     public RectangleF Card;
     public RectangleF Header;
@@ -182,11 +183,12 @@ internal static class HudRenderer
         }
     }
 
-    public static HudLayout Measure(Graphics g, float s, NowPlaying np, bool compact, bool green)
+    public static HudLayout Measure(Graphics g, float s, NowPlaying np, bool compact, bool green, int side)
     {
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-        var layout = new HudLayout();
+        side = Math.Max(0, Math.Min(3, side));
+        var layout = new HudLayout { Side = side };
         var width = MF.Round(DesignWidth * s);
         var innerW = width - (PadX * 2 + AccentW) * s;
 
@@ -259,7 +261,8 @@ internal static class HudRenderer
 
             var card = new PrevCardLayout
             {
-                Card = new RectangleF(width - cardW, totalH + gap, cardW, h),
+                // 贴左侧时灰卡向左对齐，贴右侧时保持原来的右对齐；动画也从对应边缘进入
+                Card = new RectangleF(side == 2 ? 0f : width - cardW, totalH + gap, cardW, h),
                 Alpha = PrevAlpha(i),
                 Scale = scale
             };
@@ -672,7 +675,7 @@ internal static class HudRenderer
         var cardBg = green
             ? C_CardOpaque
             : HudTheme.WithAlpha(Theme.Card, (int)(255f * MF.Clamp(Theme.CardOpacity, 0.05f, 1f)));
-        DrawCard(g, s, l.Card, cardBg, border, true);
+        DrawCard(g, s, l.Card, cardBg, border, true, l.Side == 2);
 
         var header = l.Header;
         var accent = np.Playing ? C_Accent : Color.FromArgb(255, 124, 134, 148);
@@ -762,6 +765,11 @@ internal static class HudRenderer
         if (index == 0)
         {
             fromRect = new RectangleF(card.Card.X, card.Card.Y - 16f * s, card.Card.Width, card.Card.Height);
+
+            // 贴右/贴左时，新灰卡从对应屏幕边缘滑入；上/下保持从上方进入
+            if (layout.Side == 2) fromRect.X = card.Card.X - 24f * s;
+            else if (layout.Side == 3) fromRect.X = card.Card.X + 24f * s;
+
             fromScale = card.Scale;
             fromAlpha = 0f;
         }
@@ -806,7 +814,7 @@ internal static class HudRenderer
 
         var fill = green ? C_CardOpaque : HudTheme.WithAlpha(Theme.Card, (int)(alpha * MF.Clamp(Theme.CardOpacity, 0.05f, 1f)));
         var borderColor = Color.FromArgb((int)(border.A * alpha / 255f), border.R, border.G, border.B);
-        DrawCard(g, s, rect, fill, borderColor, false);
+        DrawCard(g, s, rect, fill, borderColor, false, layout.Side == 2);
 
         var title = np.PrevTitles != null && index < np.PrevTitles.Length ? np.PrevTitles[index] : "";
         var artist = np.PrevArtists != null && index < np.PrevArtists.Length ? np.PrevArtists[index] : "";
@@ -865,7 +873,7 @@ internal static class HudRenderer
         }
     }
 
-    private static void DrawCard(Graphics g, float s, RectangleF r, Color fill, Color border, bool accent)
+    private static void DrawCard(Graphics g, float s, RectangleF r, Color fill, Color border, bool accent, bool accentRight)
     {
         using (var path = RoundRect(r, Radius * s))
         {
@@ -877,7 +885,10 @@ internal static class HudRenderer
             var old = g.Clip;
             g.SetClip(path);
             using (var b = new SolidBrush(C_Accent))
-                g.FillRectangle(b, r.X, r.Y, AccentW * s, r.Height);
+            {
+                if (accentRight) g.FillRectangle(b, r.Right - AccentW * s, r.Y, AccentW * s, r.Height);
+                else g.FillRectangle(b, r.X, r.Y, AccentW * s, r.Height);
+            }
             g.Clip = old;
         }
     }

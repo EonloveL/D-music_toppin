@@ -815,8 +815,6 @@ internal sealed class TrayApp : ApplicationContext
 
     private void UpdateRingSide()
     {
-        if (!_settings.Ring) return;
-
         int side;
         switch (_settings.Anchor)
         {
@@ -841,6 +839,30 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         _hud.SetRingSide(side);
+
+        // 经典/极简样式：贴左侧时灰卡左对齐、强调条在右、动画从左侧进入；
+        // 贴右侧保持原来的右对齐。四角按水平方向判断，自由拖动按窗口中心。
+        bool left;
+        switch (_settings.Anchor)
+        {
+            case "left":
+            case "tl":
+            case "bl":
+                left = true;
+                break;
+            case "right":
+            case "tr":
+            case "br":
+            case "center":
+                left = false;
+                break;
+            default:
+                var area = Screen.FromRectangle(_hud.Bounds).WorkingArea;
+                left = _hud.Bounds.Left + _hud.Bounds.Width / 2f < area.Left + area.Width / 2f;
+                break;
+        }
+
+        _hud.SetClassicSide(left ? 2 : 3);
     }
 
     private int NearestRingSide()
@@ -3336,7 +3358,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemRing.Checked = style == 2;
         _settings.Save();
 
-        if (style == 2) UpdateRingSide();
+        UpdateRingSide();
         if (!string.IsNullOrEmpty(_anchor))
         {
             MoveHudTo(_anchor, fromUser: false);
