@@ -50,6 +50,7 @@ internal sealed class HudForm : Form
     private readonly System.Windows.Forms.Timer _animTimer;
 
     private Bitmap _bmp;
+    private byte[] _premulBuffer;
     private HudLayout _layout;
     private RingLayout _ringLayout;
     private NowPlaying _state = NowPlaying.Empty;
@@ -200,7 +201,16 @@ internal sealed class HudForm : Form
         side = Math.Max(0, Math.Min(3, side));
         if (_ringSide == side) return;
         _ringSide = side;
-        if (_ring) Render();
+        if (_ring)
+        {
+            // 动画进行中换方向/尺寸会瞬移，直接收敛到最终状态
+            if (_anim < 1f)
+            {
+                _animTimer.Stop();
+                _anim = 1f;
+            }
+            Render();
+        }
     }
 
     /// <summary>经典/极简样式贴左侧：灰卡左对齐、强调条在右、动画向左滑入。</summary>
@@ -453,17 +463,21 @@ internal sealed class HudForm : Form
     }
 
     /// <summary>把 ARGB 直通 alpha 转成预乘 alpha（分层窗口的要求）。</summary>
-    private static void Premultiply(Bitmap bmp)
+    private void Premultiply(Bitmap bmp)
     {
         var rect = new Rectangle(0, 0, bmp.Width, bmp.Height);
         var data = bmp.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
         try
         {
             var stride = Math.Abs(data.Stride);
-            var buffer = new byte[stride * bmp.Height];
-            Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
+            var length = stride * bmp.Height;
+            if (_premulBuffer == null || _premulBuffer.Length < length)
+                _premulBuffer = new byte[length];
 
-            for (var i = 0; i < buffer.Length; i += 4)
+            var buffer = _premulBuffer;
+            Marshal.Copy(data.Scan0, buffer, 0, length);
+
+            for (var i = 0; i < length; i += 4)
             {
                 var a = buffer[i + 3];
                 if (a == 255) continue;
@@ -479,7 +493,7 @@ internal sealed class HudForm : Form
                 buffer[i + 2] = (byte)((buffer[i + 2] * a + 127) / 255);
             }
 
-            Marshal.Copy(buffer, 0, data.Scan0, buffer.Length);
+            Marshal.Copy(buffer, 0, data.Scan0, length);
         }
         finally
         {

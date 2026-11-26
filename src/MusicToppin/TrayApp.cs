@@ -633,6 +633,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly List<OwnHistoryEntry> _ownHistory = new List<OwnHistoryEntry>();
     private readonly List<OwnHistoryEntry> _forwardOwn = new List<OwnHistoryEntry>();
     private bool _suppressOwnHistory;
+    private int _ownPlayedCount;
     private volatile OverlayState _overlaySnapshot;
     private volatile bool _exiting;
     private DateTime _lastSkipCommandUtc;
@@ -1091,6 +1092,7 @@ internal sealed class TrayApp : ApplicationContext
             if (_settings.VideoAudio == 1)
             {
                 if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
+                _ownPlayedCount++;
                 StartVideoPlayback(song);
                 return;
             }
@@ -1098,6 +1100,7 @@ internal sealed class TrayApp : ApplicationContext
             await EnsurePlayer().PlayAsync(song);
             if (generation != _playGeneration) return;
             if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
+            _ownPlayedCount++;
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
         }
         catch (Exception ex)
@@ -1152,7 +1155,7 @@ internal sealed class TrayApp : ApplicationContext
             true, song.Title, song.Artist, state.Position,
             state.Duration > TimeSpan.Zero ? state.Duration : song.Duration,
             state.Playing, true,
-            prevTitles, prevArtists, prevCount, 0);
+            prevTitles, prevArtists, prevCount, _ownPlayedCount);
 
         // 侧卡「下一首」优先显示前进栈里的歌（回退后点下一首会回到它）
         var forward = _forwardOwn.Count > 0 ? _forwardOwn[_forwardOwn.Count - 1] : null;
@@ -1683,6 +1686,7 @@ internal sealed class TrayApp : ApplicationContext
                 await EnsurePlayer().PlayAsync(song);
                 if (generation != _playGeneration) return;
                 if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
+                _ownPlayedCount++;
                 PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
                 Logger.Write("default playlist play: " + song.Title +
                              (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist));
@@ -2918,6 +2922,7 @@ internal sealed class TrayApp : ApplicationContext
         if (_videoBvid.Length > 0 && _settings.VideoAudio == 1)
         {
             if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
+            _ownPlayedCount++;
             StartVideoPlayback(song);
             return;
         }
@@ -2927,6 +2932,7 @@ internal sealed class TrayApp : ApplicationContext
             await EnsurePlayer().PlayAsync(song);
             if (generation != _playGeneration) return;
             if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
+            _ownPlayedCount++;
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
             Logger.Write("queue play: " + song.Title + (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist));
             LiveNotify("正在播放点歌",
@@ -3795,6 +3801,7 @@ internal sealed class TrayApp : ApplicationContext
         if (_videoBvid.Length > 0 && _settings.VideoAudio == 1)
         {
             entry.Started = true;
+            _ownPlayedCount++;
             StartVideoPlayback(entry.Song);
             return true;
         }
@@ -3838,6 +3845,7 @@ internal sealed class TrayApp : ApplicationContext
             await EnsurePlayer().PlayAsync(entry.Song);
             if (generation != _playGeneration) return true;
             entry.Started = true;
+            _ownPlayedCount++;
             PushOwnState(entry.Song, new PlaybackState { Playing = true, Duration = entry.Song.Duration });
             if (entry.Kind == OwnKind.DefaultPlaylist) _defaultPlaylistFailStreak = 0;
             Logger.Write((goingBack ? "previous" : "forward") + " play: " + entry.Song.Title +

@@ -89,9 +89,10 @@ internal sealed class NowPlayingService : IDisposable
             var own = _own;
             if (own != null)
             {
-                var ownSnapshot = WithHistory(own.Value);
-                UpdateHistory(ownSnapshot.Title, ownSnapshot.Artist);
-                if (generation == _pollGeneration) Publish(ownSnapshot);
+                // 先更新持久化历史，再直接发布自家快照：
+                // 自家快照已经带会话历史，避免切歌第一帧被旧历史覆盖
+                UpdateHistory(own.Value.Title, own.Value.Artist);
+                if (generation == _pollGeneration) Publish(own.Value);
                 return;
             }
 

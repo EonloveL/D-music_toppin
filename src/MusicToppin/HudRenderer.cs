@@ -57,10 +57,13 @@ internal sealed class RingLayout
     public bool HasPrev;
     public bool HasNext;
     public bool HasTimeline;
+    public bool HasOutPrev;
     public RectangleF PrevRect;
     public RectangleF NextRect;
     public string PrevTitle = "";
     public string PrevArtist = "";
+    public string OutPrevTitle = "";
+    public string OutPrevArtist = "";
     public string NextTitle = "";
     public string NextArtist = "";
     public int QueueCount;
@@ -349,6 +352,14 @@ internal static class HudRenderer
         layout.PrevTitle = layout.HasPrev ? (np.PrevTitles[0] ?? "") : "";
         layout.PrevArtist = layout.HasPrev && np.PrevArtists != null && np.PrevArtists.Length > 0
             ? (np.PrevArtists[0] ?? "") : "";
+
+        // 再往前一首：切歌时作为「滚出」的旧上一首，让滚动看起来是连续的
+        layout.HasOutPrev = np.PrevCount > 1 && np.PrevTitles != null && np.PrevTitles.Length > 1 &&
+                            !string.IsNullOrWhiteSpace(np.PrevTitles[1]);
+        layout.OutPrevTitle = layout.HasOutPrev ? (np.PrevTitles[1] ?? "") : "";
+        layout.OutPrevArtist = layout.HasOutPrev && np.PrevArtists != null && np.PrevArtists.Length > 1
+            ? (np.PrevArtists[1] ?? "") : "";
+
         layout.NextTitle = np.NextTitle ?? "";
         layout.NextArtist = np.NextArtist ?? "";
         layout.QueueCount = np.QueueCount;
@@ -357,7 +368,10 @@ internal static class HudRenderer
         var sideInner = layout.SideWidth - 20f * s;
         var prevH = RingSideHeight(g, s, layout.PrevTitle, layout.PrevArtist, sideInner);
         var nextH = RingSideHeight(g, s, layout.NextTitle, layout.NextArtist, sideInner);
-        layout.SideHeight = Math.Max(70f * s, Math.Max(prevH, nextH));
+        var outH = layout.HasOutPrev
+            ? RingSideHeight(g, s, layout.OutPrevTitle, layout.OutPrevArtist, sideInner)
+            : 0f;
+        layout.SideHeight = Math.Max(70f * s, Math.Max(prevH, Math.Max(nextH, outH)));
 
         layout.Width = (int)Math.Ceiling((horizontal ? 688f : 310f) * s);
         layout.Height = horizontal
@@ -443,9 +457,26 @@ internal static class HudRenderer
                 g.FillRectangle(bg, 0, 0, layout.Width, layout.Height);
         }
 
-        var t = MF.Clamp(anim, 0f, 1f);
+        var raw = MF.Clamp(anim, 0f, 1f);
+        // 二次缓出：起步比线性柔和，又不会像三次缓出那样第一帧走太多
+        var t = 1f - (1f - raw) * (1f - raw);
         var fade = 0.55f + 0.45f * t;
         var offset = layout.RollSign * (1f - t) * layout.Theta;
+
+        // 旧的「上一首」在原槽位淡出：窗口边缘没有额外空间让它完整滚出，
+        // 硬滚会被位图边界裁成一条竖线；淡出更轻，也不会穿帮。
+        // 绿幕模式卡片不透明、无法自然淡出，直接跳过。
+        if (layout.HasOutPrev && !green && raw < 1f)
+        {
+            var outAlpha = (int)(205f * (1f - raw));
+            if (outAlpha > 14)
+            {
+                DrawRingCard(g, s, layout, layout.OutPrevTitle, layout.OutPrevArtist,
+                    "更早播放", layout.PrevAngle, false, false, false,
+                    TimeSpan.Zero, TimeSpan.Zero, false, outAlpha, green,
+                    layout.Side == 3 || layout.Side <= 1);
+            }
+        }
 
         if (layout.HasPrev)
         {
@@ -605,22 +636,16 @@ internal static class HudRenderer
         using (var main = new SolidBrush(Color.FromArgb(Math.Min(255, Math.Max(0, alpha)), color)))
         {
             // 当前播放不发光；上一首/下一首保留一层很轻的同色柔光
-            if (glowRadius > 0f)
+            if (glowRadius > 0f && alpha >= 40)
             {
                 var glowAlpha = Math.Min(255, Math.Max(0, (int)(alpha * 0.16f)));
                 using (var glow = new SolidBrush(Color.FromArgb(glowAlpha, color)))
                 {
                     var r = glowRadius;
-                    var offsets = new[]
-                    {
-                        new PointF(-r, 0f), new PointF(r, 0f), new PointF(0f, -r), new PointF(0f, r)
-                    };
-
-                    foreach (var offset in offsets)
-                    {
-                        g.DrawString(text, font, glow,
-                            new RectangleF(rect.X + offset.X, rect.Y + offset.Y, rect.Width, rect.Height), format);
-                    }
+                    g.DrawString(text, font, glow, new RectangleF(rect.X - r, rect.Y, rect.Width, rect.Height), format);
+                    g.DrawString(text, font, glow, new RectangleF(rect.X + r, rect.Y, rect.Width, rect.Height), format);
+                    g.DrawString(text, font, glow, new RectangleF(rect.X, rect.Y - r, rect.Width, rect.Height), format);
+                    g.DrawString(text, font, glow, new RectangleF(rect.X, rect.Y + r, rect.Width, rect.Height), format);
                 }
             }
 
