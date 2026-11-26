@@ -27,7 +27,8 @@ $sources = @(
     'IniFile.cs',
     'QQMusic.cs',
     'Bilibili.cs',
-    'SongResolvers.cs'
+    'SongResolvers.cs',
+    'Playlist.cs'
 ) | ForEach-Object { Join-Path $app $_ }
 $sources += Get-ChildItem $tests -Filter *.cs -File | ForEach-Object { $_.FullName }
 

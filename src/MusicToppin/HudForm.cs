@@ -53,6 +53,8 @@ internal sealed class HudForm : Form
     private HudLayout _layout;
     private NowPlaying _state = NowPlaying.Empty;
     private bool _compact;
+    private bool _ring;
+    private int _ringSide = 1;
     private bool _green;
     private bool _locked;
     private bool _editing;
@@ -91,7 +93,7 @@ internal sealed class HudForm : Form
         {
             try
             {
-                _anim = Math.Min(1f, _anim + 0.10f);
+                _anim = Math.Min(1f, _anim + (_ring ? 0.06f : 0.10f));
                 Render();
             }
             catch (Exception ex)
@@ -153,13 +155,17 @@ internal sealed class HudForm : Form
     private static string BuildSignature(NowPlaying np)
     {
         var builder = new System.Text.StringBuilder();
-        builder.Append(np.Title).Append('\u0001').Append(np.Artist)
+        builder.Append(np.HasSession ? "1" : "0").Append('\u0001')
+            .Append(np.Title).Append('\u0001').Append(np.Artist)
             .Append('\u0001').Append(np.Playing ? "1" : "0")
             .Append('\u0001').Append(np.HasTimeline ? "1" : "0")
             .Append('\u0001').Append((int)np.Position.TotalSeconds)
             .Append('\u0001').Append((int)np.Duration.TotalSeconds)
             .Append('\u0001').Append(np.PrevCount)
-            .Append('\u0001').Append(np.PlayedCount);
+            .Append('\u0001').Append(np.PlayedCount)
+            .Append('\u0001').Append(np.NextTitle ?? "")
+            .Append('\u0002').Append(np.NextArtist ?? "")
+            .Append('\u0001').Append(np.QueueCount);
 
         for (var i = 0; i < NowPlaying.HistorySlots; i++)
         {
@@ -176,6 +182,27 @@ internal sealed class HudForm : Form
         if (_compact == compact) return;
         _compact = compact;
         Render();
+    }
+
+    public void SetRing(bool ring)
+    {
+        if (_ring == ring) return;
+        _ring = ring;
+        Render();
+    }
+
+    /// <summary>环状样式的方向：0 上、1 下、2 左、3 右。圆心在对应屏幕外侧。</summary>
+    public void SetRingSide(int side)
+    {
+        side = Math.Max(0, Math.Min(3, side));
+        if (_ringSide == side) return;
+        _ringSide = side;
+        Render();
+    }
+
+    public bool IsRing
+    {
+        get { return _ring; }
     }
 
     public void SetGreen(bool green)
@@ -336,19 +363,43 @@ internal sealed class HudForm : Form
         try
         {
             var s = Scale;
-            var layout = HudRenderer.Measure(_measureG, s, _state, _compact, _green);
-            _layout = layout;
+            HudLayout layout = null;
+            RingLayout ringLayout = null;
+            int width;
+            int height;
 
-            if (_bmp == null || _bmp.Width != layout.Width || _bmp.Height != layout.Height)
+            if (_ring)
+            {
+                ringLayout = HudRenderer.MeasureRing(_measureG, s, _state, _ringSide);
+                width = ringLayout.Width;
+                height = ringLayout.Height;
+                _layout = null;
+            }
+            else
+            {
+                layout = HudRenderer.Measure(_measureG, s, _state, _compact, _green);
+                width = layout.Width;
+                height = layout.Height;
+                _layout = layout;
+            }
+
+            if (_bmp == null || _bmp.Width != width || _bmp.Height != height)
             {
                 if (_bmp != null) _bmp.Dispose();
-                _bmp = new Bitmap(Math.Max(1, layout.Width), Math.Max(1, layout.Height), PixelFormat.Format32bppArgb);
+                _bmp = new Bitmap(Math.Max(1, width), Math.Max(1, height), PixelFormat.Format32bppArgb);
             }
 
             using (var g = Graphics.FromImage(_bmp))
             {
                 g.Clear(Color.Transparent);
-                HudRenderer.Draw(g, s, _state, layout, _green, _compact, _editing, _anim);
+                if (_ring)
+                {
+                    HudRenderer.DrawRing(g, s, _state, ringLayout, _green, _editing, _anim);
+                }
+                else
+                {
+                    HudRenderer.Draw(g, s, _state, layout, _green, _compact, _editing, _anim);
+                }
             }
 
             var dump = Environment.GetEnvironmentVariable("MUSICTOPPIN_DUMP");
@@ -359,10 +410,10 @@ internal sealed class HudForm : Form
 
             Premultiply(_bmp);
 
-            if (Width != layout.Width || Height != layout.Height)
+            if (Width != width || Height != height)
             {
-                Width = layout.Width;
-                Height = layout.Height;
+                Width = width;
+                Height = height;
             }
 
             Push();

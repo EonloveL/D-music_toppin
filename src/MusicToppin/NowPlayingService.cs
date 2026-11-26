@@ -26,6 +26,7 @@ internal sealed class NowPlayingService : IDisposable
     private readonly System.Threading.Timer _timer;
 
     private int _busy;
+    private int _pollGeneration;
     private DateTime _pollStartedUtc = DateTime.MinValue;
     private volatile bool _disposed;
 
@@ -73,12 +74,14 @@ internal sealed class NowPlayingService : IDisposable
             if (_pollStartedUtc != DateTime.MinValue && DateTime.UtcNow - _pollStartedUtc > PollHeartbeatTimeout)
             {
                 Logger.Write("poll watchdog: force reset");
+                Interlocked.Increment(ref _pollGeneration);
                 _smtc.Reset();
                 Interlocked.Exchange(ref _busy, 0);
             }
             return;
         }
 
+        var generation = Interlocked.Increment(ref _pollGeneration);
         _pollStartedUtc = DateTime.UtcNow;
         try
         {
@@ -88,12 +91,12 @@ internal sealed class NowPlayingService : IDisposable
             {
                 var ownSnapshot = WithHistory(own.Value);
                 UpdateHistory(ownSnapshot.Title, ownSnapshot.Artist);
-                Publish(ownSnapshot);
+                if (generation == _pollGeneration) Publish(ownSnapshot);
                 return;
             }
 
             var smtc = await _smtc.ReadAsync();
-            if (_disposed) return;
+            if (_disposed || generation != _pollGeneration) return;
 
             // SMTC 正在放歌时就不必每拍都去枚举窗口 + 音频会话（那是这条通道最贵的部分）
             var needWindow = smtc == null || !smtc.Value.Playing || _activeKind == SourceKind.Window;
@@ -102,23 +105,26 @@ internal sealed class NowPlayingService : IDisposable
 
             if (value == null)
             {
-                Publish(NowPlaying.Empty);
+                if (generation == _pollGeneration) Publish(NowPlaying.Empty);
                 return;
             }
 
             UpdateHistory(value.Value.Title, value.Value.Artist);
 
-            Publish(WithHistory(value.Value));
+            if (generation == _pollGeneration) Publish(WithHistory(value.Value));
         }
         catch (Exception ex)
         {
             Logger.Write("poll: " + ex.GetType().Name + " " + ex.Message);
-            Publish(NowPlaying.Empty);
+            if (generation == _pollGeneration) Publish(NowPlaying.Empty);
         }
         finally
         {
-            _pollStartedUtc = DateTime.MinValue;
-            Interlocked.Exchange(ref _busy, 0);
+            if (generation == _pollGeneration)
+            {
+                _pollStartedUtc = DateTime.MinValue;
+                Interlocked.Exchange(ref _busy, 0);
+            }
         }
     }
 

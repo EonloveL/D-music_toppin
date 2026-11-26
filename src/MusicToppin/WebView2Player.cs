@@ -23,15 +23,15 @@ internal sealed class WebView2Player : IDisposable
         "<html><body style='margin:0;background:#000'>" +
         "<audio id='a' preload='auto'></audio>" +
         "<script>" +
-        "function playAudio(u){var a=document.getElementById('a');a.src=u;a.play().catch(function(){});}" +
+        "function playAudio(u){window.__playError=0;var a=document.getElementById('a');a.src=u;var p=a.play();if(p&&p.catch)p.catch(function(){window.__playError=1;});}" +
         "function stopAudio(){var a=document.getElementById('a');a.pause();a.removeAttribute('src');a.load();}" +
         "function seekTo(t){var a=document.getElementById('a');try{a.currentTime=t;}catch(e){}}" +
         "function setVolume(v){var a=document.getElementById('a');try{a.volume=Math.max(0,Math.min(1,v));}catch(e){}}" +
-        "function getState(){var a=document.getElementById('a');return JSON.stringify({t:a.currentTime||0,d:a.duration||0,p:a.paused,e:a.error?a.error.code:0,ended:a.ended});}" +
+        "function getState(){var a=document.getElementById('a');return JSON.stringify({t:a.currentTime||0,d:a.duration||0,p:a.paused,e:(a.error?a.error.code:(window.__playError?1:0)),ended:a.ended});}" +
         "</script></body></html>";
 
     private static readonly Regex StateRegex = new Regex(
-        "\"t\":([0-9.]+).*?\"d\":([0-9.]+).*?\"p\":(true|false).*?\"e\":(\\d+).*?\"ended\":(true|false)",
+        "\"t\":([0-9.]+).*?\"d\":([0-9.]+).*?\"p\":(true|false).*?\"e\":(-?\\d+).*?\"ended\":(true|false)",
         RegexOptions.Compiled);
 
     private Form _host;
@@ -42,6 +42,9 @@ internal sealed class WebView2Player : IDisposable
     private bool _backupTried;
     private bool _failureReported;
     private ResolvedSong _current;
+    private DateTime _lastProgressUtc = DateTime.MinValue;
+    private TimeSpan _lastPosition;
+    private Task _stopTask;
     private readonly object _gate = new object();
 
     public event Action<PlaybackState> StateChanged;
@@ -159,22 +162,42 @@ internal sealed class WebView2Player : IDisposable
     {
         if (song == null || string.IsNullOrWhiteSpace(song.AudioUrl)) return;
 
+        // 等上一次 StopAsync 真正执行完 stopAudio，避免旧脚本把新歌停掉
+        var stopTask = _stopTask;
+        if (stopTask != null)
+        {
+            try { await stopTask; } catch { }
+        }
+
         await EnsureReadyAsync();
-        _current = song;
+
+        _poll.Stop();
+        _current = null;
         _backupTried = false;
         _failureReported = false;
 
         await ApplyVolumeAsync();
         await _web.CoreWebView2.ExecuteScriptAsync("playAudio(" + ToJsString(song.AudioUrl) + ")");
+
+        _current = song;
+        _lastProgressUtc = DateTime.UtcNow;
+        _lastPosition = TimeSpan.Zero;
         _poll.Start();
     }
 
-    public async Task StopAsync()
+    public Task StopAsync()
     {
         // 先清当前项，避免「停止」的异步收尾把下一首的 Current 抹掉
         _current = null;
         _failureReported = false;
 
+        var task = StopCoreAsync();
+        _stopTask = task;
+        return task;
+    }
+
+    private async Task StopCoreAsync()
+    {
         try
         {
             _poll.Stop();
@@ -242,6 +265,8 @@ internal sealed class WebView2Player : IDisposable
             if (error != 0 && _current != null && !_backupTried && !string.IsNullOrEmpty(_current.BackupUrl))
             {
                 _backupTried = true;
+                _lastProgressUtc = DateTime.UtcNow;
+                _lastPosition = TimeSpan.Zero;
                 await _web.CoreWebView2.ExecuteScriptAsync("playAudio(" + ToJsString(_current.BackupUrl) + ")");
                 return;
             }
@@ -254,6 +279,29 @@ internal sealed class WebView2Player : IDisposable
                 if (failed != null)
                 {
                     try { failed("音频加载失败（直链可能已过期，或这一条需要登录 B 站）"); }
+                    catch (Exception ex) { Logger.Write("player failed handler: " + ex.Message); }
+                }
+            }
+
+            var now = DateTime.UtcNow;
+            if (position > _lastPosition.TotalSeconds + 0.2)
+            {
+                _lastPosition = TimeSpan.FromSeconds(position);
+                _lastProgressUtc = now;
+            }
+
+            // 自动播放被拦、WebView2 渲染进程卡住、或网络一直起不来：按不同情况设看门狗
+            var stuckSeconds = paused && position < 0.2 ? 8 : 20;
+            if (_current != null && error == 0 && !ended &&
+                (now - _lastProgressUtc).TotalSeconds > stuckSeconds)
+            {
+                _failureReported = true;
+                var failed = Failed;
+                if (failed != null)
+                {
+                    try { failed(paused && position < 0.2
+                        ? "音频没有开始播放（可能被自动播放策略拦截）"
+                        : "音频播放卡住（网络或 WebView2 无响应）"); }
                     catch (Exception ex) { Logger.Write("player failed handler: " + ex.Message); }
                 }
             }

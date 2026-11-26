@@ -24,8 +24,9 @@ internal static class Secrets
         }
         catch (Exception ex)
         {
+            // 宁可让用户重新登录，也不要把 cookie 明文写进注册表
             Logger.Write("secret protect: " + ex.Message);
-            return value;
+            return "";
         }
     }
 

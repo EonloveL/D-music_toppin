@@ -5,7 +5,7 @@
 ## 0. 一句话现状
 
 **V1.1.1 已发布（叠加层 / 离屏采集 / 遮挡模式，已合进 main）；V2 已完成 S1（点歌指令 + 队列）、S2（B 站弹幕接入 + 点歌自动播放）、S3-网易云、S4（BV 播放链路）。**
-S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示 + 视频小窗）。剩下 Apple Music（酷狗按需求先移除）。版本号 **1.2.5**。
+S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「播放器检查」），S5 也已完成（HUD / 叠加层「下一首」+ 托盘队列列表 + 观众端提示 + 视频小窗）。剩下 Apple Music（酷狗按需求先移除）。版本号 **1.4.0**。
 
 ## 1. 仓库与构建
 
@@ -15,8 +15,8 @@ S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「�
 | 分支 | `main` 是唯一开发线（V2 + v1.1.1 已合并）；`fix/v1` 保留为 v1.1.1 发布点 |
 | 最新提交 | 见 `git log -1` |
 | 构建 | `powershell -ExecutionPolicy Bypass -File .\build.ps1`（**不需要 .NET SDK**，首次自动下载工具链到 `.cache\nuget`） |
-| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（148 项，退出码 0 = 全过） |
-| 产物 | `build\MusicToppin-Setup.exe`（约 399 KB）、`build\app\`（主程序 257 KB） |
+| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（186 项，退出码 0 = 全过） |
+| 产物 | `build\MusicToppin-Setup.exe`（约 825 KB）、`build\app\`（主程序约 335 KB） |
 | 运行 | 装好后从托盘启动；调试直接跑 `build\app\MusicToppin.exe` |
 
 **重要**：项目是 `.NET Framework 4.8` + 直接调 Roslyn `csc`（**不是** `dotnet build`，仓库里的 `MusicToppin.csproj` 是历史遗留，不要用它构建）。
@@ -33,26 +33,28 @@ S3 已接入网易云 + QQ 音乐（含「同步官方客户端登录」与「�
 ### S2 弹幕接入（已实测直播间）
 
 ```
-房间号 → room_init（短号→真实房号）→ getConf（token + wss 列表）
-      → ClientWebSocket + 游客鉴权（uid=0, protover=2）
-      → 30 秒心跳 → op=5 收包 → zlib 解包 → DANMU_MSG
+房间号 → room_init（短号→真实房号）→ getDanmuInfo（wbi 签名，token + wss 列表；失败回退 getConf）
+      → ClientWebSocket + 鉴权（游客 uid=0，或登录 uid；protover=3）
+      → 30 秒心跳 → op=5 收包 → zlib / brotli 解包 → DANMU_MSG
       → SongRequestParser.TryParse → RequestQueue.Enqueue → 自动播放
 ```
 
 | 文件 | 职责 |
 |---|---|
-| `src/MusicToppin/Danmaku.cs` | `DanmakuClient`（连接/鉴权/心跳/重连）+ `DanmakuProtocol`（封包、拆包、zlib、`DANMU_MSG` 解析）+ `BilibiliLive`（房号解析、取 token） |
+| `src/MusicToppin/Danmaku.cs` | `DanmakuClient`（连接/鉴权/心跳/重连/会话刷新）+ `DanmakuProtocol`（封包、拆包、zlib/brotli、`DANMU_MSG` 解析）+ `BilibiliLive`（房号解析、wbi 签名、取 token）+ `DanmakuPermissions`（点歌/切歌权限） |
 | `src/MusicToppin/Json.cs` | 零依赖只读 JSON（对象→Dictionary / 数组→List） |
 | `src/MusicToppin/TrayApp.cs` | 「弹幕点歌」菜单：连接/断开、队列状态、自动播放、放不了就跳下一首 |
 | `src/MusicToppin/Settings.cs` | `LiveRoomId`、`LiveAutoConnect`（记住直播间，启动自动重连） |
-| `tests/` | 148 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
+| `tests/` | 186 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
 
 行为要点：
 
 - 只认「点歌」开头的弹幕；`点歌姬` 不会误判
 - 第一首自动开播，播完自动下一首；不支持/解析失败的那首提示并跳过
 - 断线自动重连：2 秒起翻倍，最长 30 秒；连上超过 60 秒会重置退避
-- 弹幕走游客身份，不需要账号
+- 会话刷新默认 300 秒；120 秒收不到任何协议包按半开连接重连
+- 弹幕默认走游客身份；部分房间要求登录，登录后 token 与 uid 自动匹配
+- 点歌 / 切歌权限可在托盘「弹幕权限」随时修改，默认：点歌需粉丝团灯牌或舰长，切歌仅点歌人且房管可切全部
 
 协议细节见 **[docs/v2-danmaku.md](v2-danmaku.md)**（含实测数据与排错表）。
 
@@ -118,7 +120,14 @@ QQ 音乐：点歌 qq 起风了
 - **自动选平台**：`点歌 歌名` 只看「应用内可播」的登录态 —— 只登录一个就用它，都登录网易云优先、QQ 兜底；
   `wy` / `qq` 前缀强制指定；`BV` 永远走 B 站（`SongResolvers.AutoOrder` 有单元测试）
 - **单队列播放**：同一时间只放一首（`_playingFromQueue` + 手动点播先 `StopOwnPlayback`）
-- **弹幕切歌/撤回权限**：`SkipPolicy` / `RemovePolicy`（0 所有人、1 仅点歌人/本人、2 关闭），菜单在「弹幕点歌」下
+- 弹幕切歌/撤回权限：`SkipPolicy`（0 所有人、1 仅点歌人且房管可切全部、2 仅房管、3 关闭）/ `RemovePolicy`（0 所有人、1 仅本人且房管可撤全部（默认）、2 关闭），见 `DanmakuPermissions`，菜单在「弹幕点歌」下；
+  托盘根菜单另有「弹幕权限（点歌 / 切歌）」快捷入口，可随时切回「所有人」
+- **点歌权限**：`RequestPolicy`（0 所有人、1 粉丝团灯牌或舰长（默认）、2 仅舰长、3 关闭）；粉丝牌必须是本直播间的（`info[3][3]`）；
+  `DanmakuMessage` 已解析 `MedalLevel / MedalName / MedalRoomId / GuardLevel`（`info[3]` / `info[7]`）
+- **v1.3 上屏向导**：`WizardForm` + `WizardContext`，按软件推荐叠加层 / 绿幕 / 离屏，一键应用；含弹幕点歌、权限、功能说明、FAQ
+- **v1.4 环状毛玻璃**：`HudRenderer.MeasureRing/DrawRing` + `HudForm.SetRing/SetRingSide`；按位置锚点自动选择上/下/左/右，圆心在屏幕外，下一首/上一首沿圆周排列并随切歌滚动
+- **v1.4 默认歌单**：`Playlist.cs` + `Netease.LoadPlaylist/ResolveById` + `QQMusic.LoadPlaylist/ResolveByMid`；设置里只存平台/ID/名称，播放时逐首取流；点歌队列优先，空了自动续默认歌单
+- **反作弊保守模式**：`AppSettings.DisableMediaKeys`；关闭时 `WindowPlayers.MediaKeysEnabled=false`，不再调用 `keybd_event` 发送媒体键，只影响外部播放器切歌
 - **登录凭据**：`Secrets` 用 DPAPI（CurrentUser）加密 `NeteaseCookie` / `QQMusicCookie` 再写注册表，旧明文读取时兼容
 - **点歌音量**：`AppSettings.PlayerVolume`（默认 60），菜单「播放控制 → 点歌音量」预设/滑块；
   `WebView2Player.Volume` + JS `setVolume()`，拖动即时生效（只改内置播放器，不动系统音量）
@@ -146,14 +155,17 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 - 叠加层两个源共用一个端口：`OverlayServer.Start(preferredPort)` 优先上次端口、占用则 4681-4750 往后找，
   成功端口写回 `OverlayPort`；托盘可分别「复制叠加层地址 / 复制视频小窗地址」
 - 至此 S5 完成；剩余是 S3 的 Apple Music（酷狗暂缓）
-> **弹幕排查教训**：见 [postmortem-danmaku.md](postmortem-danmaku.md)（brotli / getDanmuInfo(2245) / 登录 uid=mid 三个坑）。\n\n## 3. 关键决策与代价
+> **弹幕排查教训**：见 [postmortem-danmaku.md](postmortem-danmaku.md)（brotli / getDanmuInfo(2245) / 登录 uid=mid 三个坑）。
+
+## 3. 关键决策与代价
 
 | 决策 | 原因 | 代价 |
 |---|---|---|
-| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **399 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
+| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **约 825 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
 | **双模式**：纯显示 / 点歌 | 保住 V1「轻量」卖点 | 首次播放时才创建 WebView2（纯显示模式 25–33 MB） |
-| 弹幕用 **getConf** 而不是 getDanmuInfo | 新接口要 wbi 签名 + cookie，未签名直接 -352 | 老接口随时可能下线，届时要做 wbi |
-| 鉴权 **protover=2**（只 zlib） | .NET Framework 4.8 没有 Brotli | 服务器若强制 brotli 就收不到弹幕（会记警告） |
+| 弹幕优先 **getDanmuInfo（wbi）+ 2245**，旧 getConf 兜底 | 旧接口对部分房间只推人气包；新接口能正常订阅弹幕 | 需要 wbi 签名；旧接口随时可能下线 |
+| 鉴权 **protover=3**，支持 **brotli + zlib** | 部分房间只下发 brotli；只支持 zlib 会「鉴权成功但 0 条弹幕」 | 内置 BrotliSharpLib + Unsafe，安装包约 +1.3 MB |
+| 登录 token 必须配登录 **uid** | 登录后 token 绑定 uid，鉴权包仍发 uid=0 会秒断；`nav` 字段是 `mid` | 登录失败时自动回退游客连接 |
 | 点歌自动播放做成「队列驱动」 | S2 先闭环：弹幕 → 入队 → 出声 | 支持网易云 + QQ 音乐 + B 站 BV；Apple 入队后会被跳过并提示 |
 | 网易云走 **公开 `/api/*`** 而不是 weapi 加密 | 2026-11 实测游客可用，省掉 AES/RSA 一大段代码 | 游客曲库有限；登录后更多（客户端同步 / 扫码） |
 | 登录优先「**同步官方客户端**」 | 参考工具的文档就是「登录交给官方客户端」，用户不想复制 cookie | 读客户端私有 cookie（仅本机、不上传）；换号后要重新同步；依赖 Win10+ 的 `winsqlite3.dll` |
@@ -175,15 +187,15 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 
 ## 5. 已知坑（别再踩）
 
-1. **安装器会删文件**：现在只清理 `*_MusicToppin.exe` 残留。加新依赖 DLL 时不要假设会被保留，确认 payload 里有。
+1. **安装器会替换整个安装目录**：只允许替换真正的 MusicToppin 安装目录（`MusicToppin.exe` 产品名/注册表匹配）；加新依赖 DLL 时必须进 payload。
 2. **WebView2 必须在可见窗口里**：宿主窗口是屏幕外 2×2（`-32000,-32000`），不能用隐藏窗口，否则不渲染/不出声。
 3. **B 站音频直链有热链保护**：所有 CDN 请求必须带 `Referer: https://www.bilibili.com`，否则 403。备用地址（`backupUrl`）要自动重试。
 4. **playurl 目前不需要 wbi 签名**（2026-11 实测），但 B 站随时可能改；如果突然返回 `-403`，先怀疑这一点。
-5. **弹幕包是 zlib 不是裸 deflate**：`DeflateStream` 要先剥 2 字节头 + 4 字节 Adler32；解出来的内容还是若干完整包，要递归拆。
+5. **弹幕包有 zlib 和 brotli 两种**：zlib（`ver=2`）不是裸 deflate，`DeflateStream` 要先剥 2 字节头 + 4 字节 Adler32；brotli（`ver=3`）用 BrotliSharpLib 解。解出来的内容还是若干完整包，要递归拆。
 6. **`DANMU_MSG` 的 `cmd` 可能带后缀**（`DANMU_MSG:4:0:2:2:2:0`），必须前缀匹配。
 7. **冷场房间**（如房号 6 的赛事重播）能鉴权成功但收不到弹幕，别当成连接失败。
 8. **csc 编译要带 `/nowarn:8632`**，且所有 `.cs` 里中文字符串用 UTF-8；`toolchain.ps1` 已处理。
-9. **`git` 是便携版**：`D:\tools\MinGit\cmd\git.exe`（没进 PATH）。提交前先 `cd D:\music_toppin`。
+9. **`git` 现在可直接用**；仓库在 `E:\D-music_toppin`。早期文档提到的便携版路径 `D:\tools\MinGit\cmd\git.exe` 只作历史参考。
 10. **中文日志乱码**：`%TEMP%\musictoppin.log` 是 UTF-8，PowerShell 5.1 直接 `Get-Content` 会乱码，用 `-Encoding UTF8`。
 11. **执行策略**：交互式 pwsh 里 `. script.ps1` 会被挡，统一用 `powershell -NoProfile -ExecutionPolicy Bypass -File xxx.ps1`。
 12. **别改成弹气泡「通知」**：点歌/连接/播放这类自动事件走 `LiveNotify`（默认只写日志），
@@ -217,15 +229,15 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 ```
 
 - 日志：`%TEMP%\musictoppin.log`（`sources:`、`netease client:`、`netease account:`、`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`qq:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
-- 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded` 等）
+- 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded`、`DefaultPlaylistSource`、`NeteasePlaylistId`、`QQPlaylistId` 等）
 - 安装目录：默认 `%LocalAppData%\Programs\MusicToppin`，可自定义
-- 单元测试：`run-tests.ps1`（148 项，不必联网；已引用 `src\MusicToppin\lib` 下的 brotli 依赖）
+- 单元测试：`run-tests.ps1`（186 项，不必联网；已引用 `src\MusicToppin\lib` 下的 brotli 依赖）
 - 叠加层：托盘开启后日志里有 `overlay server started at http://127.0.0.1:<port>/`，浏览器可直接打开验证
 
 ## 7. 新会话建议的第一次动作
 
 1. `git checkout main && git pull`
-2. `run-tests.ps1` + `build.ps1` 确认环境（应全绿、约 399 KB）
+2. `run-tests.ps1` + `build.ps1` 确认环境（应全绿、约 825 KB）
 3. `MusicToppin.exe --room=5050` 跑 30 秒，看日志里有没有 `danmaku auth ok` 与 `song request`
 4. `MusicToppin.exe --fake-danmaku="点歌 起风了"` 验证网易云链路（日志应有 `resolved:` + `queue play:`）
 5. 接着做 **S3 剩余**：Apple Music（只有试听），或按用户要求再评估酷狗/酷我
@@ -235,5 +247,5 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - `main`：唯一开发线，已用 merge 提交把 **v1.1.1**（叠加层 / 离屏采集 / 遮挡模式）合进来，冲突点都在
   `TrayApp.cs`（菜单项/字段）、`Settings.cs`（注册表项）、`CHANGELOG.md`，处理原则是**两边都保留**。
 - `fix/v1`：停在 v1.1.1 发布点，只做 V1 修复；不要在这里加 V2 功能。
-- **版本号 1.2.1**（`VersionInfo.cs` + `installer/Installer.cs`）。
+- **版本号 1.4.0**（`VersionInfo.cs` + `installer/Installer.cs`）。
   发版时确认 GitHub Release 的 tag 与之一致，否则更新器会比对失败。

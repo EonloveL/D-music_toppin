@@ -2,6 +2,9 @@
 
 > 参考项目：[BxNcm-DJ](https://github.com/Taumata-wwq/BxNcm-DJ)（Electron + Vue3 + Chromium）。
 > 本文回答两件事：**能不能在当前架构上做**，以及 **BV 点播会把架构推向哪里**。
+>
+> **说明**：本文是 V2 立项时的评估快照，里面的体积、测试数量和弹幕链路（当时还是 getConf + zlib）已被后续版本更新。
+> 最新数据与实现请以 [README](../README.md)、[CHANGELOG](../CHANGELOG.md)、[v2-handoff](v2-handoff.md) 为准（当前版本 1.4.0）。
 
 ---
 
@@ -12,7 +15,7 @@
 ```
 
 - 只读：不播放、不联网、不碰版权内容
-- 卖点：96 KB、26 MB 内存、0.16% CPU、无运行时依赖
+- 卖点：当时约 96 KB、26 MB 内存、0.16% CPU、无运行时依赖（当前约 335 KB）
 - 已有可复用资产：分层窗口渲染、颜色/位置/透明度、绿幕、上屏向导、更新器、托盘与热键
 
 ## 二、V2 必须新增的四层
@@ -54,7 +57,7 @@
 | B. mpv/ffmpeg sidecar | 内存低（~50 MB）、格式最全、可做本地缓存 | 体积 +30–70 MB，进程管理与 IPC 复杂，杀软更敏感 | 作为"无 WebView2 环境"的兜底 |
 | C. Media Foundation | 零依赖、零体积 | DASH/FLV 不可靠，热链头无解 | 不采用 |
 
-> 关键取舍：V1 的"极低占用"卖点在点歌模式下必然被打破。建议做成**双模式**——纯显示模式（现在这套，96 KB / 26 MB）和点歌模式（加载 WebView2），用户自己选。
+> 关键取舍：V1 的"极低占用"卖点在点歌模式下必然被打破。建议做成**双模式**——纯显示模式（当时 96 KB / 26 MB，当前约 296 KB / 25–33 MB）和点歌模式（加载 WebView2），用户自己选。
 
 ### 3.4 双模式下的状态源
 
@@ -121,7 +124,7 @@ internal interface IPlaybackEngine : IDisposable
 |---|---|---|
 | 网易云加密（weapi/eapi/linuxapi） | ✅ 算法可移植 | 纯 C# 实现，约 300 行；`netease-crypto.ts` 可逐段对照重写 |
 | B站 WBI 签名 | ✅ | `wbi.ts` 逻辑固定，C# 重写约 80 行 |
-| B站弹幕协议 | ✅ | WS + zlib 解包 + JSON，约 500 行 |
+| B站弹幕协议 | ✅ | WS + zlib/brotli 解包 + JSON，约 500 行 |
 | B站 playurl（含 Referer/cookie） | ✅ | 逻辑简单，难点在签名与风控 |
 | 播放层（Chromium `<audio>`） | ✅ 思路可移植 | 我们用 WebView2 达到同等效果 |
 | UI（Vue3 + Electron） | ❌ | 不搬；我们用 WinForms + GDI+ 已有 HUD |
@@ -197,8 +200,8 @@ view API（拿 cid/标题/时长，无需 cookie）
 
 ## 八、下一步建议
 
-1. S3 剩余：QQ 音乐 / Apple Music（照着 `Netease.cs` 写，`SongResolvers` 加 case）
-2. S5 再把「下一首/队列」接进 HUD，并把点歌成功/失败做成弹幕提示
-3. 发布前确认版本号（已升到 1.2.0）与 GitHub Release tag 一致
+1. S3 剩余：Apple Music（只有试听）；QQ 音乐 / B 站 BV 已接入
+2. S5 已完成（「下一首 / 队列」已进 HUD，点歌成功/失败有叠加层提示）
+3. 发布前确认版本号（当前 1.4.0）与 GitHub Release tag 一致
 
-本仓库当前状态：V1.1.1 已发布并合入 main；V2 的 S1（队列）、S2（弹幕）、S3-网易云、S4（BV 播放）已完成，带 94 项单元测试。
+本仓库当前状态：V1.1.1 已发布并合入 main；V2 的 S1（队列）、S2（弹幕）、S3（网易云 / QQ 音乐）、S4（BV 播放）、S5（下一首 / 队列 / 视频小窗）以及 v1.3 权限、v1.4 环状毛玻璃与上屏向导均已完成，带 186 项单元测试。

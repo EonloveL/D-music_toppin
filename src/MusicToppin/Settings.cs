@@ -9,13 +9,26 @@ namespace MusicToppin;
 internal sealed class AppSettings
 {
     private const string KeyPath = @"Software\MusicToppin";
-    private const int CurrentSchema = 3;
+    private const int CurrentSchema = 5;
 
     public int X = -1;
     public int Y = -1;
     public bool Green;
     public bool Locked = true;
-    public bool Compact;
+
+    /// <summary>卡片样式：0 = 击杀播报，1 = 极简，2 = 环状毛玻璃。</summary>
+    public int Style;
+
+    public bool Compact
+    {
+        get { return Style == 1; }
+    }
+
+    public bool Ring
+    {
+        get { return Style == 2; }
+    }
+
     public bool AutoStart;
     public bool Visible = true;
     public bool Hotkeys = true;
@@ -42,17 +55,34 @@ internal sealed class AppSettings
     /// <summary>内置播放器音量（0-100）。默认 60，避免直播时盖过游戏/人声。</summary>
     public int PlayerVolume = 60;
 
-    /// <summary>视频点播的声音：1 = 跟随视频（音画同步，默认），0 = 走应用播放器（可调音量）。</summary>
-    public int VideoAudio = 1;
+    /// <summary>视频点播的声音：1 = 跟随视频（音画同步），0 = 走应用播放器（默认，确保 OBS 有声）。</summary>
+    public int VideoAudio;
 
     /// <summary>叠加层上次用的端口（0 = 没记录）。</summary>
     public int OverlayPort;
 
-    /// <summary>弹幕切歌权限：0 = 所有人，1 = 仅当前点歌人，2 = 关闭。</summary>
-    public int SkipPolicy;
+    /// <summary>弹幕点歌权限：0 = 所有人，1 = 粉丝团灯牌或舰长（默认），2 = 仅舰长，3 = 关闭。</summary>
+    public int RequestPolicy = 1;
 
-    /// <summary>弹幕撤回队列权限：0 = 所有人，1 = 仅本人，2 = 关闭。</summary>
-    public int RemovePolicy;
+    /// <summary>弹幕切歌权限：0 = 所有人，1 = 仅点歌人（房管可切全部），2 = 仅房管，3 = 关闭。</summary>
+    public int SkipPolicy = 1;
+
+    /// <summary>弹幕撤回队列权限：0 = 所有人，1 = 仅本人（默认，房管可撤全部），2 = 关闭。</summary>
+    public int RemovePolicy = 1;
+
+    /// <summary>是否允许发送系统媒体键（上一首/下一首）。关闭后只影响外部播放器的切歌，不影响点歌。</summary>
+    public bool DisableMediaKeys;
+
+    /// <summary>默认歌单来源：0 = 未设置，1 = 网易云，2 = QQ 音乐（二选一）。</summary>
+    public int DefaultPlaylistSource;
+
+    /// <summary>默认歌单是否启用（导入后自动开，可手动暂停）。</summary>
+    public bool DefaultPlaylistEnabled;
+
+    public string NeteasePlaylistId = "";
+    public string NeteasePlaylistName = "";
+    public string QQPlaylistId = "";
+    public string QQPlaylistName = "";
 
     /// <summary>网易云登录 cookie（MUSIC_U 等；空 = 游客）。</summary>
     public string NeteaseCookie = "";
@@ -112,7 +142,8 @@ internal sealed class AppSettings
                 s.Y = ReadInt(key, "Y", -1);
                 s.Green = ReadInt(key, "Green", 0) == 1;
                 s.Locked = ReadInt(key, "Locked", 1) == 1;
-                s.Compact = ReadInt(key, "Compact", 0) == 1;
+                s.Style = ReadInt(key, "Style", ReadInt(key, "Compact", 0) == 1 ? 1 : 0);
+                if (s.Style < 0 || s.Style > 2) s.Style = 0;
                 s.AutoStart = ReadInt(key, "AutoStart", 0) == 1;
                 s.Visible = ReadInt(key, "Visible", 1) == 1;
                 s.Hotkeys = ReadInt(key, "Hotkeys", 1) == 1;
@@ -127,8 +158,19 @@ internal sealed class AppSettings
                 s.VideoAudio = ReadInt(key, "VideoAudio", 0);
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
 
-                s.SkipPolicy = ReadInt(key, "SkipPolicy", 0);
-                s.RemovePolicy = ReadInt(key, "RemovePolicy", 0);
+                s.SkipPolicy = ReadInt(key, "SkipPolicy", 1);
+                s.RequestPolicy = ReadInt(key, "RequestPolicy", 1);
+                if (s.SkipPolicy < 0 || s.SkipPolicy > 3) s.SkipPolicy = 1;
+                if (s.RequestPolicy < 0 || s.RequestPolicy > 3) s.RequestPolicy = 1;
+                s.RemovePolicy = ReadInt(key, "RemovePolicy", 1);
+                s.DisableMediaKeys = ReadInt(key, "DisableMediaKeys", 0) == 1;
+                s.DefaultPlaylistSource = ReadInt(key, "DefaultPlaylistSource", 0);
+                if (s.DefaultPlaylistSource < 0 || s.DefaultPlaylistSource > 2) s.DefaultPlaylistSource = 0;
+                s.DefaultPlaylistEnabled = ReadInt(key, "DefaultPlaylistEnabled", 0) == 1;
+                s.NeteasePlaylistId = ReadString(key, "NeteasePlaylistId", "");
+                s.NeteasePlaylistName = ReadString(key, "NeteasePlaylistName", "");
+                s.QQPlaylistId = ReadString(key, "QQPlaylistId", "");
+                s.QQPlaylistName = ReadString(key, "QQPlaylistName", "");
                 s.SessionRefreshSeconds = ReadInt(key, "SessionRefreshSeconds", 300);
                 s.BilibiliCookie = Secrets.Unprotect(ReadString(key, "BilibiliCookie", ""));
                 s.BilibiliUid = ReadString(key, "BilibiliUid", "");
@@ -166,6 +208,17 @@ internal sealed class AppSettings
             // 旧版默认「跟随视频」，OBS 浏览器源可能不允许带声自动播放；升级后先保证有声
             if (s.Schema < 3) s.VideoAudio = 0;
 
+            // v1.3：切歌权限新增「仅房管」；旧版 2 = 关闭，映射到新版 3，避免升级后反而放宽权限。
+            // 旧版默认 0 = 所有人，升级后改成推荐值 1（普通观众只能切自己点的，房管可切全部）。
+            if (s.Schema < 4)
+            {
+                if (s.SkipPolicy == 2) s.SkipPolicy = 3;
+                else if (s.SkipPolicy == 0) s.SkipPolicy = 1;
+            }
+
+            // v1.4：旧 Compact 已在读取时映射成 Style；这里统一落盘
+            Logger.Write("settings migrated: style=" + s.Style + " request=" + s.RequestPolicy +
+                         " skip=" + s.SkipPolicy + " remove=" + s.RemovePolicy);
             s.Save();
         }
 
@@ -210,6 +263,7 @@ internal sealed class AppSettings
                 WriteInt(key, "Y", Y);
                 WriteInt(key, "Green", Green ? 1 : 0);
                 WriteInt(key, "Locked", Locked ? 1 : 0);
+                WriteInt(key, "Style", Style);
                 WriteInt(key, "Compact", Compact ? 1 : 0);
                 WriteInt(key, "AutoStart", AutoStart ? 1 : 0);
                 WriteInt(key, "Visible", Visible ? 1 : 0);
@@ -224,7 +278,15 @@ internal sealed class AppSettings
                 WriteInt(key, "VideoAudio", VideoAudio);
                 WriteInt(key, "OverlayPort", OverlayPort);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
+                WriteInt(key, "RequestPolicy", RequestPolicy);
                 WriteInt(key, "RemovePolicy", RemovePolicy);
+                WriteInt(key, "DisableMediaKeys", DisableMediaKeys ? 1 : 0);
+                WriteInt(key, "DefaultPlaylistSource", DefaultPlaylistSource);
+                WriteInt(key, "DefaultPlaylistEnabled", DefaultPlaylistEnabled ? 1 : 0);
+                try { key.SetValue("NeteasePlaylistId", NeteasePlaylistId ?? "", RegistryValueKind.String); } catch { }
+                try { key.SetValue("NeteasePlaylistName", NeteasePlaylistName ?? "", RegistryValueKind.String); } catch { }
+                try { key.SetValue("QQPlaylistId", QQPlaylistId ?? "", RegistryValueKind.String); } catch { }
+                try { key.SetValue("QQPlaylistName", QQPlaylistName ?? "", RegistryValueKind.String); } catch { }
                 WriteInt(key, "SessionRefreshSeconds", SessionRefreshSeconds);
                 try { key.SetValue("BilibiliCookie", Secrets.Protect(BilibiliCookie ?? ""), RegistryValueKind.String); } catch { }
                 try { key.SetValue("BilibiliUid", BilibiliUid ?? "", RegistryValueKind.String); } catch { }

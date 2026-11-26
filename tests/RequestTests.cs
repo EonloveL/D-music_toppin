@@ -117,6 +117,13 @@ namespace MusicToppin.Tests
             TestRun.Check(loose.Enqueue(Parse("点歌 起风了", "观众A", 4001)).Accepted, "冷却为 0 时可重复点");
             TestRun.Check(loose.Enqueue(Parse("点歌 起风了", "观众A", 4001)).Accepted, "冷却为 0 时同用户可连点");
 
+            // 本地「测试点歌」跳过冷却/去重，但仍然入队
+            var testQueue = new RequestQueue { MaxSize = 5, UserCooldown = TimeSpan.FromSeconds(30), SongCooldown = TimeSpan.FromMinutes(5) };
+            TestRun.Check(testQueue.Enqueue(Parse("点歌 起风了", "本地测试", 9001)).Accepted, "测试点歌：首次入队");
+            TestRun.Check(!testQueue.Enqueue(Parse("点歌 起风了", "本地测试", 9001)).Accepted, "测试点歌：正常冷却仍生效");
+            TestRun.Check(testQueue.Enqueue(Parse("点歌 起风了", "本地测试", 9001), ignoreLimits: true).Accepted,
+                "测试点歌：ignoreLimits 可跳过冷却/去重");
+
             // 冷却按 uid：同名不同 uid 不互相影响，同 uid 改昵称也绕不过
             var uidQueue = new RequestQueue { MaxSize = 5, UserCooldown = TimeSpan.FromSeconds(30), SongCooldown = TimeSpan.Zero };
             TestRun.Check(uidQueue.Enqueue(Parse("点歌 起风了", "同名", 5001)).Accepted, "uid 冷却：第一首");

@@ -190,16 +190,20 @@ internal sealed class OverlayServer : IDisposable
                 // 只接受本机回环 Host，挡住 DNS rebinding（外部页面把域名解析到 127.0.0.1 来读 /state）
                 if (!IsAllowedHost(request.Host))
                 {
-                    WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", "forbidden");
+                    WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", "forbidden",
+                        !string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase));
                     return;
                 }
 
                 if (!string.Equals(request.Method, "GET", StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase))
                 {
-                    WriteResponse(stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "method not allowed");
+                    WriteResponse(stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "method not allowed",
+                        !string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase));
                     return;
                 }
+
+                var includeBody = !string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
 
                 var path = request.Path;
                 var queryIndex = path.IndexOf('?');
@@ -235,11 +239,11 @@ internal sealed class OverlayServer : IDisposable
                 }
                 else
                 {
-                    WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", "not found");
+                    WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", "not found", includeBody);
                     return;
                 }
 
-                WriteResponse(stream, "200 OK", contentType, body);
+                WriteResponse(stream, "200 OK", contentType, body, includeBody);
             }
         }
         catch
@@ -377,7 +381,7 @@ internal sealed class OverlayServer : IDisposable
         }
     }
 
-    private static void WriteResponse(Stream stream, string status, string contentType, string body)
+    private static void WriteResponse(Stream stream, string status, string contentType, string body, bool includeBody = true)
     {
         var bytes = Encoding.UTF8.GetBytes(body ?? "");
         var header =
@@ -389,7 +393,7 @@ internal sealed class OverlayServer : IDisposable
             "Connection: close\r\n\r\n";
         var headerBytes = Encoding.ASCII.GetBytes(header);
         stream.Write(headerBytes, 0, headerBytes.Length);
-        stream.Write(bytes, 0, bytes.Length);
+        if (includeBody) stream.Write(bytes, 0, bytes.Length);
         stream.Flush();
     }
 
@@ -446,9 +450,9 @@ internal sealed class OverlayServer : IDisposable
         var length = 0;
         while (length < buffer.Length)
         {
-            var read = stream.Read(buffer, length, 1);
+            var read = stream.Read(buffer, length, Math.Min(512, buffer.Length - length));
             if (read <= 0) break;
-            length++;
+            length += read;
             if (length >= 4 &&
                 buffer[length - 4] == (byte)'\r' && buffer[length - 3] == (byte)'\n' &&
                 buffer[length - 2] == (byte)'\r' && buffer[length - 1] == (byte)'\n')
@@ -624,23 +628,46 @@ internal sealed class OverlayServer : IDisposable
     background:#000;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 40px rgba(0,0,0,.55);}
   #stage.on{display:block;}
   #player{width:100%;height:100%;border:0;display:block;object-fit:contain;background:#000;}
+  #fallback{width:100%;height:100%;border:0;display:none;background:#000;}
 </style>
 </head>
 <body>
-<div id=""stage""><video id=""player"" playsinline preload=""auto""></video></div>
+<div id=""stage"">
+  <video id=""player"" playsinline preload=""auto""></video>
+  <iframe id=""fallback"" allow=""autoplay; fullscreen"" allowfullscreen></iframe>
+</div>
 <script>
 (function(){
   var stage=document.getElementById('stage');
   var player=document.getElementById('player');
+  var fallback=document.getElementById('fallback');
   var current='';
+  var currentBv='';
+  var currentSound=true;
+  function hideFallback(){
+    fallback.style.display='none';
+    fallback.removeAttribute('src');
+    player.style.display='block';
+  }
+  function showFallback(){
+    if(!currentBv) return;
+    fallback.src='https://player.bilibili.com/player.html?bvid='+encodeURIComponent(currentBv)+
+      '&p=1&autoplay=1&muted='+(currentSound?'0':'1')+'&danmaku=0&high_quality=1&as_wide=1';
+    fallback.style.display='block';
+    player.style.display='none';
+  }
+  player.addEventListener('error', showFallback);
   function apply(st){
     var bv=st.videoBvid||'';
     var sound=!!st.videoSound;
     var key=bv+(sound?'|1':'|0')+'|'+(st.videoNonce||0);
     if(key===current) return;
     current=key;
-    if(!bv){stage.className='';try{player.pause();}catch(e){}player.removeAttribute('src');player.load();return;}
+    currentBv=bv;
+    currentSound=sound;
+    if(!bv){stage.className='';try{player.pause();}catch(e){}player.removeAttribute('src');player.load();hideFallback();return;}
     stage.className='on';
+    hideFallback();
     player.muted=!sound;
     player.src='/video/stream?bvid='+encodeURIComponent(bv);
     var p=player.play();

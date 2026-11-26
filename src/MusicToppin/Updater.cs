@@ -1,5 +1,6 @@
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -75,6 +76,14 @@ internal static class Updater
     /// <summary>兼容两种清单：自定义 {version,url,sha256,notes} 与 GitHub Releases API。</summary>
     private static UpdateInfo ParseManifest(string json)
     {
+        // GitHub Releases API 有 assets 数组：必须按 asset 名匹配 Setup.exe，
+        // 不能把所有键拉平后取第一个（否则可能选中 SHA256SUMS.txt 或 digest 与 URL 不匹配）
+        var github = ParseGitHubManifest(json);
+        if (github != null) return github;
+
+        // 有 assets 数组但没匹配到 Setup.exe：拒绝，避免把 SHA256SUMS.txt 之类当安装包
+        if (json.IndexOf("\"assets\"", StringComparison.Ordinal) >= 0) return null;
+
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match match in KeyString.Matches(json))
         {
@@ -117,6 +126,83 @@ internal static class Updater
             Sha256 = sha256,
             Notes = notes
         };
+    }
+
+    private static UpdateInfo ParseGitHubManifest(string json)
+    {
+        try
+        {
+            var root = Json.Parse(json);
+            if (root == null) return null;
+
+            var assets = root["assets"];
+            if (assets == null || assets.Kind != JsonKind.Array || assets.Count == 0) return null;
+
+            var versionText = root["tag_name"] != null ? (root["tag_name"].AsString ?? "") : "";
+            if (string.IsNullOrWhiteSpace(versionText)) return null;
+            versionText = versionText.Trim();
+            if (versionText.StartsWith("v", StringComparison.OrdinalIgnoreCase)) versionText = versionText.Substring(1);
+
+            Version version;
+            if (!Version.TryParse(NormalizeVersion(versionText), out version)) return null;
+
+            JsonValue chosen = null;
+            for (var i = 0; i < assets.Count; i++)
+            {
+                var asset = assets[i];
+                if (asset == null) continue;
+                var name = asset["name"] != null ? (asset["name"].AsString ?? "") : "";
+                if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
+                    name.IndexOf("MusicToppin-Setup", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    chosen = asset;
+                    break;
+                }
+            }
+
+            if (chosen == null)
+            {
+                // 兼容旧命名：只接受 .exe，绝不把 SHA256SUMS.txt 当安装包
+                for (var i = 0; i < assets.Count; i++)
+                {
+                    var asset = assets[i];
+                    if (asset == null) continue;
+                    var name = asset["name"] != null ? (asset["name"].AsString ?? "") : "";
+                    if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    {
+                        chosen = asset;
+                        break;
+                    }
+                }
+            }
+
+            if (chosen == null) return null;
+
+            var url = chosen["browser_download_url"] != null ? (chosen["browser_download_url"].AsString ?? "") : "";
+            if (string.IsNullOrWhiteSpace(url)) return null;
+
+            var sha256 = chosen["digest"] != null ? (chosen["digest"].AsString ?? "") : "";
+            if (!string.IsNullOrWhiteSpace(sha256) &&
+                sha256.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+            {
+                sha256 = sha256.Substring("sha256:".Length);
+            }
+
+            var notes = root["body"] != null ? (root["body"].AsString ?? "") : "";
+
+            return new UpdateInfo
+            {
+                Version = version,
+                VersionText = versionText,
+                Url = url,
+                Sha256 = sha256,
+                Notes = notes
+            };
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string NormalizeVersion(string text)
@@ -220,6 +306,24 @@ internal static class Updater
         }
     }
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetShortPathName(string longPath, StringBuilder shortPath, uint size);
+
+    private static string ShortPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+        try
+        {
+            var buffer = new StringBuilder(4096);
+            var length = GetShortPathName(path, buffer, (uint)buffer.Capacity);
+            return length > 0 && length < buffer.Capacity ? buffer.ToString() : path;
+        }
+        catch
+        {
+            return path;
+        }
+    }
+
     /// <summary>
     /// 用一个延迟批处理完成「等本进程退出 → 静默安装 → 重新拉起」。
     /// 安装器会杀掉正在运行的 MusicToppin，所以必须先退出再交给它。
@@ -227,14 +331,28 @@ internal static class Updater
     public static void ApplyAndRestart(string setupPath)
     {
         var appPath = AppPaths.ExePath;
+        var installDir = Path.GetDirectoryName(appPath) ?? Path.GetTempPath();
+        var exePath = Path.Combine(installDir, "MusicToppin.exe");
         var script = Path.Combine(Path.GetTempPath(), "musictoppin-update.cmd");
+
+        // cmd 批处理按 ANSI 读取路径；含中文/emoji 的路径取 8.3 短路径，取不到就退回原路径
+        var setupArg = ShortPath(setupPath);
+        var dirArg = ShortPath(installDir);
+        var appArg = ShortPath(appPath);
+        var exeArg = ShortPath(exePath);
 
         var content =
             "@echo off\r\n" +
             "timeout /t 2 /nobreak >nul\r\n" +
-            "\"" + setupPath + "\" /S\r\n" +
+            "\"" + setupArg + "\" /S /DIR=\"" + dirArg + "\"\r\n" +
+            "if errorlevel 1 (\r\n" +
+            "  echo update failed %date% %time% > \"%TEMP%\\musictoppin-update-error.log\"\r\n" +
+            "  start \"\" \"" + appArg + "\"\r\n" +
+            "  del \"%~f0\"\r\n" +
+            "  exit /b\r\n" +
+            ")\r\n" +
             "timeout /t 1 /nobreak >nul\r\n" +
-            "start \"\" \"" + appPath + "\"\r\n" +
+            "start \"\" \"" + exeArg + "\"\r\n" +
             "del \"%~f0\"\r\n";
 
         File.WriteAllText(script, content, Encoding.Default);

@@ -12,7 +12,7 @@ internal static class Program
 {
     internal const string AppName = "Music Toppin";
     internal const string AppExe = "MusicToppin.exe";
-    internal const string Version = "1.2.6";
+    internal const string Version = "1.4.0";
 
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\MusicToppin";
 
@@ -124,35 +124,82 @@ internal static class Program
 
             if (systemLike && full.StartsWith(normalized + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             {
-                error = "不能装到系统目录里：" + full;
+                error = "不支持装到 Program Files / Windows 等系统目录，请选择用户目录或 D:\\MusicToppin：" + full;
                 return false;
             }
         }
 
         if (Directory.Exists(full))
         {
-            var isOurs = File.Exists(Path.Combine(full, AppExe)) ||
-                         File.Exists(Path.Combine(full, "Uninstall.exe"));
-
-            if (!isOurs)
+            bool empty;
+            try
             {
-                var entries = Directory.GetFileSystemEntries(full);
-                if (entries.Length > 0)
-                {
-                    error = "目标目录不是空的，而且不像 MusicToppin 的安装目录，已拒绝安装：" + full;
-                    return false;
-                }
+                empty = Directory.GetFileSystemEntries(full).Length == 0;
+            }
+            catch (Exception ex)
+            {
+                error = "无法读取目标目录，已拒绝安装：" + full + "（" + ex.Message + "）";
+                return false;
+            }
+
+            if (!empty && !IsOurInstallDir(full))
+            {
+                error = "目标目录不是空的，而且不像 MusicToppin 的安装目录，已拒绝安装：" + full;
+                return false;
             }
         }
 
         return true;
     }
 
+    /// <summary>
+    /// 只认「真正的 MusicToppin 安装目录」：必须存在 MusicToppin.exe，且文件产品名匹配，
+    /// 或注册表登记的就是这个目录。不能仅凭一个同名 Uninstall.exe 就整目录删除。
+    /// </summary>
+    internal static bool IsOurInstallDir(string dir)
+    {
+        if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir)) return false;
+
+        var exe = Path.Combine(dir, AppExe);
+        if (!File.Exists(exe)) return false;
+
+        try
+        {
+            var info = FileVersionInfo.GetVersionInfo(exe);
+            if (string.Equals((info.ProductName ?? "").Trim(), AppName, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        catch { }
+
+        try
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(UninstallKey))
+            {
+                var existing = key == null ? null : key.GetValue("InstallLocation") as string;
+                if (!string.IsNullOrWhiteSpace(existing) &&
+                    string.Equals(Path.GetFullPath(existing).TrimEnd('\\'), Path.GetFullPath(dir).TrimEnd('\\'),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
     internal static bool IsEmptyOrOurInstallDir(string dir)
     {
         if (!Directory.Exists(dir)) return true;
-        if (File.Exists(Path.Combine(dir, AppExe)) || File.Exists(Path.Combine(dir, "Uninstall.exe"))) return true;
-        return Directory.GetFileSystemEntries(dir).Length == 0;
+        try
+        {
+            if (Directory.GetFileSystemEntries(dir).Length == 0) return true;
+        }
+        catch
+        {
+            return false;
+        }
+        return IsOurInstallDir(dir);
     }
 
     [STAThread]
@@ -244,8 +291,12 @@ internal static class Program
         KillRunning();
 
         Report(status, "正在解压文件…");
-        CleanDirectory(targetDir);
-        Directory.CreateDirectory(targetDir);
+
+        var parent = Path.GetDirectoryName(targetDir);
+        if (string.IsNullOrEmpty(parent)) throw new InvalidOperationException("安装路径无效：" + targetDir);
+        var folderName = Path.GetFileName(targetDir);
+        var newDir = Path.Combine(parent, "." + folderName + ".new-" + Guid.NewGuid().ToString("N"));
+        var backupDir = Path.Combine(parent, "." + folderName + ".old-" + Guid.NewGuid().ToString("N"));
 
         var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip");
         if (payload == null) throw new InvalidOperationException("安装包数据缺失");
@@ -256,23 +307,50 @@ internal static class Program
 
         try
         {
-            ZipFile.ExtractToDirectory(tempZip, targetDir);
+            // 先解压到同盘临时目录；成功后再替换，避免解压失败把旧版本删成半残
+            Directory.CreateDirectory(newDir);
+            ZipFile.ExtractToDirectory(tempZip, newDir);
+
+            if (Directory.Exists(targetDir))
+            {
+                if (!IsEmptyOrOurInstallDir(targetDir))
+                    throw new InvalidOperationException("拒绝替换非 MusicToppin 目录：" + targetDir);
+
+                if (Directory.Exists(backupDir)) DeleteDirectoryBestEffort(backupDir);
+                Directory.Move(targetDir, backupDir);
+            }
+
+            try
+            {
+                Directory.Move(newDir, targetDir);
+            }
+            catch
+            {
+                // 替换失败：把旧目录放回去
+                if (!Directory.Exists(targetDir) && Directory.Exists(backupDir))
+                {
+                    try { Directory.Move(backupDir, targetDir); } catch { }
+                }
+                throw;
+            }
+
+            DeleteDirectoryBestEffort(backupDir);
+
+            // 只清掉已知的历史残留（被占用后改名遗留的 {guid}_MusicToppin.exe）。
+            try
+            {
+                foreach (var file in Directory.GetFiles(targetDir, "*_MusicToppin.exe"))
+                {
+                    try { File.Delete(file); } catch { }
+                }
+            }
+            catch { }
         }
         finally
         {
             try { File.Delete(tempZip); } catch { }
+            DeleteDirectoryBestEffort(newDir);
         }
-
-        // 只清掉已知的历史残留（被占用后改名遗留的 {guid}_MusicToppin.exe）。
-        // 绝对不能"删除除两个 exe 之外的所有文件"——payload 里还有 WebView2 的依赖 DLL。
-        try
-        {
-            foreach (var file in Directory.GetFiles(targetDir, "*_MusicToppin.exe"))
-            {
-                try { File.Delete(file); } catch { }
-            }
-        }
-        catch { }
 
         Report(status, "正在创建快捷方式…");
         var exe = Path.Combine(targetDir, AppExe);
@@ -290,30 +368,30 @@ internal static class Program
         if (progress != null) progress.Report(text);
     }
 
-    private static void CleanDirectory(string dir)
+    private static void DeleteDirectoryBestEffort(string dir)
     {
-        // 双保险：只清理空目录或本程序自己的安装目录，绝不整删任意目录
-        if (!IsEmptyOrOurInstallDir(dir))
-        {
-            throw new InvalidOperationException("拒绝清理非 MusicToppin 目录：" + dir);
-        }
+        if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir)) return;
 
         try
         {
-            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            Directory.Delete(dir, true);
             return;
         }
         catch { }
 
-        if (!Directory.Exists(dir)) return;
-        foreach (var file in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+        try
         {
-            try { File.SetAttributes(file, FileAttributes.Normal); File.Delete(file); } catch { }
+            foreach (var file in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+            {
+                try { File.SetAttributes(file, FileAttributes.Normal); File.Delete(file); } catch { }
+            }
+            foreach (var sub in Directory.GetDirectories(dir))
+            {
+                try { Directory.Delete(sub, true); } catch { }
+            }
+            try { Directory.Delete(dir, true); } catch { }
         }
-        foreach (var sub in Directory.GetDirectories(dir))
-        {
-            try { Directory.Delete(sub, true); } catch { }
-        }
+        catch { }
     }
 
     internal static void KillRunning()
@@ -437,7 +515,7 @@ internal sealed class InstallForm : Form
 
         var hint = new Label
         {
-            Text = "装到 Program Files 等受保护目录时，会提示以管理员身份重新运行。",
+            Text = "不支持 Program Files / Windows 等系统目录；请装到用户目录或 D:\\MusicToppin。",
             ForeColor = Color.FromArgb(150, 156, 168),
             AutoSize = true,
             Location = new Point(30, 152)

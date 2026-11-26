@@ -1,6 +1,6 @@
 # 把本地代码推到 GitHub
 
-本机目前**没有安装 git**（`git --version` 报找不到命令），所以这一步需要你来做。
+本机现在已经有可用的 `git`（如果换机器后 `git --version` 找不到，再按下面的「一次性的准备」装一个）。
 
 ## 一次性的准备
 
@@ -12,7 +12,7 @@
 
 ## 首次推送（3 条命令）
 
-在 `D:\music_toppin` 目录下开一个终端：
+在 `E:\D-music_toppin` 目录下开一个终端：
 
 ```powershell
 git init
@@ -38,8 +38,8 @@ git push -u origin main
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 # 3. 提交 + 打 tag
 git add -A
-git commit -m "release: v1.0.1"
-git tag v1.0.1
+git commit -m "release: v1.4.0"
+git tag v1.4.0
 git push origin main --tags
 # 4. 在 GitHub 上建 Release，把 build\MusicToppin-Setup.exe 传上去
 ```

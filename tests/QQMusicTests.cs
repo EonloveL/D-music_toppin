@@ -53,6 +53,19 @@ namespace MusicToppin.Tests
             TestRun.Check(QQMusic.NormalizeUin("123456") == "123456", "uin：纯数字");
             TestRun.Check(QQMusic.NormalizeUin("o0abc") == "", "uin：非数字返回空");
             TestRun.Check(QQMusic.NormalizeUin("") == "", "uin：空串");
+
+            var playlistJson =
+                "{\"cdlist\":[{\"dissname\":\"默认歌单\",\"songlist\":[" +
+                "{\"songmid\":\"0004jPDk2eB2dt\",\"songname\":\"起风了\",\"interval\":312,\"singer\":[{\"name\":\"买辣椒也用券\"}]}," +
+                "{\"songmid\":\"002w57E00BGzXn\",\"songname\":\"群青\",\"interval\":264,\"singer\":[{\"name\":\"YOASOBI\"}]}" +
+                "]}]}";
+            var playlist = QQMusic.ParsePlaylist(playlistJson, "12345");
+            TestRun.Check(playlist != null && playlist.Name == "默认歌单", "歌单：名称");
+            TestRun.Check(playlist != null && playlist.Tracks.Count == 2, "歌单：曲目数");
+            TestRun.Check(playlist != null && playlist.Tracks[0].Id == "0004jPDk2eB2dt" && playlist.Tracks[0].Title == "起风了", "歌单：曲目/ID");
+            TestRun.Check(playlist != null && playlist.Tracks[1].Artist == "YOASOBI", "歌单：歌手");
+            TestRun.Check(QQMusic.ParsePlaylist("{\"cdlist\":[{\"songlist\":[]}]}", "1") == null, "歌单：空");
+            TestRun.Check(QQMusic.ParsePlaylist(null, "1") == null, "歌单：null");
         }
     }
 }

@@ -14,6 +14,7 @@ internal sealed class SmtcReader : IDisposable
     private string _artist = "";
     private bool _propsDirty = true;
     private DateTime _propsRetryAfterUtc = DateTime.MinValue;
+    private DateTime _lastErrorLogUtc = DateTime.MinValue;
     private volatile bool _disposed;
 
     public bool HasSession
@@ -79,8 +80,14 @@ internal sealed class SmtcReader : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Write("smtc read: " + ex.GetType().Name + " " + ex.Message);
+            if ((DateTime.UtcNow - _lastErrorLogUtc).TotalSeconds > 30)
+            {
+                _lastErrorLogUtc = DateTime.UtcNow;
+                Logger.Write("smtc read: " + ex.GetType().Name + " " + ex.Message);
+            }
+
             Detach();
+            _manager = null;
             return null;
         }
     }

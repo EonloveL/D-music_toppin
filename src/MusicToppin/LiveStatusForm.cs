@@ -13,6 +13,7 @@ internal sealed class LiveStatusSnapshot
     public string LastRequestResult = "";
     public DateTime LastPacketUtc;
     public int PacketCount;
+    public int RecentVersion;
     public List<string> Recent = new List<string>();
 }
 
@@ -37,7 +38,7 @@ internal sealed class LiveStatusForm : Form
     private readonly Label _packet;
     private readonly ListBox _recent;
 
-    private int _lastRecentCount = -1;
+    private int _lastRecentVersion = -1;
     private readonly System.Windows.Forms.Timer _timer;
 
     public LiveStatusForm(Func<LiveStatusSnapshot> snapshot, Action reconnect, Action testPlay)
@@ -193,9 +194,9 @@ internal sealed class LiveStatusForm : Form
         }
 
         // 最近弹幕：只在变化时重建，避免每秒闪
-        if (s.Recent.Count != _lastRecentCount)
+        if (s.RecentVersion != _lastRecentVersion)
         {
-            _lastRecentCount = s.Recent.Count;
+            _lastRecentVersion = s.RecentVersion;
             _recent.BeginUpdate();
             _recent.Items.Clear();
             foreach (var line in s.Recent) _recent.Items.Add(line);

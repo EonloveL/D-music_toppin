@@ -32,6 +32,37 @@ internal sealed class HudLayout
     public List<PrevCardLayout> PrevCards = new List<PrevCardLayout>();
 }
 
+/// <summary>环状样式：圆心在屏幕外侧，当前卡在弧顶，上一首/下一首分列两侧。</summary>
+internal sealed class RingLayout
+{
+    public int Width;
+    public int Height;
+    public int Side;       // 0 上 / 1 下 / 2 左 / 3 右
+
+    public float CurrentWidth;
+    public float CurrentHeight;
+    public float SideWidth;
+    public float SideHeight;
+
+    public float CenterX;
+    public float CenterY;
+    public float Radius;
+    public float CurrentAngle;
+    public float PrevAngle;
+    public float NextAngle;
+    public float RollSign;
+    public float Theta;
+
+    public bool HasPrev;
+    public bool HasNext;
+    public bool HasTimeline;
+    public string PrevTitle = "";
+    public string PrevArtist = "";
+    public string NextTitle = "";
+    public string NextArtist = "";
+    public int QueueCount;
+}
+
 /// <summary>纯 GDI+ 绘制，无 GPU、无额外线程，只在内容变化时重绘。</summary>
 internal static class HudRenderer
 {
@@ -96,6 +127,12 @@ internal static class HudRenderer
     private static Font StreakFont(float s) { return F("Microsoft YaHei UI", 10.5f * s, FontStyle.Regular); }
     private static Font PrevTitleFont(float s, float scale) { return F("Microsoft YaHei UI", 16f * s * scale, FontStyle.Bold); }
     private static Font PrevArtistFont(float s, float scale) { return F("Microsoft YaHei UI", 12.5f * s * scale, FontStyle.Regular); }
+    private static Font RingTitleFont(float s) { return F("Microsoft YaHei UI", 17f * s, FontStyle.Bold); }
+    private static Font RingArtistFont(float s) { return F("Microsoft YaHei UI", 12f * s, FontStyle.Regular); }
+    private static Font RingSideTitleFont(float s) { return F("Microsoft YaHei UI", 13f * s, FontStyle.Bold); }
+    private static Font RingSideArtistFont(float s) { return F("Microsoft YaHei UI", 10.5f * s, FontStyle.Regular); }
+    private static Font RingTagFont(float s) { return F("Microsoft YaHei UI", 10f * s, FontStyle.Bold); }
+    private static Font RingTimeFont(float s) { return F("Consolas", 9.5f * s, FontStyle.Regular); }
 
     private static StringFormat WrapFormat()
     {
@@ -105,6 +142,16 @@ internal static class HudRenderer
     private static StringFormat EllipsisFormat()
     {
         return new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+    }
+
+    private static StringFormat EllipsisFormat(StringAlignment alignment)
+    {
+        return new StringFormat
+        {
+            Trimming = StringTrimming.EllipsisCharacter,
+            FormatFlags = StringFormatFlags.NoWrap,
+            Alignment = alignment
+        };
     }
 
     private static float MeasureWrapped(Graphics g, string text, Font font, float width)
@@ -257,6 +304,329 @@ internal static class HudRenderer
 
         layout.Height = (int)MF.Ceiling(totalH);
         return layout;
+    }
+
+    // ---- 环状毛玻璃样式 ----
+
+    public static RingLayout MeasureRing(Graphics g, float s, NowPlaying np, int side)
+    {
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        side = Math.Max(0, Math.Min(3, side));
+
+        var layout = new RingLayout
+        {
+            Side = side,
+            Theta = 34f,
+            Radius = (side <= 1 ? 420f : 230f) * s
+        };
+
+        var horizontal = side <= 1;
+        layout.CurrentWidth = (horizontal ? 300f : 260f) * s;
+        layout.SideWidth = (horizontal ? 210f : 180f) * s;
+
+        var currentInner = layout.CurrentWidth - 24f * s;
+        var titleFont = RingTitleFont(s);
+        var artistFont = RingArtistFont(s);
+        var titleH = Math.Min(MeasureWrapped(g, np.Title, titleFont, currentInner), titleFont.Height * 2f);
+        if (titleH < titleFont.Height) titleH = titleFont.Height;
+        var artistH = string.IsNullOrWhiteSpace(np.Artist)
+            ? 0f
+            : Math.Min(MeasureWrapped(g, np.Artist, artistFont, currentInner), artistFont.Height * 2f);
+        if (artistH > 0f && artistH < artistFont.Height) artistH = artistFont.Height;
+
+        var hasTimeline = np.HasTimeline && np.Duration > TimeSpan.Zero;
+        layout.CurrentHeight = 12f * s + 14f * s + 6f * s + titleH
+                               + (artistH > 0f ? 4f * s + artistH : 0f)
+                               + (hasTimeline ? 4f * s : 0f) + 8f * s;
+
+        layout.HasPrev = np.PrevCount > 0 && np.PrevTitles != null && np.PrevTitles.Length > 0 &&
+                         !string.IsNullOrWhiteSpace(np.PrevTitles[0]);
+        layout.HasNext = np.QueueCount > 0 && !string.IsNullOrWhiteSpace(np.NextTitle);
+        layout.PrevTitle = layout.HasPrev ? (np.PrevTitles[0] ?? "") : "";
+        layout.PrevArtist = layout.HasPrev && np.PrevArtists != null && np.PrevArtists.Length > 0
+            ? (np.PrevArtists[0] ?? "") : "";
+        layout.NextTitle = np.NextTitle ?? "";
+        layout.NextArtist = np.NextArtist ?? "";
+        layout.QueueCount = np.QueueCount;
+        layout.HasTimeline = hasTimeline;
+
+        var sideInner = layout.SideWidth - 20f * s;
+        var prevH = RingSideHeight(g, s, layout.PrevTitle, layout.PrevArtist, sideInner);
+        var nextH = RingSideHeight(g, s, layout.NextTitle, layout.NextArtist, sideInner);
+        layout.SideHeight = Math.Max(70f * s, Math.Max(prevH, nextH));
+
+        layout.Width = (int)Math.Ceiling((horizontal ? 680f : 310f) * s);
+        layout.Height = horizontal
+            ? (int)Math.Ceiling(Math.Max(210f * s, layout.CurrentHeight + 90f * s))
+            : (int)Math.Ceiling(560f * s);
+
+        if (horizontal)
+        {
+            layout.CenterX = layout.Width / 2f;
+            var currentCenterY = side == 0
+                ? layout.Height - layout.CurrentHeight / 2f - 10f * s
+                : layout.CurrentHeight / 2f + 10f * s;
+
+            // 上/下：下一首在左，上一首在右；沿圆周向右滚到当前
+            layout.CurrentAngle = side == 0 ? 90f : 270f;
+            layout.NextAngle = layout.CurrentAngle + (side == 0 ? layout.Theta : -layout.Theta);
+            layout.PrevAngle = layout.CurrentAngle - (side == 0 ? layout.Theta : -layout.Theta);
+            layout.RollSign = side == 0 ? -1f : 1f;
+            layout.CenterY = side == 0 ? currentCenterY - layout.Radius : currentCenterY + layout.Radius;
+        }
+        else
+        {
+            layout.CenterY = layout.Height / 2f;
+            var currentCenterX = side == 2
+                ? layout.Width - layout.CurrentWidth / 2f - 10f * s
+                : layout.CurrentWidth / 2f + 10f * s;
+
+            // 左/右：下一首在上，上一首在下；沿圆周向下滚到当前
+            layout.CurrentAngle = side == 2 ? 0f : 180f;
+            layout.NextAngle = layout.CurrentAngle + (side == 2 ? -layout.Theta : layout.Theta);
+            layout.PrevAngle = layout.CurrentAngle + (side == 2 ? layout.Theta : -layout.Theta);
+            layout.RollSign = side == 2 ? 1f : -1f;
+            layout.CenterX = side == 2 ? currentCenterX - layout.Radius : currentCenterX + layout.Radius;
+        }
+
+        return layout;
+    }
+
+    private static float RingSideHeight(Graphics g, float s, string title, string artist, float innerWidth)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return 0f;
+
+        var titleFont = RingSideTitleFont(s);
+        var titleH = Math.Min(MeasureWrapped(g, title, titleFont, innerWidth), titleFont.Height * 2f);
+        if (titleH < titleFont.Height) titleH = titleFont.Height;
+
+        var artistH = 0f;
+        if (!string.IsNullOrWhiteSpace(artist))
+        {
+            var artistFont = RingSideArtistFont(s);
+            artistH = Math.Min(MeasureWrapped(g, artist, artistFont, innerWidth), artistFont.Height * 2f);
+            if (artistH < artistFont.Height) artistH = artistFont.Height;
+        }
+
+        return 10f * s + 14f * s + 5f * s + titleH + (artistH > 0f ? 3f * s + artistH : 0f) + 8f * s;
+    }
+
+    public static void DrawRing(Graphics g, float s, NowPlaying np, RingLayout layout, bool green, bool editing, float anim)
+    {
+        if (layout == null) return;
+
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
+        if (green)
+        {
+            using (var bg = new SolidBrush(Color.FromArgb(255, 0, 255, 0)))
+                g.FillRectangle(bg, 0, 0, layout.Width, layout.Height);
+        }
+
+        var t = MF.Clamp(anim, 0f, 1f);
+        var fade = 0.55f + 0.45f * t;
+        var offset = layout.RollSign * (1f - t) * layout.Theta;
+
+        if (layout.HasPrev)
+        {
+            DrawRingCard(g, s, layout, layout.PrevTitle, layout.PrevArtist,
+                "上一首", layout.PrevAngle - offset, false, false, false,
+                TimeSpan.Zero, TimeSpan.Zero, false,
+                (int)(205f * fade), green, layout.Side == 3 || layout.Side <= 1);
+        }
+
+        if (layout.HasNext)
+        {
+            var tag = layout.QueueCount > 1 ? "下一首 · " + layout.QueueCount : "下一首";
+            DrawRingCard(g, s, layout, layout.NextTitle, layout.NextArtist,
+                tag, layout.NextAngle - offset, false, false, false,
+                TimeSpan.Zero, TimeSpan.Zero, false,
+                (int)(205f * fade), green, layout.Side == 3);
+        }
+
+        DrawRingCard(g, s, layout, np.Title, np.Artist,
+            editing ? "编辑中" : (np.Playing ? "正在播放" : "已暂停"),
+            layout.CurrentAngle - offset, true, np.Playing, editing,
+            np.Position, np.Duration, layout.HasTimeline,
+            (int)(255f * fade), green, false);
+    }
+
+    private static void DrawRingCard(Graphics g, float s, RingLayout layout, string title, string artist,
+        string tag, float angle, bool current, bool playing, bool editing,
+        TimeSpan position, TimeSpan duration, bool hasTimeline,
+        int alpha, bool green, bool rightAlign)
+    {
+        var width = current ? layout.CurrentWidth : layout.SideWidth;
+        var height = current ? layout.CurrentHeight : layout.SideHeight;
+        var radians = angle * (float)Math.PI / 180f;
+        var centerX = layout.CenterX + layout.Radius * (float)Math.Cos(radians);
+        var centerY = layout.CenterY + layout.Radius * (float)Math.Sin(radians);
+        var rect = new RectangleF(centerX - width / 2f, centerY - height / 2f, width, height);
+
+        var radius = (current ? 18f : 15f) * s;
+        var glass = green ? 1f : MF.Clamp(0.25f + Theme.CardOpacity * 0.55f, 0.28f, 0.82f);
+
+        using (var path = RoundRect(rect, radius))
+        {
+            if (!green)
+            {
+                using (var shadowPath = RoundRect(rect.X, rect.Y + 4f * s, rect.Width, rect.Height, radius))
+                using (var shadow = new SolidBrush(Color.FromArgb(Math.Min(255, (int)(alpha * 0.25f)), 0, 0, 0)))
+                    g.FillPath(shadow, shadowPath);
+            }
+
+            var top = green
+                ? Color.FromArgb(255, 30, 34, 42)
+                : Color.FromArgb(Math.Min(255, (int)(alpha * glass)), 54, 60, 72);
+            var bottom = green
+                ? Color.FromArgb(255, 16, 19, 25)
+                : Color.FromArgb(Math.Min(255, (int)(alpha * glass * 0.72f)), 14, 17, 23);
+
+            using (var fill = new LinearGradientBrush(rect, top, bottom, 90f))
+                g.FillPath(fill, path);
+
+            // 顶部高光 + 文字色染出的彩色光晕，模拟毛玻璃后的彩色灯效
+            using (var highlight = new LinearGradientBrush(rect,
+                       Color.FromArgb(Math.Min(255, (int)(alpha * 0.10f)), 255, 255, 255),
+                       Color.FromArgb(0, 255, 255, 255), 90f))
+                g.FillPath(highlight, path);
+
+            using (var tint = new LinearGradientBrush(rect,
+                       Color.FromArgb(Math.Min(255, (int)(alpha * 0.10f)), C_Title),
+                       Color.FromArgb(0, C_Title), LinearGradientMode.ForwardDiagonal))
+                g.FillPath(tint, path);
+
+            g.FillPath(GrainBrush(), path);
+
+            var borderColor = current && editing
+                ? C_Accent
+                : Color.FromArgb(Math.Min(255, (int)(alpha * 0.34f)), 255, 255, 255);
+            using (var pen = new Pen(borderColor, (current && editing ? 1.6f : 1f) * s))
+                g.DrawPath(pen, path);
+
+            var pad = (current ? 12f : 10f) * s;
+            var innerX = rect.X + pad;
+            var innerW = rect.Width - pad * 2f;
+            var headerY = rect.Y + pad;
+            var headerH = 14f * s;
+
+            var dotR = (current ? 3.5f : 3f) * s;
+            if (current)
+            {
+                var dotColor = playing ? C_Accent : Color.FromArgb(255, 124, 134, 148);
+                using (var dot = new SolidBrush(dotColor))
+                    g.FillEllipse(dot, innerX, headerY + headerH / 2f - dotR, dotR * 2f, dotR * 2f);
+            }
+
+            var tagX = current ? innerX + dotR * 2f + 7f * s : innerX;
+            var tagColor = current
+                ? (editing ? C_Accent : (playing ? C_Accent : Color.FromArgb(255, 124, 134, 148)))
+                : Color.FromArgb(Math.Min(255, (int)(alpha * 0.85f)), C_Muted.R, C_Muted.G, C_Muted.B);
+            using (var tagBrush = new SolidBrush(tagColor))
+            using (var tagFormat = EllipsisFormat(rightAlign ? StringAlignment.Far : StringAlignment.Near))
+                g.DrawString(tag, RingTagFont(s), tagBrush,
+                    new RectangleF(tagX, headerY - 1f * s, innerW - (tagX - innerX), headerH), tagFormat);
+
+            if (current && hasTimeline && duration > TimeSpan.Zero)
+            {
+                using (var timeBrush = new SolidBrush(Color.FromArgb(Math.Min(255, (int)(alpha * 0.62f)), C_Muted.R, C_Muted.G, C_Muted.B)))
+                using (var timeFormat = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center })
+                    g.DrawString(Fmt(position) + " / " + Fmt(duration), RingTimeFont(s), timeBrush,
+                        new RectangleF(innerX, headerY - 1f * s, innerW, headerH), timeFormat);
+            }
+
+            var titleFont = current ? RingTitleFont(s) : RingSideTitleFont(s);
+            var titleY = headerY + headerH + (current ? 6f : 5f) * s;
+            var titleH = Math.Min(MeasureWrapped(g, title, titleFont, innerW), titleFont.Height * 2f);
+            if (titleH < titleFont.Height) titleH = titleFont.Height;
+            var titleRect = new RectangleF(innerX, titleY, innerW, titleH);
+
+            DrawGlowText(g, title, titleFont, titleRect, C_Title, alpha,
+                current ? 2.2f * s : 1.3f * s, rightAlign ? StringAlignment.Far : StringAlignment.Near);
+
+            if (!string.IsNullOrWhiteSpace(artist))
+            {
+                var artistFont = current ? RingArtistFont(s) : RingSideArtistFont(s);
+                var artistY = titleY + titleH + (current ? 4f : 3f) * s;
+                var artistH = Math.Min(MeasureWrapped(g, artist, artistFont, innerW), artistFont.Height * 2f);
+                if (artistH < artistFont.Height) artistH = artistFont.Height;
+                DrawGlowText(g, artist, artistFont, new RectangleF(innerX, artistY, innerW, artistH),
+                    C_Artist, Math.Min(255, (int)(alpha * 0.86f)), current ? 1.6f * s : 1f * s,
+                    rightAlign ? StringAlignment.Far : StringAlignment.Near);
+            }
+
+            if (current && hasTimeline && duration > TimeSpan.Zero)
+            {
+                var barY = rect.Bottom - 8f * s;
+                var bar = new RectangleF(innerX, barY, innerW, 2f * s);
+                using (var track = new SolidBrush(Color.FromArgb(Math.Min(255, (int)(alpha * 0.16f)), 255, 255, 255)))
+                    g.FillRectangle(track, bar);
+                var progress = MF.Clamp((float)(position.TotalSeconds / duration.TotalSeconds), 0f, 1f);
+                if (progress > 0f)
+                {
+                    using (var fill = new SolidBrush(playing ? C_Accent : Color.FromArgb(255, 108, 118, 132)))
+                        g.FillRectangle(fill, bar.X, bar.Y, bar.Width * progress, bar.Height);
+                }
+            }
+        }
+    }
+
+    private static void DrawGlowText(Graphics g, string text, Font font, RectangleF rect, Color color, int alpha,
+        float glowRadius, StringAlignment alignment)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        using (var format = new StringFormat { Trimming = StringTrimming.None, Alignment = alignment })
+        using (var main = new SolidBrush(Color.FromArgb(Math.Min(255, Math.Max(0, alpha)), color)))
+        {
+            var glowAlpha = Math.Min(255, Math.Max(0, (int)(alpha * 0.26f)));
+            using (var glow = new SolidBrush(Color.FromArgb(glowAlpha, color)))
+            {
+                var r = glowRadius;
+                var offsets = new[]
+                {
+                    new PointF(-r, 0f), new PointF(r, 0f), new PointF(0f, -r), new PointF(0f, r),
+                    new PointF(-r * 0.7f, -r * 0.7f), new PointF(r * 0.7f, -r * 0.7f),
+                    new PointF(-r * 0.7f, r * 0.7f), new PointF(r * 0.7f, r * 0.7f)
+                };
+
+                foreach (var offset in offsets)
+                {
+                    g.DrawString(text, font, glow,
+                        new RectangleF(rect.X + offset.X, rect.Y + offset.Y, rect.Width, rect.Height), format);
+                }
+            }
+
+            g.DrawString(text, font, main, rect, format);
+        }
+    }
+
+    private static TextureBrush _grainBrush;
+
+    private static TextureBrush GrainBrush()
+    {
+        if (_grainBrush != null) return _grainBrush;
+
+        var bitmap = new Bitmap(64, 64, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            g.Clear(Color.Transparent);
+            var random = new Random(20261126);
+            for (var y = 0; y < 64; y++)
+            {
+                for (var x = 0; x < 64; x++)
+                {
+                    if (random.NextDouble() < 0.16)
+                    {
+                        bitmap.SetPixel(x, y, Color.FromArgb(10 + random.Next(8), 255, 255, 255));
+                    }
+                }
+            }
+        }
+
+        _grainBrush = new TextureBrush(bitmap) { WrapMode = WrapMode.Tile };
+        return _grainBrush;
     }
 
     public static void Draw(Graphics g, float s, NowPlaying np, HudLayout l, bool green, bool compact, bool editing, float anim)
@@ -512,6 +882,11 @@ internal static class HudRenderer
         path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
         path.CloseFigure();
         return path;
+    }
+
+    private static GraphicsPath RoundRect(float x, float y, float width, float height, float radius)
+    {
+        return RoundRect(new RectangleF(x, y, width, height), radius);
     }
 
     private static string Fmt(TimeSpan t)

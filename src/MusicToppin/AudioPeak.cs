@@ -56,6 +56,7 @@ internal static class AudioPeak
             {
                 if (_meter == null || (DateTime.UtcNow - _meterCreatedUtc).TotalSeconds > 30)
                 {
+                    ReleaseCom(_meter);
                     _meter = CreateMeter();
                     _meterCreatedUtc = DateTime.UtcNow;
                     if (_meter == null) return -1f;
@@ -81,23 +82,45 @@ internal static class AudioPeak
 
     private static IAudioMeterInformation CreateMeter()
     {
+        IMMDeviceEnumerator enumerator = null;
         try
         {
-            var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+            enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
             IMMDevice device;
             if (enumerator.GetDefaultAudioEndpoint(0 /*eRender*/, 0 /*eConsole*/, out device) != 0 || device == null)
                 return null;
 
-            var iid = IID_IAudioMeterInformation;
-            object meterObject;
-            if (device.Activate(ref iid, 23 /*CLSCTX_ALL*/, IntPtr.Zero, out meterObject) != 0 || meterObject == null)
-                return null;
+            try
+            {
+                var iid = IID_IAudioMeterInformation;
+                object meterObject;
+                if (device.Activate(ref iid, 23 /*CLSCTX_ALL*/, IntPtr.Zero, out meterObject) != 0 || meterObject == null)
+                    return null;
 
-            return (IAudioMeterInformation)meterObject;
+                return (IAudioMeterInformation)meterObject;
+            }
+            finally
+            {
+                ReleaseCom(device);
+            }
         }
         catch
         {
             return null;
         }
+        finally
+        {
+            ReleaseCom(enumerator);
+        }
+    }
+
+    private static void ReleaseCom(object comObject)
+    {
+        if (comObject == null) return;
+        try
+        {
+            if (Marshal.IsComObject(comObject)) Marshal.ReleaseComObject(comObject);
+        }
+        catch { }
     }
 }

@@ -13,9 +13,96 @@ internal sealed class DanmakuMessage
     public string UserName = "";
     public long Uid;
     public bool IsAdmin;
+
+    /// <summary>粉丝牌等级（0 = 没挂粉丝牌）。</summary>
     public int MedalLevel;
     public string MedalName = "";
+    public string MedalAnchorName = "";
+
+    /// <summary>粉丝牌所属主播的房间号，用来判断是不是「本直播间的灯牌」。</summary>
+    public long MedalRoomId;
+
+    /// <summary>大航海等级：0 = 无，1 = 总督，2 = 提督，3 = 舰长。</summary>
+    public int GuardLevel;
+
+    /// <summary>本地调试/「测试点歌」注入的假弹幕，不受点歌/切歌权限限制。</summary>
+    public bool IsLocalTest;
+
     public DateTime ReceivedUtc = DateTime.UtcNow;
+
+    /// <summary>是否挂着粉丝团灯牌（有牌子等级和名称）。</summary>
+    public bool HasMedal
+    {
+        get { return MedalLevel > 0 && !string.IsNullOrWhiteSpace(MedalName); }
+    }
+
+    /// <summary>是否大航海（舰长 / 提督 / 总督都算）。</summary>
+    public bool IsGuard
+    {
+        get { return GuardLevel > 0; }
+    }
+}
+
+/// <summary>
+/// 弹幕点歌 / 切歌的权限判定（纯函数，方便单元测试）。
+/// 点歌：所有人 / 粉丝团灯牌或舰长 / 仅舰长 / 关闭。
+/// 切歌：所有人 / 仅点歌人（房管可切全部）/ 仅房管 / 关闭。
+/// </summary>
+internal static class DanmakuPermissions
+{
+    public const int RequestAll = 0;
+    public const int RequestFansOrGuard = 1;
+    public const int RequestGuardOnly = 2;
+    public const int RequestOff = 3;
+
+    public const int SkipAll = 0;
+    public const int SkipRequester = 1;
+    public const int SkipAdmin = 2;
+    public const int SkipOff = 3;
+
+    public static bool CanRequest(int policy, bool hasMedal, bool isGuard)
+    {
+        switch (policy)
+        {
+            case RequestAll: return true;
+            case RequestFansOrGuard: return hasMedal || isGuard;
+            case RequestGuardOnly: return isGuard;
+            default: return false;
+        }
+    }
+
+    public static string RequestDeniedMessage(int policy)
+    {
+        switch (policy)
+        {
+            case RequestFansOrGuard: return "点歌需要粉丝团灯牌或舰长";
+            case RequestGuardOnly: return "点歌仅限舰长 / 大航海";
+            case RequestOff: return "点歌功能已关闭";
+            default: return "";
+        }
+    }
+
+    public static bool CanSkip(int policy, bool isAdmin, bool isRequester)
+    {
+        switch (policy)
+        {
+            case SkipAll: return true;
+            case SkipRequester: return isAdmin || isRequester;
+            case SkipAdmin: return isAdmin;
+            default: return false;
+        }
+    }
+
+    public static string SkipDeniedMessage(int policy)
+    {
+        switch (policy)
+        {
+            case SkipRequester: return "普通观众只能切自己点的歌；房管可以切全部";
+            case SkipAdmin: return "现在只有房管可以切歌";
+            case SkipOff: return "弹幕切歌已关闭";
+            default: return "";
+        }
+    }
 }
 
 /// <summary>拆出来的一个协议包。</summary>
@@ -75,8 +162,8 @@ internal static class DanmakuProtocol
         return packet;
     }
 
-    /// <summary>鉴权包：游客 uid=0 即可，protover=2 让服务器回 zlib（.NET Framework 没有 brotli）。</summary>
-    public static byte[] BuildAuthPacket(long roomId, string token, long uid = 0, int protoVersion = 2)
+    /// <summary>鉴权包：游客 uid=0 即可；protover=3 让服务器回 brotli（客户端内置解码）。</summary>
+    public static byte[] BuildAuthPacket(long roomId, string token, long uid = 0, int protoVersion = 3)
     {
         var buvid = BilibiliLive.ExtractCookieValue("buvid3");
 
@@ -174,12 +261,39 @@ internal static class DanmakuProtocol
             IsAdmin = user != null && user[2] != null && user[2].AsBool
         };
 
-        // info[7] 是粉丝牌：[等级, 牌子名, 主播名, 房间号, ...]
-        var medal = info[7];
-        if (medal != null && medal.Kind == JsonKind.Array && medal.Count >= 2 && medal[0] != null)
+        // 粉丝牌在 info[3]：[等级, 牌子名, 主播名, 房间号, 颜色..., 大航海类型(10)]
+        var medal = info[3];
+        if (medal != null && medal.Kind == JsonKind.Array && medal.Count >= 2)
         {
-            message.MedalLevel = medal[0].AsInt;
+            message.MedalLevel = medal[0] != null ? medal[0].AsInt : 0;
             message.MedalName = medal[1] != null ? (medal[1].AsString ?? "") : "";
+            message.MedalAnchorName = medal[2] != null ? (medal[2].AsString ?? "") : "";
+            message.MedalRoomId = medal[3] != null ? medal[3].AsLong : 0;
+            if (medal.Count > 10 && medal[10] != null) message.GuardLevel = medal[10].AsInt;
+        }
+
+        // 兼容旧协议/旧测试数据：有些房间把粉丝牌放在 info[7] 的数组里
+        var legacyMedal = info[7];
+        if (legacyMedal != null && legacyMedal.Kind == JsonKind.Array && legacyMedal.Count >= 2)
+        {
+            if (message.MedalLevel <= 0)
+            {
+                message.MedalLevel = legacyMedal[0] != null ? legacyMedal[0].AsInt : 0;
+                message.MedalName = legacyMedal[1] != null ? (legacyMedal[1].AsString ?? "") : "";
+                message.MedalAnchorName = legacyMedal[2] != null ? (legacyMedal[2].AsString ?? "") : "";
+                message.MedalRoomId = legacyMedal[3] != null ? legacyMedal[3].AsLong : 0;
+            }
+
+            if (message.GuardLevel == 0 && legacyMedal.Count > 10 && legacyMedal[10] != null)
+            {
+                message.GuardLevel = legacyMedal[10].AsInt;
+            }
+        }
+
+        // 大航海等级在 info[7]：0 = 无，1 = 总督，2 = 提督，3 = 舰长
+        if (legacyMedal != null && (legacyMedal.Kind == JsonKind.Number || legacyMedal.Kind == JsonKind.String))
+        {
+            message.GuardLevel = legacyMedal.AsInt;
         }
 
         if (string.IsNullOrEmpty(message.UserName)) message.UserName = "观众" + message.Uid;
@@ -338,7 +452,7 @@ internal static class BilibiliLive
     /// 新版弹幕服务器接口（需要 wbi 签名）：返回的 host_list 使用 wss_port=2245，
     /// 旧 getConf 的 443 对部分房间只推人气、不推弹幕。
     /// </summary>
-    private static DanmakuEndpoint GetDanmuInfoEndpoint(long roomId)
+    private static DanmakuEndpoint GetDanmuInfoEndpoint(long roomId, bool retried = false)
     {
         try
         {
@@ -352,7 +466,23 @@ internal static class BilibiliLive
             var url = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?" + query + "&w_rid=" + wrid;
             var json = Get(url, "https://live.bilibili.com/" + roomId);
             var root = ParseOrNull(json);
-            if (root == null || root["code"] == null || root["code"].AsInt != 0) return null;
+            if (root == null || root["code"] == null) return null;
+
+            var code = root["code"].AsInt;
+            if (code != 0)
+            {
+                // wbi key 过期/轮换：清缓存重试一次，别让旧 key 拖 11 小时
+                if (!retried && (code == -352 || code == -403))
+                {
+                    _wbiKey = null;
+                    _wbiKeyFetchedUtc = DateTime.MinValue;
+                    Logger.Write("danmaku getDanmuInfo: code " + code + "，刷新 wbi 重试");
+                    return GetDanmuInfoEndpoint(roomId, true);
+                }
+
+                Logger.Write("danmaku getDanmuInfo: code " + code);
+                return null;
+            }
 
             var data = root["data"];
             if (data == null) return null;
@@ -602,6 +732,7 @@ internal sealed class DanmakuClient : IDisposable
         if (room != null && room.RoomId > 0)
         {
             RoomId = room.RoomId;
+            ShortId = room.ShortId > 0 ? room.ShortId : roomInput;
             LiveStatus = room.LiveStatus;
             ReportStatus("房间 " + RoomId + (room.LiveStatus == 1 ? "（直播中）" : "（未开播，通常收不到弹幕）"));
         }

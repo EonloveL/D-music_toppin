@@ -18,19 +18,25 @@
 | OV（组织验证） | ¥1000–3000 / 年 | SmartScreen 需要累积下载量才转好，初期仍可能提示 |
 | EV（扩展验证） | ¥3000–5000 / 年，需硬件 UKey | **立即**获得 SmartScreen 信誉，最省心 |
 
-签名命令（签 setup 和 exe，**先签 exe 再打包**）：
+签名顺序（`build.ps1` 每次都会重新编译并打包，**不要在签名后重跑 build.ps1**）：
 
 ```powershell
+# 1. 先正常构建出 build\app
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+
+# 2. 签内层主程序
 signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\app\MusicToppin.exe
-# 先重新打包，再签安装器
+
+# 3. 重新打包 payload + Setup（或直接在 build.ps1 的 [2/5] 编译完成后加签名步骤）
+# 4. 签外层安装器
 signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\MusicToppin-Setup.exe
 ```
 
-> 现状：`build.ps1` 里还没有签名步骤。买了证书后在 `[5/5]` 之后加一行 `signtool` 即可。
+> 现状：`build.ps1` 里还没有签名步骤，发布的是未签名包。买了证书后建议把内层 exe 的签名放在编译完成后、`payload.zip` 打包前。
 
 ### 2. 版本号与更新日志
 
-已补 `src/MusicToppin/VersionInfo.cs`（`AssemblyVersion 1.0.0.0`），安装器常量同步为 `1.0.0`。
+已补 `src/MusicToppin/VersionInfo.cs`（当前 `AssemblyVersion 1.4.0.0`），安装器常量同步为 `1.4.0`。
 每次发版改这三处：`VersionInfo.cs`、`installer/Installer.cs` 的 `Version`、README 的更新记录。
 
 ### 3. 杀软白名单（决定"装完还能不能跑"）
@@ -57,7 +63,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 | 渠道 | 作用 | 优点 | 代价 |
 |---|---|---|---|
 | **自己的落地页**（主） | 下载 + 教程 + 更新说明 | 完全可控、可埋统计、可放 30 秒上手视频 | 要域名/备案（国内服务器） |
-| **蓝奏云**（备） | 国内免登录直链 | 96 KB 秒传秒下，最适合小白 | 单文件 100MB 内、偶尔限速 |
+| **蓝奏云**（备） | 国内免登录直链 | 约 825 KB 秒传秒下，最适合小白 | 单文件 100MB 内、偶尔限速 |
 | **GitHub Releases** | 更新源 + 技术用户 | 免费、有 API、可放校验值 | 国内访问慢，需镜像 |
 | **QQ 群 / 微信群** | 种子用户、反馈 | 传播快、能直接收到崩溃反馈 | 人工维护 |
 | **winget** | 技术受众 | `winget install` 一条命令 | 需 PR 到 winget-pkgs，审核慢 |
@@ -86,7 +92,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 
 ```json
 {
-  "version": "1.0.1",
+  "version": "1.4.0",
   "url": "https://example.com/musictoppin/MusicToppin-Setup.exe",
   "sha256": "7F906ADE…",
   "notes": "修复：解锁后立即回锁\n新增：背景透明度"
@@ -97,13 +103,13 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
   `https://api.github.com/repos/<owner>/<repo>/releases/latest` 即可，无需自建服务
 - 地址写死在 `src/MusicToppin/Updater.cs` 的 `DefaultManifestUrl`，用户零配置
 - 测试时可以用注册表 `HKCU\Software\MusicToppin\UpdateUrl` 覆盖，不影响发布值
-- 清单不给 `sha256` 时跳过校验；校验失败会丢弃安装包并提示重试
+- 清单**必须提供** `sha256`：没给校验值会拒绝自动安装；校验失败会丢弃安装包并提示重试
 - 用户点「稍后」则本次不更新，下次启动再检查
 
 注意事项：
 
 - **必须用户确认后**才安装（会关掉正在播歌的程序）
-- 更新失败时安装器是覆盖安装，旧版本文件保留，不会变成半残
+- 更新采用「先解压到临时目录、成功后替换」：下载/解压失败或文件被占用时保留旧版本；替换成功才清理旧文件
 - 自动检查失败是静默的（只写日志），手动检查才会弹提示，避免打扰
 ## 四、每次发版的 checklist
 
@@ -122,7 +128,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 
 > **Music Toppin** —— 开播时自动把「正在播放」显示在画面上。
 >
-> 96 KB，免安装运行时，支持网易云 / QQ音乐 / Apple Music / Spotify / 浏览器。
+> 约 825 KB，免安装运行时，支持网易云 / QQ音乐 / Apple Music / Spotify / 浏览器。
 >
 > 1. 双击安装
 > 2. 打开你常用的音乐软件放歌
@@ -145,4 +151,4 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 | 平台规则 | — | 直播间挂链接有风险，走粉丝群/简介 |
 | 版权 | — | 只显示元信息，不碰音源；若 V2 内置播放要另外评估 |
 
-**体积是优势**：96 KB 的安装包在群文件、网盘、邮件里都几乎瞬传，比动辄 70 MB 的 Electron 方案更容易传播。
+**体积是优势**：约 825 KB 的安装包在群文件、网盘、邮件里都几乎瞬传，比动辄 70 MB 的 Electron 方案更容易传播。

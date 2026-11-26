@@ -59,7 +59,12 @@ $unsafe = Join-Path $root 'src\MusicToppin\lib\System.Runtime.CompilerServices.U
 $refs += '/r:"' + $brotli + '"'
 $refs += '/r:"' + $unsafe + '"'
 
+# NuGet 包解压后布局随版本变化：老缓存是 pkg\lib\net462，新版直接是 lib\net462
 $webView2 = Join-Path $cacheRoot 'webview2\pkg\lib\net462'
+if (-not (Test-Path (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll')))
+{
+    $webView2 = Join-Path $cacheRoot 'webview2\lib\net462'
+}
 if (Test-Path (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll'))
 {
     $refs += '/r:"' + (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll') + '"'
@@ -81,7 +86,12 @@ if (Test-Path (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll'))
 {
     Copy-Item (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll') $appOut -Force
     Copy-Item (Join-Path $webView2 'Microsoft.Web.WebView2.WinForms.dll') $appOut -Force
-    Copy-Item (Join-Path $cacheRoot 'webview2\pkg\runtimes\win-x64\native\WebView2Loader.dll') $appOut -Force
+    $webView2Loader = Join-Path $cacheRoot 'webview2\pkg\runtimes\win-x64\native\WebView2Loader.dll'
+    if (-not (Test-Path $webView2Loader))
+    {
+        $webView2Loader = Join-Path $cacheRoot 'webview2\runtimes\win-x64\native\WebView2Loader.dll'
+    }
+    Copy-Item $webView2Loader $appOut -Force
 Copy-Item $brotli $appOut -Force
 Copy-Item $unsafe $appOut -Force
 }

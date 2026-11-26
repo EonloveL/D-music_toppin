@@ -16,6 +16,7 @@ namespace MusicToppin.Tests
             PacketTests();
             InflateTests();
             ParseTests();
+            PermissionTests();
             RoomIdTests();
         }
 
@@ -64,7 +65,7 @@ namespace MusicToppin.Tests
             var authBody = Encoding.UTF8.GetString(auth, 16, auth.Length - 16);
             var authJson = Json.Parse(authBody);
             TestRun.Check(authJson["roomid"].AsLong == 7734200, "鉴权体 roomid");
-            TestRun.Check(authJson["protover"].AsInt == 2, "鉴权体 protover=2（要 zlib，不要 brotli）");
+            TestRun.Check(authJson["protover"].AsInt == 3, "鉴权体 protover=3（要 brotli）");
             TestRun.Check(authJson["uid"].AsLong == 0, "鉴权体游客 uid");
             TestRun.Check(authJson["key"].AsString == "tok en\"", "鉴权体 token 转义正确");
 
@@ -141,6 +142,46 @@ namespace MusicToppin.Tests
             TestRun.Check(DanmakuProtocol.ParseDanmaku(Json.Parse("{\"cmd\":\"SEND_GIFT\",\"data\":{}}")) == null, "非弹幕返回 null");
             TestRun.Check(DanmakuProtocol.ParseDanmaku(Json.Parse("{\"cmd\":\"DANMU_MSG\",\"info\":[[],\"  \",[1,\"x\",0,0]]}")) == null, "空白弹幕返回 null");
             TestRun.Check(DanmakuProtocol.ParseDanmaku(null) == null, "null 返回 null");
+
+            // 真实结构：粉丝牌在 info[3]，大航海等级在 info[7]
+            var real = DanmakuProtocol.ParseDanmaku(Json.Parse(
+                "{\"cmd\":\"DANMU_MSG\",\"info\":[[],\"点歌 群青\",[1850091,\"观众D\",1,0,0,10000,1]," +
+                "[21,\"观测者\",\"主播\",422915,1725515,\"\",0,6809855,1725515,5414290,3,1,1850091]," +
+                "[20,0,6406234,\"u003e50000\",3],[\"\",\"\"],0,3]}"));
+            TestRun.Check(real != null && real.MedalLevel == 21, "info[3] 粉丝牌等级");
+            TestRun.Check(real != null && real.MedalName == "观测者", "info[3] 粉丝牌名称");
+            TestRun.Check(real != null && real.MedalRoomId == 422915, "info[3] 粉丝牌房间号");
+            TestRun.Check(real != null && real.GuardLevel == 3 && real.IsGuard, "info[7] 舰长等级");
+            TestRun.Check(real != null && real.HasMedal, "挂灯牌判定");
+            TestRun.Check(real != null && real.IsAdmin, "房管仍能识别");
+
+            var plain = DanmakuProtocol.ParseDanmaku(Json.Parse(
+                "{\"cmd\":\"DANMU_MSG\",\"info\":[[],\"点歌 起风了\",[1,\"路人\",0,0,0],[],[],[],[],0]}"));
+            TestRun.Check(plain != null && !plain.HasMedal && !plain.IsGuard && !plain.IsAdmin, "普通观众没有牌子/大航海");
+        }
+
+        private static void PermissionTests()
+        {
+            TestRun.Section("点歌 / 切歌权限");
+
+            TestRun.Check(DanmakuPermissions.CanRequest(DanmakuPermissions.RequestAll, false, false), "点歌：所有人");
+            TestRun.Check(DanmakuPermissions.CanRequest(DanmakuPermissions.RequestFansOrGuard, true, false), "点歌：粉丝牌可以");
+            TestRun.Check(DanmakuPermissions.CanRequest(DanmakuPermissions.RequestFansOrGuard, false, true), "点歌：舰长可以");
+            TestRun.Check(!DanmakuPermissions.CanRequest(DanmakuPermissions.RequestFansOrGuard, false, false), "点歌：普通观众被拦截");
+            TestRun.Check(!DanmakuPermissions.CanRequest(DanmakuPermissions.RequestGuardOnly, true, false), "点歌：仅舰长时粉丝牌也不行");
+            TestRun.Check(DanmakuPermissions.CanRequest(DanmakuPermissions.RequestGuardOnly, false, true), "点歌：仅舰长时舰长可以");
+            TestRun.Check(!DanmakuPermissions.CanRequest(DanmakuPermissions.RequestOff, true, true), "点歌：关闭后谁都不行");
+
+            TestRun.Check(DanmakuPermissions.CanSkip(DanmakuPermissions.SkipAll, false, false), "切歌：所有人");
+            TestRun.Check(DanmakuPermissions.CanSkip(DanmakuPermissions.SkipRequester, false, true), "切歌：点歌人可以切自己的");
+            TestRun.Check(!DanmakuPermissions.CanSkip(DanmakuPermissions.SkipRequester, false, false), "切歌：普通观众不能切别人的");
+            TestRun.Check(DanmakuPermissions.CanSkip(DanmakuPermissions.SkipRequester, true, false), "切歌：房管可以切全部");
+            TestRun.Check(!DanmakuPermissions.CanSkip(DanmakuPermissions.SkipAdmin, false, true), "切歌：仅房管时点歌人也不行");
+            TestRun.Check(DanmakuPermissions.CanSkip(DanmakuPermissions.SkipAdmin, true, false), "切歌：仅房管时房管可以");
+            TestRun.Check(!DanmakuPermissions.CanSkip(DanmakuPermissions.SkipOff, true, true), "切歌：关闭后谁都不行");
+
+            TestRun.Check(DanmakuPermissions.RequestDeniedMessage(DanmakuPermissions.RequestFansOrGuard).Contains("灯牌"), "点歌拒绝提示包含灯牌");
+            TestRun.Check(DanmakuPermissions.SkipDeniedMessage(DanmakuPermissions.SkipRequester).Contains("房管"), "切歌拒绝提示包含房管");
         }
 
         private static void RoomIdTests()

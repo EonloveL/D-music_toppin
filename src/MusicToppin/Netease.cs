@@ -107,21 +107,72 @@ internal static class Netease
 
     // ---- 取流 ----
 
-    private static ResolvedSong TryResolve(Candidate candidate)
+    public static ResolvedSong ResolveById(long id, string title, string artist, TimeSpan duration)
     {
-        var url = PlayerUrl(candidate.Id);
-        if (string.IsNullOrEmpty(url)) url = OuterUrl(candidate.Id);
+        if (id <= 0) return null;
+
+        var url = PlayerUrl(id);
+        if (string.IsNullOrEmpty(url)) url = OuterUrl(id);
         if (string.IsNullOrEmpty(url)) return null;
 
         return new ResolvedSong
         {
-            Title = candidate.Name,
-            Artist = candidate.Artist,
+            Title = title ?? "",
+            Artist = artist ?? "",
             AudioUrl = url,
-            Duration = candidate.Duration > TimeSpan.Zero ? candidate.Duration : TimeSpan.Zero,
+            Duration = duration > TimeSpan.Zero ? duration : TimeSpan.Zero,
             SourceLabel = "网易云",
-            PageUrl = "https://music.163.com/song?id=" + candidate.Id
+            PageUrl = "https://music.163.com/song?id=" + id
         };
+    }
+
+    /// <summary>读取网易云歌单（默认歌单用）；只取元信息，播放时再逐首取流。</summary>
+    public static PlaylistData LoadPlaylist(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+
+        var json = Get("https://music.163.com/api/v6/playlist/detail?id=" + Uri.EscapeDataString(id) + "&n=1000");
+        return ParsePlaylist(json, id);
+    }
+
+    public static PlaylistData ParsePlaylist(string json, string id)
+    {
+        var root = SafeParse(json);
+        var playlist = root != null ? root["playlist"] : null;
+        if (playlist == null) return null;
+
+        var data = new PlaylistData
+        {
+            Source = PlaylistSource.Netease,
+            Id = id,
+            Name = playlist["name"] != null ? (playlist["name"].AsString ?? "") : ""
+        };
+
+        var tracks = playlist["tracks"];
+        if (tracks != null && tracks.Kind == JsonKind.Array)
+        {
+            foreach (var song in tracks.Items)
+            {
+                var candidate = FromSong(song);
+                if (candidate == null) continue;
+
+                data.Tracks.Add(new PlaylistTrack
+                {
+                    Source = PlaylistSource.Netease,
+                    Id = candidate.Id.ToString(),
+                    Title = candidate.Name,
+                    Artist = candidate.Artist,
+                    Duration = candidate.Duration
+                });
+            }
+        }
+
+        return data.Tracks.Count > 0 ? data : null;
+    }
+
+    private static ResolvedSong TryResolve(Candidate candidate)
+    {
+        return ResolveById(candidate.Id, candidate.Name, candidate.Artist, candidate.Duration);
     }
 
     private static List<Candidate> Search(string keyword)
@@ -234,10 +285,11 @@ internal static class Netease
         if (id <= 0) return null;
 
         var name = song["name"] != null ? (song["name"].AsString ?? "") : "";
-        var duration = song["duration"] != null ? song["duration"].AsLong : 0;
+        var durationValue = song["duration"] ?? song["dt"];
+        var duration = durationValue != null ? durationValue.AsLong : 0;
         var fee = song["fee"] != null ? song["fee"].AsInt : 0;
 
-        var artists = song["artists"];
+        var artists = song["artists"] ?? song["ar"];
         var artist = "";
         if (artists != null && artists.Kind == JsonKind.Array)
         {

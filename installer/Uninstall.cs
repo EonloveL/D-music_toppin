@@ -27,6 +27,17 @@ internal static class UninstallProgram
 
         try
         {
+            var dir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
+            if (!CanWriteDirectory(dir))
+            {
+                if (!elevated && RelaunchElevated(silent)) return 0;
+
+                const string permissionMessage = "没有权限删除安装目录，请右键卸载程序选择「以管理员身份运行」。";
+                WriteLog(permissionMessage);
+                if (!silent) MessageBox.Show(permissionMessage, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return 1;
+            }
+
             Run(silent);
             return 0;
         }
@@ -63,6 +74,12 @@ internal static class UninstallProgram
         TryDelete(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), AppName + ".lnk"));
         TryDelete(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), AppName + ".lnk"));
 
+        // 先确认安装目录里的文件能删掉，再删卸载注册项；否则用户会在「设置→应用」里失去重试入口
+        if (!TryDeleteInstallFiles(dir))
+        {
+            throw new UnauthorizedAccessException("安装目录里有文件删不掉：" + dir);
+        }
+
         try
         {
             Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false);
@@ -91,6 +108,15 @@ internal static class UninstallProgram
             var appData = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MusicToppin");
             if (Directory.Exists(appData)) Directory.Delete(appData, true);
+        }
+        catch { }
+
+        // WebView2 播放器/登录窗口的数据目录（通常几十 MB）
+        try
+        {
+            var localData = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MusicToppin");
+            if (Directory.Exists(localData)) Directory.Delete(localData, true);
         }
         catch { }
 
@@ -126,6 +152,22 @@ internal static class UninstallProgram
         catch { }
     }
 
+    private static bool CanWriteDirectory(string dir)
+    {
+        try
+        {
+            if (!Directory.Exists(dir)) return true;
+            var probe = Path.Combine(dir, ".uninstall-test-" + Guid.NewGuid().ToString("N"));
+            File.WriteAllText(probe, "x");
+            File.Delete(probe);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool RelaunchElevated(bool silent)
     {
         try
@@ -154,6 +196,33 @@ internal static class UninstallProgram
                 DateTime.Now + "  " + message);
         }
         catch { }
+    }
+
+    private static bool TryDeleteInstallFiles(string dir)
+    {
+        if (!Directory.Exists(dir)) return true;
+
+        var ok = true;
+        try
+        {
+            foreach (var file in Directory.GetFiles(dir))
+            {
+                if (string.Equals(Path.GetFileName(file), "Uninstall.exe", StringComparison.OrdinalIgnoreCase)) continue;
+                try { File.SetAttributes(file, FileAttributes.Normal); File.Delete(file); }
+                catch { ok = false; }
+            }
+
+            foreach (var sub in Directory.GetDirectories(dir))
+            {
+                try { Directory.Delete(sub, true); } catch { ok = false; }
+            }
+        }
+        catch
+        {
+            ok = false;
+        }
+
+        return ok;
     }
 
     private static void TryDelete(string path)

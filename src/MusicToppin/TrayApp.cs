@@ -32,6 +32,8 @@ internal sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _itemGreen;
     private readonly ToolStripMenuItem _itemCompact;
     private readonly ToolStripMenuItem _itemKillfeed;
+    private readonly ToolStripMenuItem _itemRing;
+    private ToolStripMenuItem _itemSafeMedia;
     private readonly ToolStripMenuItem _itemAutoStart;
 
     private static readonly (string Title, string Artist, int Seconds)[] DemoTracks =
@@ -59,6 +61,7 @@ internal sealed class TrayApp : ApplicationContext
         QQMusic.Cookie = _settings.QQMusicCookie ?? "";
         QQMusic.Uin = _settings.QQMusicUin ?? "";
         QQMusic.ClientLoggedIn = SourceCheck.IsQQMusicClientLoggedIn();
+        WindowPlayers.MediaKeysEnabled = !_settings.DisableMediaKeys;
         _noBiliLogin = Environment.GetCommandLineArgs().Any(a => a.Equals("--no-bili-login", StringComparison.OrdinalIgnoreCase));
         BilibiliLive.WsNoCookie = Environment.GetCommandLineArgs().Any(a => a.Equals("--ws-no-cookie", StringComparison.OrdinalIgnoreCase));
         BilibiliLive.Cookie = _noBiliLogin ? "" : (_settings.BilibiliCookie ?? "");
@@ -83,6 +86,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _hud = new HudForm();
         _hud.SetCompact(_settings.Compact);
+        _hud.SetRing(_settings.Ring);
         _hud.SetGreen(_settings.Green);
         _hud.SetLocked(_settings.Locked);
         _hud.SetEditing(!_settings.Locked);
@@ -94,13 +98,19 @@ internal sealed class TrayApp : ApplicationContext
         {
             _anchor = "";
             _settings.Anchor = "";
+
+            // 环状样式按拖到的边缘换方向；尺寸变化后再夹回工作区
+            UpdateRingSide();
+            var clamped = ClampToWorkArea(_hud.Bounds);
+            _hud.Location = clamped.Location;
+
             _settings.X = _hud.Left;
             _settings.Y = _hud.Top;
             _settings.Save();
         };
         _hud.SizeChanged += (_, _) =>
         {
-            if (!string.IsNullOrEmpty(_anchor)) MoveHudTo(_anchor);
+            if (!string.IsNullOrEmpty(_anchor)) MoveHudTo(_anchor, fromUser: false);
         };
 
         PlaceHud();
@@ -108,17 +118,19 @@ internal sealed class TrayApp : ApplicationContext
         _itemShow = new ToolStripMenuItem("显示浮窗", null, (_, _) => ToggleVisible()) { Checked = _settings.Visible };
         _itemLock = new ToolStripMenuItem("锁定浮窗（鼠标穿透）", null, (_, _) => ToggleLock()) { Checked = _settings.Locked };
         _itemGreen = new ToolStripMenuItem("绿幕模式（直播采集）", null, (_, _) => ToggleGreen()) { Checked = _settings.Green };
-        _itemKillfeed = new ToolStripMenuItem("击杀播报", null, (_, _) => SetStyle(compact: false)) { Checked = !_settings.Compact };
-        _itemCompact = new ToolStripMenuItem("极简", null, (_, _) => SetStyle(compact: true)) { Checked = _settings.Compact };
+        _itemKillfeed = new ToolStripMenuItem("击杀播报", null, (_, _) => SetStyle(0)) { Checked = _settings.Style == 0 };
+        _itemCompact = new ToolStripMenuItem("极简", null, (_, _) => SetStyle(1)) { Checked = _settings.Style == 1 };
+        _itemRing = new ToolStripMenuItem("环状毛玻璃（新）", null, (_, _) => SetStyle(2)) { Checked = _settings.Style == 2 };
         _itemAutoStart = new ToolStripMenuItem("开机自启", null, (_, _) => ToggleAutoStart()) { Checked = _settings.AutoStart };
 
         _itemWizard = new ToolStripMenuItem("上屏向导…", null, (_, _) => ShowWizard());
         _itemCheckUpdate = new ToolStripMenuItem("检查更新…", null, (_, _) => CheckForUpdates(manual: true));
         _itemPlayBv = new ToolStripMenuItem("点歌测试（播放 BV）…", null, (_, _) => PromptAndPlayBv());
-        _itemStopPlay = new ToolStripMenuItem("停止播放", null, (_, _) => StopOwnPlayback());
+        _itemStopPlay = new ToolStripMenuItem("停止播放", null, (_, _) => StopAllPlayback());
 
         _liveStatus = new ToolStripMenuItem("未连接直播间") { Enabled = false };
         _itemLiveDiag = new ToolStripMenuItem("直播间状态…", null, (_, _) => ShowLiveStatus());
+        _itemRequestPolicy = BuildRequestPolicyMenu();
         _itemSkipPolicy = BuildSkipPolicyMenu();
         _itemRemovePolicy = BuildRemovePolicyMenu();
         _itemSessionRefresh = BuildSessionRefreshMenu();
@@ -143,12 +155,20 @@ internal sealed class TrayApp : ApplicationContext
             _liveStatus,
             _itemLiveDiag,
             _itemQueueList,
+            _itemRequestPolicy,
             _itemSkipPolicy,
             _itemRemovePolicy,
             _itemSessionRefresh,
             new ToolStripSeparator(),
             _itemLiveToast
         });
+
+        // 托盘根菜单也放一份权限入口：直播中不用展开两层就能随时切回「所有人」
+        _permissionMenu = new ToolStripMenuItem("弹幕权限（点歌 / 切歌）");
+        _permissionMenu.DropDownItems.Add(BuildRequestPolicyMenu());
+        _permissionMenu.DropDownItems.Add(BuildSkipPolicyMenu());
+        _permissionMenu.DropDownOpening += (_, _) => UpdatePermissionMenuText();
+        UpdatePermissionMenuText();
 
         _itemNeteaseLogin = new ToolStripMenuItem("网易云：登录（扫码 / 手机号）…", null, (_, _) => LoginNetease());
         _itemNeteaseLogout = new ToolStripMenuItem("网易云：退出登录", null, (_, _) => LogoutNetease());
@@ -183,6 +203,7 @@ internal sealed class TrayApp : ApplicationContext
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
         styleMenu.DropDownItems.Add(_itemCompact);
+        styleMenu.DropDownItems.Add(_itemRing);
 
         _colorMenu = BuildColorMenu();
 
@@ -191,6 +212,8 @@ internal sealed class TrayApp : ApplicationContext
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("右上", null, (_, _) => MoveHudTo("tr")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("左下", null, (_, _) => MoveHudTo("bl")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("右下", null, (_, _) => MoveHudTo("br")));
+        positionMenu.DropDownItems.Add(new ToolStripMenuItem("左侧", null, (_, _) => MoveHudTo("left")));
+        positionMenu.DropDownItems.Add(new ToolStripMenuItem("右侧", null, (_, _) => MoveHudTo("right")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("屏幕居中", null, (_, _) => MoveHudTo("center")));
         positionMenu.DropDownItems.Add(new ToolStripSeparator());
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("自由拖动：先按快捷键解锁") { Enabled = false });
@@ -202,6 +225,11 @@ internal sealed class TrayApp : ApplicationContext
         _volumeMenu = BuildVolumeMenu();
         controlsMenu.DropDownItems.Add(_volumeMenu);
         controlsMenu.DropDownItems.Add(BuildVideoAudioMenu());
+        _itemSafeMedia = new ToolStripMenuItem("反作弊保守模式（禁用媒体键切歌）", null, (_, _) => ToggleMediaKeys()) { Checked = _settings.DisableMediaKeys };
+        controlsMenu.DropDownItems.Add(new ToolStripSeparator());
+        controlsMenu.DropDownItems.Add(_itemSafeMedia);
+
+        _defaultPlaylistMenu = BuildDefaultPlaylistMenu();
 
         _itemHotkey = new ToolStripMenuItem("锁定快捷键：…", null, (_, _) => ShowHotkeyDialog());
 
@@ -214,7 +242,9 @@ internal sealed class TrayApp : ApplicationContext
             _itemGreen,
             new ToolStripSeparator(),
             controlsMenu,
+            _defaultPlaylistMenu,
             liveMenu,
+            _permissionMenu,
             sourceMenu,
             styleMenu,
             _colorMenu,
@@ -305,6 +335,19 @@ internal sealed class TrayApp : ApplicationContext
                 timer.Tick += (_, _) => { timer.Stop(); timer.Dispose(); _ = PlayBvidAsync(bvid); };
                 timer.Start();
             }
+        }
+
+        // 配置过默认歌单就自动续播；有手动点播/点歌正在放时会跳过，等它们结束再续
+        if (!_demo && _settings.DefaultPlaylistEnabled && _settings.DefaultPlaylistSource != 0)
+        {
+            var playlistTimer = new System.Windows.Forms.Timer { Interval = 4500 };
+            playlistTimer.Tick += (_, _) =>
+            {
+                playlistTimer.Stop();
+                playlistTimer.Dispose();
+                _ = StartDefaultPlaylistAsync();
+            };
+            playlistTimer.Start();
         }
         // 调试/自动化用：--room=5050 启动即连直播间；--fake-danmaku="点歌 BV…" 注入一条假弹幕
         var roomArg = Environment.GetCommandLineArgs()
@@ -421,7 +464,8 @@ internal sealed class TrayApp : ApplicationContext
                 {
                     Text = fakeArguments[fakeIndex - 1],
                     UserName = "测试观众" + fakeIndex,
-                    Uid = 10000 + fakeIndex
+                    Uid = 10000 + fakeIndex,
+                    IsLocalTest = true
                 });
             };
             fakeTimer.Start();
@@ -515,12 +559,21 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemCopyOverlay;
     private ToolStripMenuItem _itemCopyVideo;
     private ToolStripMenuItem _itemSkipPolicy;
+    private ToolStripMenuItem _itemRequestPolicy;
+    private ToolStripMenuItem _permissionMenu;
     private ToolStripMenuItem _itemRemovePolicy;
     private ToolStripMenuItem _itemSessionRefresh;
     private bool _noBiliLogin;
     private ToolStripMenuItem _itemBiliLogin;
     private ToolStripMenuItem _itemBiliLogout;
     private ToolStripMenuItem _itemLiveToast;
+    private ToolStripMenuItem _defaultPlaylistMenu;
+    private ToolStripMenuItem _defaultPlaylistStatus;
+    private ToolStripMenuItem _defaultPlaylistToggle;
+    private ToolStripMenuItem _defaultPlaylistNext;
+    private ToolStripMenuItem _defaultPlaylistClear;
+    private ToolStripMenuItem _defaultPlaylistUseNetease;
+    private ToolStripMenuItem _defaultPlaylistUseQQ;
     private ToolStripMenuItem _itemNeteaseLogin;
     private ToolStripMenuItem _itemNeteaseLogout;
     private ToolStripMenuItem _itemNeteaseSync;
@@ -533,9 +586,16 @@ internal sealed class TrayApp : ApplicationContext
     private readonly RequestQueue _queue = new RequestQueue();
     private DanmakuClient _danmaku;
     private bool _playingFromQueue;
+    private bool _playingDefaultPlaylist;
+    private readonly List<PlaylistTrack> _defaultPlaylistTracks = new List<PlaylistTrack>();
+    private int _defaultPlaylistIndex;
+    private string _defaultPlaylistLoadedKey = "";
+    private string _defaultPlaylistLoadedName = "";
+    private Task<bool> _defaultPlaylistLoadTask;
     private int _idleTicks;
     private int _danmakuReceived;
     private readonly List<string> _recentDanmaku = new List<string>();
+    private int _recentDanmakuVersion;
     private string _lastRequestResult = "";
     private string _toastText = "";
     private int _toastId;
@@ -551,6 +611,8 @@ internal sealed class TrayApp : ApplicationContext
     private volatile OverlayState _overlaySnapshot;
     private volatile bool _exiting;
     private DateTime _lastSkipCommandUtc;
+    private DateTime _lastSkipNoticeUtc;
+    private DateTime _lastRequestDeniedNoticeUtc;
     private DateTime _lastRemoveCommandUtc;
     private ToolStripMenuItem _itemOverlay;
     private ToolStripMenuItem _itemOffscreen;
@@ -734,12 +796,61 @@ internal sealed class TrayApp : ApplicationContext
         if (old != null) old.Dispose();
     }
 
-    private void MoveHudTo(string anchor)
+    private void UpdateRingSide()
+    {
+        if (!_settings.Ring) return;
+
+        int side;
+        switch (_settings.Anchor)
+        {
+            case "tl":
+            case "tr":
+                side = 0;
+                break;
+            case "bl":
+            case "br":
+            case "center":
+                side = 1;
+                break;
+            case "left":
+                side = 2;
+                break;
+            case "right":
+                side = 3;
+                break;
+            default:
+                side = NearestRingSide();
+                break;
+        }
+
+        _hud.SetRingSide(side);
+    }
+
+    private int NearestRingSide()
+    {
+        var bounds = _hud.Bounds;
+        var area = Screen.FromRectangle(bounds).WorkingArea;
+        var top = bounds.Top - area.Top;
+        var bottom = area.Bottom - bounds.Bottom;
+        var left = bounds.Left - area.Left;
+        var right = area.Right - bounds.Right;
+        var min = Math.Min(Math.Min(top, bottom), Math.Min(left, right));
+
+        if (min == top) return 0;
+        if (min == bottom) return 1;
+        if (min == left) return 2;
+        return 3;
+    }
+
+    private void MoveHudTo(string anchor, bool fromUser = true)
     {
         if (!_hud.IsHandleCreated) return;
         if (_reanchoring) return;
 
-        if (_settings.CaptureOffscreen)
+        // 尺寸变化（标题换行 / 下一首行出现）也会调用这里；不能因此退出离屏或遮挡
+        if (!fromUser && (_settings.CaptureOffscreen || _settings.CaptureOccluded)) return;
+
+        if (fromUser && _settings.CaptureOffscreen)
         {
             _settings.CaptureOffscreen = false;
             _itemOffscreen.Checked = false;
@@ -756,6 +867,7 @@ internal sealed class TrayApp : ApplicationContext
         _reanchoring = true;
         try
         {
+            UpdateRingSide();
             _hud.Render();
 
             var area = Screen.PrimaryScreen != null ? Screen.PrimaryScreen.WorkingArea : new Rectangle(0, 0, 1920, 1080);
@@ -770,6 +882,8 @@ internal sealed class TrayApp : ApplicationContext
                 case "tr": x = area.Right - w - margin; y = area.Top + 90; break;
                 case "bl": x = area.Left + margin; y = area.Bottom - h - margin; break;
                 case "br": x = area.Right - w - margin; y = area.Bottom - h - margin; break;
+                case "left": x = area.Left + margin; y = area.Top + (area.Height - h) / 2; break;
+                case "right": x = area.Right - w - margin; y = area.Top + (area.Height - h) / 2; break;
                 default: x = area.Left + (area.Width - w) / 2; y = area.Top + (area.Height - h) / 2; break;
             }
 
@@ -895,8 +1009,8 @@ internal sealed class TrayApp : ApplicationContext
     {
         try
         {
-            // 单播放：手动点播前先停掉队列里正在放的那首
-            if (_playingFromQueue) StopOwnPlayback();
+            // 单播放：手动点播前先停掉队列/默认歌单里正在放的那首
+            if (_playingFromQueue || _playingDefaultPlaylist) StopOwnPlayback();
 
             _tray.ShowBalloonTip(1500, "Music Toppin", "正在解析 " + bvid + " …", ToolTipIcon.Info);
 
@@ -935,9 +1049,9 @@ internal sealed class TrayApp : ApplicationContext
             // 只处理「当前这首」的结束，避免重复 Ended 把下一首也切掉
             if (song == null || song != _activeSong) return;
 
-            // 一首放完：清掉当前项，队列里还有就接着放
+            // 一首放完：点歌队列优先，空了再回默认歌单
             StopOwnPlayback();
-            StartNextQueuedSong();
+            ContinuePlayback();
             return;
         }
 
@@ -955,13 +1069,20 @@ internal sealed class TrayApp : ApplicationContext
             state.Playing, true,
             new string[NowPlaying.HistorySlots], new string[NowPlaying.HistorySlots], 0, 0);
 
-        // 点歌模式：HUD 多显示一行「下一首」
+        // 点歌队列优先显示；没有点歌时显示默认歌单的下一首
         var next = _queue.PeekNext();
         if (next != null)
         {
             np.NextTitle = next.DisplayName;
             np.NextArtist = next.Artist;
             np.QueueCount = _queue.Count;
+        }
+        else if (_settings.DefaultPlaylistEnabled && _defaultPlaylistTracks.Count > 0)
+        {
+            var track = _defaultPlaylistTracks[_defaultPlaylistIndex % _defaultPlaylistTracks.Count];
+            np.NextTitle = track.Title;
+            np.NextArtist = track.Artist;
+            np.QueueCount = 1;
         }
 
         _service.SetOwnPlayback(np);
@@ -971,6 +1092,7 @@ internal sealed class TrayApp : ApplicationContext
     private void StopOwnPlayback()
     {
         _playingFromQueue = false;
+        _playingDefaultPlaylist = false;
         _playGeneration++;
         _activeSong = null;
         _videoBvid = "";
@@ -979,6 +1101,7 @@ internal sealed class TrayApp : ApplicationContext
         try { if (_player != null) _ = _player.StopAsync(); } catch { }
         if (_service != null) _service.SetOwnPlayback(null);
         UpdateQueueMenu();
+        UpdateDefaultPlaylistMenu();
     }
 
     private WebView2Player EnsurePlayer()
@@ -1050,28 +1173,506 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Save();
     }
 
-    // ---- 弹幕切歌权限 ----
+    // ---- 默认歌单 ----
+
+    private ToolStripMenuItem BuildDefaultPlaylistMenu()
+    {
+        var menu = new ToolStripMenuItem("默认歌单");
+
+        _defaultPlaylistStatus = new ToolStripMenuItem("默认歌单：未设置") { Enabled = false };
+        _defaultPlaylistUseNetease = new ToolStripMenuItem("使用网易云歌单", null, (_, _) => SetDefaultPlaylistSource(PlaylistSource.Netease)) { Tag = 1 };
+        _defaultPlaylistUseQQ = new ToolStripMenuItem("使用 QQ 音乐歌单", null, (_, _) => SetDefaultPlaylistSource(PlaylistSource.QQMusic)) { Tag = 2 };
+        _defaultPlaylistToggle = new ToolStripMenuItem("暂停默认歌单", null, (_, _) => ToggleDefaultPlaylist());
+        _defaultPlaylistNext = new ToolStripMenuItem("下一首（默认歌单）", null, (_, _) => SkipDefaultPlaylist());
+        _defaultPlaylistClear = new ToolStripMenuItem("清除默认歌单", null, (_, _) => ClearDefaultPlaylist());
+
+        menu.DropDownItems.Add(_defaultPlaylistStatus);
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(new ToolStripMenuItem("设置网易云歌单…", null, (_, _) => PromptDefaultPlaylist(PlaylistSource.Netease)));
+        menu.DropDownItems.Add(new ToolStripMenuItem("设置 QQ 音乐歌单…", null, (_, _) => PromptDefaultPlaylist(PlaylistSource.QQMusic)));
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(_defaultPlaylistUseNetease);
+        menu.DropDownItems.Add(_defaultPlaylistUseQQ);
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(_defaultPlaylistToggle);
+        menu.DropDownItems.Add(_defaultPlaylistNext);
+        menu.DropDownItems.Add(_defaultPlaylistClear);
+        menu.DropDownOpening += (_, _) => UpdateDefaultPlaylistMenu();
+
+        return menu;
+    }
+
+    private void UpdateDefaultPlaylistMenu()
+    {
+        if (_defaultPlaylistStatus == null) return;
+
+        var source = CurrentPlaylistSource;
+        var id = PlaylistId(source);
+        var name = PlaylistName(source);
+        var loaded = _defaultPlaylistTracks.Count > 0 &&
+                     string.Equals(_defaultPlaylistLoadedKey, PlaylistKey(source, id), StringComparison.Ordinal);
+        if (loaded && !string.IsNullOrWhiteSpace(_defaultPlaylistLoadedName)) name = _defaultPlaylistLoadedName;
+
+        if (source == PlaylistSource.None || string.IsNullOrWhiteSpace(id))
+        {
+            _defaultPlaylistStatus.Text = "默认歌单：未设置";
+        }
+        else
+        {
+            var label = source == PlaylistSource.Netease ? "网易云" : "QQ 音乐";
+            var text = "默认歌单：" + label + " · " + (string.IsNullOrWhiteSpace(name) ? id : name);
+            if (loaded) text += "（" + _defaultPlaylistTracks.Count + " 首）";
+            if (!_settings.DefaultPlaylistEnabled) text += " · 已暂停";
+            else if (_playingDefaultPlaylist) text += " · 播放中";
+            _defaultPlaylistStatus.Text = text;
+        }
+
+        _defaultPlaylistUseNetease.Checked = source == PlaylistSource.Netease;
+        _defaultPlaylistUseQQ.Checked = source == PlaylistSource.QQMusic;
+        _defaultPlaylistToggle.Text = _settings.DefaultPlaylistEnabled ? "暂停默认歌单" : "开始默认歌单";
+        _defaultPlaylistToggle.Enabled = source != PlaylistSource.None && !string.IsNullOrWhiteSpace(id);
+        _defaultPlaylistNext.Enabled = source != PlaylistSource.None && !string.IsNullOrWhiteSpace(id);
+        _defaultPlaylistClear.Enabled = source != PlaylistSource.None || !string.IsNullOrWhiteSpace(_settings.NeteasePlaylistId) ||
+                                        !string.IsNullOrWhiteSpace(_settings.QQPlaylistId);
+    }
+
+    private PlaylistSource CurrentPlaylistSource
+    {
+        get
+        {
+            var value = _settings.DefaultPlaylistSource;
+            return value == 1 ? PlaylistSource.Netease : value == 2 ? PlaylistSource.QQMusic : PlaylistSource.None;
+        }
+    }
+
+    private string PlaylistId(PlaylistSource source)
+    {
+        return source == PlaylistSource.Netease ? (_settings.NeteasePlaylistId ?? "")
+            : source == PlaylistSource.QQMusic ? (_settings.QQPlaylistId ?? "") : "";
+    }
+
+    private string PlaylistName(PlaylistSource source)
+    {
+        return source == PlaylistSource.Netease ? (_settings.NeteasePlaylistName ?? "")
+            : source == PlaylistSource.QQMusic ? (_settings.QQPlaylistName ?? "") : "";
+    }
+
+    private static string PlaylistKey(PlaylistSource source, string id)
+    {
+        return (int)source + "|" + (id ?? "");
+    }
+
+    private void PromptDefaultPlaylist(PlaylistSource source)
+    {
+        var label = source == PlaylistSource.Netease ? "网易云" : "QQ 音乐";
+        var hint = source == PlaylistSource.Netease
+            ? "粘贴网易云歌单链接或 ID（例如 https://music.163.com/playlist?id=123456）"
+            : "粘贴 QQ 音乐歌单链接或 ID（例如 https://y.qq.com/n/ryqq/playlist/123456）";
+        var initial = PlaylistId(source);
+
+        using (var prompt = new PromptDialog("导入默认歌单 · " + label, hint, initial))
+        {
+            if (prompt.ShowDialog(_hud) != DialogResult.OK) return;
+
+            var id = ExtractPlaylistId(source, prompt.Value);
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                _tray.ShowBalloonTip(3000, "Music Toppin", "没认出歌单 ID，请粘贴完整歌单链接或数字 ID。", ToolTipIcon.Warning);
+                return;
+            }
+
+            SetDefaultPlaylist(source, id);
+        }
+    }
+
+    private void SetDefaultPlaylist(PlaylistSource source, string id)
+    {
+        if (source == PlaylistSource.Netease)
+        {
+            _settings.NeteasePlaylistId = id;
+            _settings.NeteasePlaylistName = "";
+        }
+        else if (source == PlaylistSource.QQMusic)
+        {
+            _settings.QQPlaylistId = id;
+            _settings.QQPlaylistName = "";
+        }
+
+        _settings.DefaultPlaylistSource = (int)source;
+        _settings.DefaultPlaylistEnabled = true;
+        _settings.Save();
+
+        ResetDefaultPlaylistCache();
+        if (_playingDefaultPlaylist) StopOwnPlayback();
+        UpdateDefaultPlaylistMenu();
+
+        if (!_playingFromQueue && (_player == null || _player.Current == null))
+            _ = StartDefaultPlaylistAsync();
+    }
+
+    private void SetDefaultPlaylistSource(PlaylistSource source)
+    {
+        if (string.IsNullOrWhiteSpace(PlaylistId(source)))
+        {
+            PromptDefaultPlaylist(source);
+            return;
+        }
+
+        if (CurrentPlaylistSource == source)
+        {
+            if (!_settings.DefaultPlaylistEnabled) ToggleDefaultPlaylist();
+            else if (!_playingDefaultPlaylist && !_playingFromQueue && (_player == null || _player.Current == null))
+                _ = StartDefaultPlaylistAsync();
+            return;
+        }
+
+        if (_playingDefaultPlaylist) StopOwnPlayback();
+        _settings.DefaultPlaylistSource = (int)source;
+        _settings.DefaultPlaylistEnabled = true;
+        _settings.Save();
+        ResetDefaultPlaylistCache();
+        UpdateDefaultPlaylistMenu();
+
+        if (!_playingFromQueue && (_player == null || _player.Current == null))
+            _ = StartDefaultPlaylistAsync();
+    }
+
+    private void ToggleDefaultPlaylist()
+    {
+        if (CurrentPlaylistSource == PlaylistSource.None || string.IsNullOrWhiteSpace(PlaylistId(CurrentPlaylistSource))) return;
+
+        _settings.DefaultPlaylistEnabled = !_settings.DefaultPlaylistEnabled;
+        _settings.Save();
+
+        if (!_settings.DefaultPlaylistEnabled)
+        {
+            if (_playingDefaultPlaylist)
+            {
+                StopOwnPlayback();
+                if (_queue.Count > 0) StartNextQueuedSong();
+            }
+        }
+        else if (!_playingFromQueue && (_player == null || _player.Current == null))
+        {
+            _ = StartDefaultPlaylistAsync();
+        }
+
+        UpdateDefaultPlaylistMenu();
+    }
+
+    private void SkipDefaultPlaylist()
+    {
+        if (CurrentPlaylistSource == PlaylistSource.None) return;
+
+        if (_playingDefaultPlaylist)
+        {
+            StopOwnPlayback();
+            _ = StartNextDefaultSongAsync();
+            return;
+        }
+
+        if (!_playingFromQueue && (_player == null || _player.Current == null))
+            _ = StartDefaultPlaylistAsync();
+    }
+
+    private void ClearDefaultPlaylist()
+    {
+        _settings.DefaultPlaylistSource = 0;
+        _settings.DefaultPlaylistEnabled = false;
+        _settings.NeteasePlaylistId = "";
+        _settings.NeteasePlaylistName = "";
+        _settings.QQPlaylistId = "";
+        _settings.QQPlaylistName = "";
+        _settings.Save();
+
+        ResetDefaultPlaylistCache();
+        if (_playingDefaultPlaylist)
+        {
+            StopOwnPlayback();
+            if (_queue.Count > 0) StartNextQueuedSong();
+        }
+        UpdateDefaultPlaylistMenu();
+    }
+
+    private static string ExtractPlaylistId(PlaylistSource source, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "";
+
+        var value = text.Trim();
+        var patterns = source == PlaylistSource.Netease
+            ? new[] { @"[?&#]id=(\d+)", @"playlist/(\d+)", @"^\s*(\d{3,})\s*$" }
+            : new[] { @"disstid=(\d+)", @"playlist/(\d+)", @"[?&#]id=(\d+)", @"^\s*(\d{3,})\s*$" };
+
+        foreach (var pattern in patterns)
+        {
+            var match = Regex.Match(value, pattern, RegexOptions.IgnoreCase);
+            if (match.Success) return match.Groups[1].Value;
+        }
+
+        var digits = Regex.Match(value, @"\d{3,}");
+        return digits.Success ? digits.Value : "";
+    }
+
+    private void ResetDefaultPlaylistCache()
+    {
+        _defaultPlaylistTracks.Clear();
+        _defaultPlaylistIndex = 0;
+        _defaultPlaylistLoadedKey = "";
+        _defaultPlaylistLoadedName = "";
+        _defaultPlaylistLoadTask = null;
+    }
+
+    private async Task<bool> EnsureDefaultPlaylistAsync()
+    {
+        var source = CurrentPlaylistSource;
+        var id = PlaylistId(source);
+        if (source == PlaylistSource.None || string.IsNullOrWhiteSpace(id)) return false;
+
+        var key = PlaylistKey(source, id);
+        if (string.Equals(_defaultPlaylistLoadedKey, key, StringComparison.Ordinal) && _defaultPlaylistTracks.Count > 0)
+            return true;
+
+        if (_defaultPlaylistLoadTask != null && !_defaultPlaylistLoadTask.IsCompleted)
+            return await _defaultPlaylistLoadTask;
+
+        _defaultPlaylistLoadTask = LoadDefaultPlaylistCoreAsync(source, id, key);
+        try
+        {
+            return await _defaultPlaylistLoadTask;
+        }
+        finally
+        {
+            _defaultPlaylistLoadTask = null;
+        }
+    }
+
+    private async Task<bool> LoadDefaultPlaylistCoreAsync(PlaylistSource source, string id, string key)
+    {
+        PlaylistData data = null;
+        try
+        {
+            data = await Task.Run(() => DefaultPlaylist.Load(source, id));
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("default playlist load: " + ex.Message);
+        }
+
+        if (data == null || data.Tracks.Count == 0)
+        {
+            Logger.Write("default playlist load failed: " + source + " " + id);
+            return false;
+        }
+
+        if (!string.Equals(PlaylistKey(CurrentPlaylistSource, PlaylistId(CurrentPlaylistSource)), key, StringComparison.Ordinal))
+            return false;
+
+        _defaultPlaylistTracks.Clear();
+        _defaultPlaylistTracks.AddRange(data.Tracks);
+        _defaultPlaylistIndex = 0;
+        _defaultPlaylistLoadedKey = key;
+        _defaultPlaylistLoadedName = string.IsNullOrWhiteSpace(data.Name) ? id : data.Name;
+
+        if (source == PlaylistSource.Netease) _settings.NeteasePlaylistName = _defaultPlaylistLoadedName;
+        else if (source == PlaylistSource.QQMusic) _settings.QQPlaylistName = _defaultPlaylistLoadedName;
+        _settings.Save();
+
+        Logger.Write("default playlist loaded: " + source + " " + _defaultPlaylistLoadedName + " (" + data.Tracks.Count + " tracks)");
+        UpdateDefaultPlaylistMenu();
+        return true;
+    }
+
+    private async Task StartDefaultPlaylistAsync()
+    {
+        if (_demo || !_settings.DefaultPlaylistEnabled) return;
+        if (_playingFromQueue || _playingDefaultPlaylist) return;
+        if (_videoBvid.Length > 0 || (_player != null && _player.Current != null)) return;
+
+        if (_queue.Count > 0)
+        {
+            StartNextQueuedSong();
+            return;
+        }
+
+        if (!await EnsureDefaultPlaylistAsync()) return;
+        if (_queue.Count > 0 || _playingFromQueue || (_player != null && _player.Current != null)) return;
+
+        await StartNextDefaultSongAsync();
+    }
+
+    private async Task StartNextDefaultSongAsync()
+    {
+        if (!_settings.DefaultPlaylistEnabled || _defaultPlaylistTracks.Count == 0) return;
+
+        if (_queue.Count > 0)
+        {
+            StartNextQueuedSong();
+            return;
+        }
+
+        var count = _defaultPlaylistTracks.Count;
+        var maxAttempts = Math.Min(count, 20);
+        var generation = ++_playGeneration;
+        _playingDefaultPlaylist = true;
+        _playingFromQueue = false;
+        _videoBvid = "";
+        StopVideoTimer();
+
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            if (generation != _playGeneration) return;
+
+            var index = _defaultPlaylistIndex % count;
+            _defaultPlaylistIndex = (index + 1) % count;
+            var track = _defaultPlaylistTracks[index];
+
+            ResolvedSong song = null;
+            try
+            {
+                song = await Task.Run(() => DefaultPlaylist.Resolve(track));
+            }
+            catch (Exception ex)
+            {
+                Logger.Write("default playlist resolve: " + ex.Message);
+            }
+
+            if (generation != _playGeneration) return;
+            if (song == null)
+            {
+                Logger.Write("default playlist skip: " + track.DisplayName);
+                continue;
+            }
+
+            _activeSong = song;
+            try
+            {
+                await EnsurePlayer().PlayAsync(song);
+                if (generation != _playGeneration) return;
+                PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
+                Logger.Write("default playlist play: " + song.Title +
+                             (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist));
+                return;
+            }
+            catch (Exception ex)
+            {
+                Logger.Write("default playlist play failed: " + ex.Message);
+                _activeSong = null;
+            }
+        }
+
+        if (generation != _playGeneration) return;
+
+        _playingDefaultPlaylist = false;
+        _activeSong = null;
+        if (_service != null) _service.SetOwnPlayback(null);
+        _lastRequestResult = "默认歌单暂时放不了（可能需要登录或没有可播曲目）";
+        LiveNotify("Music Toppin", _lastRequestResult, ToolTipIcon.Warning);
+        ShowOverlayToast("默认歌单暂时放不了");
+        Logger.Write("default playlist: no playable track");
+
+        if (_queue.Count > 0) StartNextQueuedSong();
+    }
+
+    private void ContinuePlayback()
+    {
+        if (_queue.Count > 0)
+        {
+            StartNextQueuedSong();
+            return;
+        }
+
+        if (_settings.DefaultPlaylistEnabled && CurrentPlaylistSource != PlaylistSource.None &&
+            !string.IsNullOrWhiteSpace(PlaylistId(CurrentPlaylistSource)))
+        {
+            _ = StartDefaultPlaylistAsync();
+        }
+    }
+
+    private void StopAllPlayback()
+    {
+        _settings.DefaultPlaylistEnabled = false;
+        _settings.Save();
+        StopOwnPlayback();
+        UpdateDefaultPlaylistMenu();
+    }
+
+    // ---- 弹幕点歌 / 切歌权限 ----
+
+    private ToolStripMenuItem BuildRequestPolicyMenu()
+    {
+        var menu = new ToolStripMenuItem("点歌权限");
+
+        var everyone = new ToolStripMenuItem("所有人（普通观众也能点歌）", null, (_, _) => SetRequestPolicy(DanmakuPermissions.RequestAll)) { Tag = DanmakuPermissions.RequestAll };
+        var fans = new ToolStripMenuItem("粉丝团灯牌 或 舰长（推荐）", null, (_, _) => SetRequestPolicy(DanmakuPermissions.RequestFansOrGuard)) { Tag = DanmakuPermissions.RequestFansOrGuard };
+        var guard = new ToolStripMenuItem("仅舰长 / 大航海", null, (_, _) => SetRequestPolicy(DanmakuPermissions.RequestGuardOnly)) { Tag = DanmakuPermissions.RequestGuardOnly };
+        var off = new ToolStripMenuItem("关闭点歌", null, (_, _) => SetRequestPolicy(DanmakuPermissions.RequestOff)) { Tag = DanmakuPermissions.RequestOff };
+
+        menu.DropDownItems.Add(everyone);
+        menu.DropDownItems.Add(fans);
+        menu.DropDownItems.Add(guard);
+        menu.DropDownItems.Add(off);
+
+        menu.DropDownOpening += (_, _) =>
+        {
+            everyone.Checked = _settings.RequestPolicy == DanmakuPermissions.RequestAll;
+            fans.Checked = _settings.RequestPolicy == DanmakuPermissions.RequestFansOrGuard;
+            guard.Checked = _settings.RequestPolicy == DanmakuPermissions.RequestGuardOnly;
+            off.Checked = _settings.RequestPolicy == DanmakuPermissions.RequestOff;
+
+            menu.Text = "点歌权限：" + DescribeRequestPolicy(_settings.RequestPolicy);
+        };
+
+        return menu;
+    }
+
+    private void SetRequestPolicy(int policy)
+    {
+        _settings.RequestPolicy = policy < 0 || policy > 3 ? DanmakuPermissions.RequestFansOrGuard : policy;
+        _settings.Save();
+        Logger.Write("request policy: " + _settings.RequestPolicy);
+        UpdatePermissionMenuText();
+    }
+
+    private void UpdatePermissionMenuText()
+    {
+        if (_permissionMenu == null) return;
+        _permissionMenu.Text = "弹幕权限：点歌 " + DescribeRequestPolicy(_settings.RequestPolicy) +
+                               " / 切歌 " + DescribeSkipPolicy(_settings.SkipPolicy);
+    }
+
+    private static string DescribeRequestPolicy(int policy)
+    {
+        switch (policy)
+        {
+            case DanmakuPermissions.RequestFansOrGuard: return "粉丝团 / 舰长";
+            case DanmakuPermissions.RequestGuardOnly: return "仅舰长";
+            case DanmakuPermissions.RequestOff: return "关闭";
+            default: return "所有人";
+        }
+    }
 
     private ToolStripMenuItem BuildSkipPolicyMenu()
     {
         var menu = new ToolStripMenuItem("弹幕切歌");
 
-        var everyone = new ToolStripMenuItem("所有人（发「切歌」就切）", null, (_, _) => SetSkipPolicy(0)) { Tag = 0 };
-        var requester = new ToolStripMenuItem("仅当前点歌人", null, (_, _) => SetSkipPolicy(1)) { Tag = 1 };
-        var off = new ToolStripMenuItem("关闭", null, (_, _) => SetSkipPolicy(2)) { Tag = 2 };
+        var everyone = new ToolStripMenuItem("所有人（普通观众可切任意歌）", null, (_, _) => SetSkipPolicy(DanmakuPermissions.SkipAll)) { Tag = DanmakuPermissions.SkipAll };
+        var requester = new ToolStripMenuItem("仅点歌人（房管可切全部，推荐）", null, (_, _) => SetSkipPolicy(DanmakuPermissions.SkipRequester)) { Tag = DanmakuPermissions.SkipRequester };
+        var admin = new ToolStripMenuItem("仅房管", null, (_, _) => SetSkipPolicy(DanmakuPermissions.SkipAdmin)) { Tag = DanmakuPermissions.SkipAdmin };
+        var off = new ToolStripMenuItem("关闭", null, (_, _) => SetSkipPolicy(DanmakuPermissions.SkipOff)) { Tag = DanmakuPermissions.SkipOff };
 
         menu.DropDownItems.Add(everyone);
         menu.DropDownItems.Add(requester);
+        menu.DropDownItems.Add(admin);
         menu.DropDownItems.Add(off);
 
         menu.DropDownOpening += (_, _) =>
         {
-            everyone.Checked = _settings.SkipPolicy == 0;
-            requester.Checked = _settings.SkipPolicy == 1;
-            off.Checked = _settings.SkipPolicy == 2;
+            everyone.Checked = _settings.SkipPolicy == DanmakuPermissions.SkipAll;
+            requester.Checked = _settings.SkipPolicy == DanmakuPermissions.SkipRequester;
+            admin.Checked = _settings.SkipPolicy == DanmakuPermissions.SkipAdmin;
+            off.Checked = _settings.SkipPolicy == DanmakuPermissions.SkipOff;
 
-            menu.Text = "弹幕切歌：" + (_settings.SkipPolicy == 0 ? "所有人"
-                : _settings.SkipPolicy == 1 ? "仅点歌人" : "关闭");
+            menu.Text = "弹幕切歌：" + DescribeSkipPolicy(_settings.SkipPolicy);
         };
 
         return menu;
@@ -1079,9 +1680,21 @@ internal sealed class TrayApp : ApplicationContext
 
     private void SetSkipPolicy(int policy)
     {
-        _settings.SkipPolicy = policy < 0 || policy > 2 ? 0 : policy;
+        _settings.SkipPolicy = policy < 0 || policy > 3 ? DanmakuPermissions.SkipRequester : policy;
         _settings.Save();
         Logger.Write("skip policy: " + _settings.SkipPolicy);
+        UpdatePermissionMenuText();
+    }
+
+    private static string DescribeSkipPolicy(int policy)
+    {
+        switch (policy)
+        {
+            case DanmakuPermissions.SkipAll: return "所有人";
+            case DanmakuPermissions.SkipAdmin: return "仅房管";
+            case DanmakuPermissions.SkipOff: return "关闭";
+            default: return "仅点歌人（房管可切全部）";
+        }
     }
 
     private ToolStripMenuItem BuildRemovePolicyMenu()
@@ -1089,7 +1702,7 @@ internal sealed class TrayApp : ApplicationContext
         var menu = new ToolStripMenuItem("弹幕撤回");
 
         var everyone = new ToolStripMenuItem("所有人（可按序号删）", null, (_, _) => SetRemovePolicy(0)) { Tag = 0 };
-        var owner = new ToolStripMenuItem("仅本人（只能撤自己的）", null, (_, _) => SetRemovePolicy(1)) { Tag = 1 };
+        var owner = new ToolStripMenuItem("仅本人（房管可撤全部，推荐）", null, (_, _) => SetRemovePolicy(1)) { Tag = 1 };
         var off = new ToolStripMenuItem("关闭", null, (_, _) => SetRemovePolicy(2)) { Tag = 2 };
 
         menu.DropDownItems.Add(everyone);
@@ -1194,7 +1807,7 @@ internal sealed class TrayApp : ApplicationContext
         {
             Logger.Write("video ended: " + _videoSong.Title);
             StopOwnPlayback();
-            StartNextQueuedSong();
+            ContinuePlayback();
             return;
         }
 
@@ -1240,20 +1853,12 @@ internal sealed class TrayApp : ApplicationContext
         Logger.Write("player failed: " + message);
 
         // 直播中点歌是自动流程，默认不弹气泡（避免右下角通知干扰直播/游戏输入）
-        if (_playingFromQueue) LiveNotify("Music Toppin", message, ToolTipIcon.Warning);
+        if (_playingFromQueue || _playingDefaultPlaylist) LiveNotify("Music Toppin", message, ToolTipIcon.Warning);
         else _tray.ShowBalloonTip(4000, "Music Toppin", message, ToolTipIcon.Warning);
 
-        if (!_playingFromQueue)
-        {
-            // 手动点播失败：必须把 Current 清掉，否则后续队列会一直以为有歌在放
-            _activeSong = null;
-            try { if (_player != null) _ = _player.StopAsync(); } catch { }
-            return;
-        }
-
-        // 点歌播放失败：清掉当前项，接着放下面的，别卡住
+        // 失败也按同一套顺序继续：点歌队列优先，空了回默认歌单
         StopOwnPlayback();
-        StartNextQueuedSong();
+        ContinuePlayback();
     }
 
     /// <summary>
@@ -1590,6 +2195,12 @@ internal sealed class TrayApp : ApplicationContext
                 _ui.Post(_ => UpdateLiveStatus(status), null);
             };
         }
+        else
+        {
+            // 上次秒断可能把会话降级成游客；用户手动重连时从设置恢复登录态
+            _danmaku.Uid = _noBiliLogin ? 0 : ParseUid(_settings.BilibiliUid);
+            if (!_noBiliLogin) BilibiliLive.Cookie = _settings.BilibiliCookie ?? "";
+        }
 
         _danmaku.Start(roomId);
 
@@ -1624,7 +2235,7 @@ internal sealed class TrayApp : ApplicationContext
                 ? _settings.LiveRoomId
                 : (int)(_danmaku != null ? _danmaku.RoomId : 0);
             if (room > 0) ConnectLive(room, remember: false);
-        }, () => HandleDanmaku(new DanmakuMessage { Text = "点歌 起风了", UserName = "本地测试", Uid = 1 })))
+        }, () => HandleDanmaku(new DanmakuMessage { Text = "点歌 起风了", UserName = "本地测试", Uid = 1, IsLocalTest = true })))
         {
             form.ShowDialog(_hud);
         }
@@ -1646,6 +2257,7 @@ internal sealed class TrayApp : ApplicationContext
             PacketCount = client != null ? client.PacketCount : 0,
             LastError = client != null ? client.LastError : "",
             LastRequestResult = _lastRequestResult,
+            RecentVersion = _recentDanmakuVersion,
             Recent = new List<string>(_recentDanmaku)
         };
     }
@@ -1765,7 +2377,10 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
-        var result = _queue.Enqueue(request);
+        // 点歌权限：所有人 / 粉丝团灯牌或舰长 / 仅舰长 / 关闭
+        if (!CanUserRequestSong(message)) return;
+
+        var result = _queue.Enqueue(request, ignoreLimits: message.IsLocalTest);
         if (result.Accepted)
         {
             _lastRequestResult = "已入队（第 " + result.Position + " 位）：" + request.SourceLabel + " " + request.Query;
@@ -1806,6 +2421,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         _recentDanmaku.Add(DateTime.Now.ToString("HH:mm:ss") + "  " + line);
         while (_recentDanmaku.Count > 12) _recentDanmaku.RemoveAt(0);
+        _recentDanmakuVersion++;
     }
 
     // ---- 弹幕切歌 ----
@@ -1815,27 +2431,80 @@ internal sealed class TrayApp : ApplicationContext
         "切歌", "切歌吧", "换歌", "下一首", "跳过", "跳过这首", "跳过这歌", "切了"
     };
 
+    /// <summary>点歌权限：所有人 / 粉丝团灯牌或舰长 / 仅舰长 / 关闭。</summary>
+    private bool CanUserRequestSong(DanmakuMessage message)
+    {
+        if (message.IsLocalTest) return true;
+
+        var policy = _settings.RequestPolicy;
+        if (policy == DanmakuPermissions.RequestAll) return true;
+
+        var hasThisRoomMedal = message.HasMedal && IsThisRoomMedal(message);
+        if (DanmakuPermissions.CanRequest(policy, hasThisRoomMedal, message.IsGuard)) return true;
+
+        var reason = DanmakuPermissions.RequestDeniedMessage(policy);
+        if (policy == DanmakuPermissions.RequestFansOrGuard && message.HasMedal && !hasThisRoomMedal)
+        {
+            reason = "点歌需要本直播间的粉丝团灯牌（你挂的是其他直播间的灯牌）";
+        }
+
+        _lastRequestResult = "被拒绝（" + reason + "）：" + message.UserName;
+        Logger.Write("song request denied: " + reason + " | " + message.UserName + " uid=" + message.Uid +
+                     " medal=" + (message.HasMedal ? message.MedalLevel + "/" + message.MedalName + "@" + message.MedalRoomId : "none") +
+                     " guard=" + message.GuardLevel + " admin=" + message.IsAdmin);
+        LiveNotify("点歌被拒绝", reason + "：" + message.UserName, ToolTipIcon.Info);
+
+        if ((DateTime.UtcNow - _lastRequestDeniedNoticeUtc).TotalSeconds >= 3)
+        {
+            _lastRequestDeniedNoticeUtc = DateTime.UtcNow;
+            ShowOverlayToast(reason + "：" + message.UserName);
+        }
+
+        RefreshLiveStatus();
+        return false;
+    }
+
+    /// <summary>粉丝牌是不是本直播间的（没有牌子房间号时按兼容处理，不误杀）。</summary>
+    private bool IsThisRoomMedal(DanmakuMessage message)
+    {
+        var room = _danmaku != null ? _danmaku.RoomId : 0;
+        var shortId = _danmaku != null ? _danmaku.ShortId : 0;
+        if (message.MedalRoomId <= 0 || room <= 0) return true;
+        return message.MedalRoomId == room || (shortId > 0 && message.MedalRoomId == shortId);
+    }
+
     /// <summary>观众发「切歌」切掉当前这首；返回 true 表示这条弹幕已被当作切歌处理。</summary>
     private bool TryHandleSkipCommand(DanmakuMessage message)
     {
         var text = (message.Text ?? "").Trim().TrimEnd('。', '!', '！', '~', '～', ' ');
         if (!SkipCommands.Contains(text)) return false;
 
-        if (_settings.SkipPolicy == 2)
+        var policy = _settings.SkipPolicy;
+
+        if (policy == DanmakuPermissions.SkipOff && !message.IsLocalTest)
         {
             Logger.Write("danmaku skip: disabled | " + message.UserName);
             return true;
         }
 
-        if (_settings.SkipPolicy == 1)
+        var current = _queue.Current;
+        var ownerUid = current != null && current.Request != null ? current.Request.RequesterUid : 0;
+        var isRequester = ownerUid > 0 && ownerUid == message.Uid;
+
+        // 房管永远可以切全部；普通观众按权限设置判断；本地测试消息不受限制
+        if (!message.IsLocalTest && !DanmakuPermissions.CanSkip(policy, message.IsAdmin, isRequester))
         {
-            var current = _queue.Current;
-            var ownerUid = current != null && current.Request != null ? current.Request.RequesterUid : 0;
-            if (ownerUid <= 0 || ownerUid != message.Uid)
+            var reason = DanmakuPermissions.SkipDeniedMessage(policy);
+            if ((DateTime.UtcNow - _lastSkipNoticeUtc).TotalSeconds >= 3)
             {
-                Logger.Write("danmaku skip: denied (not requester) | " + message.UserName + " uid=" + message.Uid);
-                return true;
+                _lastSkipNoticeUtc = DateTime.UtcNow;
+                _lastRequestResult = "切歌被拒绝（" + reason + "）：" + message.UserName;
+                LiveNotify("切歌被拒绝", reason + "：" + message.UserName, ToolTipIcon.Info);
+                ShowOverlayToast(reason);
             }
+            Logger.Write("danmaku skip: denied (" + reason + ") | " + message.UserName + " uid=" + message.Uid +
+                         " admin=" + message.IsAdmin + " owner=" + ownerUid);
+            return true;
         }
 
         // 防刷：3 秒内只响应一次
@@ -1902,7 +2571,11 @@ internal sealed class TrayApp : ApplicationContext
         {
             var target = position >= 1 && position <= _queue.Items.Count ? _queue.Items[position - 1] : null;
 
-            if (_settings.RemovePolicy == 1 && !IsOwnedBy(target, message))
+            if (target == null)
+            {
+                error = "队列里没有第 " + position + " 首";
+            }
+            else if (_settings.RemovePolicy == 1 && !message.IsAdmin && !IsOwnedBy(target, message))
             {
                 error = "只能撤回自己的歌（「撤回」不带序号）";
             }
@@ -1917,7 +2590,7 @@ internal sealed class TrayApp : ApplicationContext
             int matches;
             var target = _queue.FindByKeyword(arg, out matches);
 
-            if (target != null && _settings.RemovePolicy == 1 && !IsOwnedBy(target, message))
+            if (target != null && _settings.RemovePolicy == 1 && !message.IsAdmin && !IsOwnedBy(target, message))
             {
                 error = "只能撤回自己的歌（「撤回」不带序号）";
             }
@@ -1970,6 +2643,7 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         RebuildQueueList();
+        UpdateDefaultPlaylistMenu();
         RefreshLiveStatus();
         RefreshOverlaySnapshot();
     }
@@ -2013,15 +2687,16 @@ internal sealed class TrayApp : ApplicationContext
 
     private async void StartNextQueuedSong()
     {
-        if (_playingFromQueue) return;
+        if (_playingFromQueue || _playingDefaultPlaylist) return;
 
-        // 手动点播（托盘「点歌测试」）还在放：等它结束，避免两路同时出声
+        // 手动点播/默认歌单还在放：等它结束，避免两路同时出声
         if (_player != null && _player.Current != null) return;
 
         var item = _queue.TakeNext();
         if (item == null) return;
 
         _playingFromQueue = true;
+        _playingDefaultPlaylist = false;
         _videoBvid = "";
         StopVideoTimer();
         UpdateQueueMenu();
@@ -2061,7 +2736,7 @@ internal sealed class TrayApp : ApplicationContext
             _queue.ClearCurrent();
             _playingFromQueue = false;
             UpdateQueueMenu();
-            StartNextQueuedSong();
+            ContinuePlayback();
             return;
         }
 
@@ -2085,6 +2760,7 @@ internal sealed class TrayApp : ApplicationContext
         try
         {
             await EnsurePlayer().PlayAsync(song);
+            if (generation != _playGeneration) return;
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
             Logger.Write("queue play: " + song.Title + (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist));
             LiveNotify("正在播放点歌",
@@ -2098,7 +2774,7 @@ internal sealed class TrayApp : ApplicationContext
             LiveNotify("Music Toppin", ex.Message, ToolTipIcon.Warning);
 
             StopOwnPlayback();
-            StartNextQueuedSong();
+            ContinuePlayback();
         }
     }
 
@@ -2169,7 +2845,7 @@ internal sealed class TrayApp : ApplicationContext
             VideoBvid = _videoBvid,
             VideoSound = _settings.VideoAudio == 1,
             VideoNonce = _videoNonce,
-            Show = np.HasSession && np.Title.Length > 0 && _hud.Visible || (np.HasSession && np.Title.Length > 0 && _settings.Overlay)
+            Show = np.HasSession && np.Title.Length > 0 && (_hud.Visible || _settings.Overlay)
         };
     }
 
@@ -2180,11 +2856,29 @@ internal sealed class TrayApp : ApplicationContext
 
     private void ToggleOverlay()
     {
-        _settings.Overlay = !_settings.Overlay;
-        _itemOverlay.Checked = _settings.Overlay;
+        SetOverlayEnabled(!_settings.Overlay);
+    }
+
+    /// <summary>托盘和上屏向导共用：显式开启/关闭浏览器源叠加层。</summary>
+    private void SetOverlayEnabled(bool enabled)
+    {
+        if (_settings.Overlay == enabled)
+        {
+            if (enabled && _overlay == null) StartOverlay(notify: true);
+            else if (!enabled && _overlay != null) StopOverlay();
+            else if (enabled && _overlay != null)
+            {
+                try { Clipboard.SetText(_overlay.Url); } catch { }
+            }
+            _itemOverlay.Checked = enabled;
+            return;
+        }
+
+        _settings.Overlay = enabled;
+        _itemOverlay.Checked = enabled;
         _settings.Save();
 
-        if (_settings.Overlay) StartOverlay(notify: true);
+        if (enabled) StartOverlay(notify: true);
         else StopOverlay();
     }
 
@@ -2284,10 +2978,17 @@ internal sealed class TrayApp : ApplicationContext
     }
     private void ToggleOffscreen()
     {
-        _settings.CaptureOffscreen = !_settings.CaptureOffscreen;
-        _itemOffscreen.Checked = _settings.CaptureOffscreen;
+        SetOffscreenEnabled(!_settings.CaptureOffscreen);
+    }
 
-        if (_settings.CaptureOffscreen && _settings.CaptureOccluded)
+    private void SetOffscreenEnabled(bool enabled)
+    {
+        if (_settings.CaptureOffscreen == enabled) return;
+
+        _settings.CaptureOffscreen = enabled;
+        _itemOffscreen.Checked = enabled;
+
+        if (enabled && _settings.CaptureOccluded)
         {
             _settings.CaptureOccluded = false;
             _itemOccluded.Checked = false;
@@ -2296,16 +2997,9 @@ internal sealed class TrayApp : ApplicationContext
 
         _settings.Save();
 
-        if (_settings.CaptureOffscreen)
+        if (enabled)
         {
-            if (!_hud.Visible)
-            {
-                _settings.Visible = true;
-                _itemShow.Checked = true;
-                _settings.Save();
-                ShowHud();
-            }
-
+            if (!_hud.Visible) SetHudVisible(true);
             _hud.SetCaptureOffscreen(true);
 
             _tray.ShowBalloonTip(7000, "Music Toppin",
@@ -2326,24 +3020,87 @@ internal sealed class TrayApp : ApplicationContext
 
         try
         {
-            using (var wizard = new WizardForm(_settings, green =>
+            var context = new WizardContext
             {
-                _settings.Green = green;
-                _hud.SetGreen(green);
-                _itemGreen.Checked = green;
-                _settings.Save();
-            }))
+                Settings = _settings,
+                OverlayRunning = () => _overlay != null,
+                SetOverlay = SetOverlayEnabled,
+                HudVisible = () => _hud.Visible,
+                SetHudVisible = SetHudVisible,
+                SetGreen = SetGreenEnabled,
+                Offscreen = () => _settings.CaptureOffscreen,
+                SetOffscreen = SetOffscreenEnabled,
+                Occluded = () => _settings.CaptureOccluded,
+                SetOccluded = enabled => { if (_settings.CaptureOccluded != enabled) ToggleOccluded(); },
+                ConnectLive = PromptLiveRoom,
+                SyncNetease = SyncNeteaseFromClient,
+                LoginNetease = LoginNetease,
+                LoginQQ = LoginQQMusic,
+                ShowPlayerCheck = ShowPlayerCheck,
+                OpenLogFolder = OpenLogFolder,
+                LiveStatusText = BuildLiveStatusText,
+                SourceStatusText = BuildSourceStatusText,
+                SetRequestPolicy = SetRequestPolicy,
+                SetSkipPolicy = SetSkipPolicy
+            };
+
+            using (var wizard = new WizardForm(context))
             {
                 wizard.ShowDialog(_hud);
             }
         }
         catch (Exception ex)
         {
-            Logger.Write("wizard: " + ex.Message);
+            Logger.Write("wizard: " + ex.GetType().Name + " " + ex.Message + " | " + ex.StackTrace);
         }
         finally
         {
             _wizardOpen = false;
+        }
+    }
+
+    private string BuildLiveStatusText()
+    {
+        if (_danmaku == null) return "未连接直播间";
+
+        if (_danmaku.IsConnected)
+        {
+            var live = _danmaku.LiveStatus == 0 ? "（未开播，收不到弹幕）" : "";
+            return "直播间 " + _danmaku.RoomId + live + " · 已收到 " + _danmaku.MessageCount + " 条弹幕 · 队列 " + _queue.Count + " 首";
+        }
+
+        if (_danmaku.IsRunning) return "直播间 " + _danmaku.RoomId + " · 正在连接 / 重连中…";
+        return _settings.LiveRoomId > 0 ? "上次直播间 " + _settings.LiveRoomId + " · 当前未连接" : "未连接直播间";
+    }
+
+    private string BuildSourceStatusText()
+    {
+        var parts = new List<string>();
+        parts.Add("网易云：" + (Netease.IsLoggedIn
+            ? (string.IsNullOrWhiteSpace(_settings.NeteaseNick) ? "已登录" : "已登录 " + _settings.NeteaseNick)
+            : "游客"));
+        parts.Add("QQ 音乐：" + (QQMusic.IsLoggedIn
+            ? "已登录"
+            : (QQMusic.ClientLoggedIn ? "客户端已登录（应用内未登录）" : "未登录")));
+        return string.Join("　·　", parts);
+    }
+
+    private void OpenLogFolder()
+    {
+        try
+        {
+            if (File.Exists(Logger.FilePath))
+            {
+                Process.Start("explorer.exe", "/select,\"" + Logger.FilePath + "\"");
+            }
+            else
+            {
+                Process.Start("explorer.exe", Path.GetTempPath());
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("open log folder: " + ex.Message);
         }
     }
     private static Icon LoadIcon()
@@ -2410,9 +3167,16 @@ internal sealed class TrayApp : ApplicationContext
         {
             _hud.Show();
         }
-        _hud.TopMost = true;
+
+        UpdateRingSide();
         _hud.Render();
-        PlaceHud();
+        if (!_settings.CaptureOffscreen) PlaceHud();
+
+        if (_settings.CaptureOccluded) _hud.SetCaptureOccluded(true);
+        else _hud.TopMost = true;
+
+        if (_settings.CaptureOffscreen) _hud.SetCaptureOffscreen(true);
+
         EnsureHotkeys();
     }
 
@@ -2424,21 +3188,35 @@ internal sealed class TrayApp : ApplicationContext
 
     private void ToggleVisible()
     {
-        // 以真实可见性为准：自动隐藏后勾选态会和实际状态漂移
-        if (_hud.Visible)
+        SetHudVisible(!_hud.Visible);
+    }
+
+    /// <summary>托盘/向导共用：显式显示或隐藏桌面浮窗（不影响浏览器源叠加层）。</summary>
+    private void SetHudVisible(bool visible)
+    {
+        if (visible == _hud.Visible)
         {
-            _settings.Visible = false;
-            HideHud();
+            _settings.Visible = visible;
+            _itemShow.Checked = visible;
+            _settings.Save();
+            return;
         }
-        else
+
+        if (visible)
         {
             _settings.Visible = true;
             ShowHud();
             _hud.SetState(_latest, animate: false);
         }
+        else
+        {
+            _settings.Visible = false;
+            HideHud();
+        }
 
         _itemShow.Checked = _hud.Visible;
         _settings.Save();
+        RefreshOverlaySnapshot();
     }
 
     private void ToggleLock()
@@ -2447,17 +3225,35 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Locked = !_settings.Locked;
         _hud.SetLocked(_settings.Locked);
         _hud.SetEditing(!_settings.Locked);
-        _hud.SetEditing(!_settings.Locked);
         _itemLock.Checked = _settings.Locked;
         _settings.Save();
     }
 
     private void ToggleGreen()
     {
-        _settings.Green = !_settings.Green;
-        _hud.SetGreen(_settings.Green);
-        _itemGreen.Checked = _settings.Green;
+        SetGreenEnabled(!_settings.Green);
+    }
+
+    private void SetGreenEnabled(bool green)
+    {
+        _settings.Green = green;
+        _hud.SetGreen(green);
+        _itemGreen.Checked = green;
         _settings.Save();
+    }
+
+    private void ToggleMediaKeys()
+    {
+        _settings.DisableMediaKeys = !_settings.DisableMediaKeys;
+        WindowPlayers.MediaKeysEnabled = !_settings.DisableMediaKeys;
+        _itemSafeMedia.Checked = _settings.DisableMediaKeys;
+        _settings.Save();
+
+        _tray.ShowBalloonTip(2500, "Music Toppin",
+            _settings.DisableMediaKeys
+                ? "已开启反作弊保守模式：不再发送系统媒体键，外部播放器的上一首/下一首不可用。"
+                : "已关闭反作弊保守模式：恢复媒体键切歌。",
+            ToolTipIcon.Info);
     }
 
     private void ToggleAutoStart()
@@ -2467,13 +3263,27 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Save();
     }
 
-    private void SetStyle(bool compact)
+    private void SetStyle(int style)
     {
-        _settings.Compact = compact;
-        _hud.SetCompact(compact);
-        _itemCompact.Checked = compact;
-        _itemKillfeed.Checked = !compact;
+        style = Math.Max(0, Math.Min(2, style));
+        _settings.Style = style;
+        _hud.SetCompact(style == 1);
+        _hud.SetRing(style == 2);
+        _itemCompact.Checked = style == 1;
+        _itemKillfeed.Checked = style == 0;
+        _itemRing.Checked = style == 2;
         _settings.Save();
+
+        if (style == 2) UpdateRingSide();
+        if (!string.IsNullOrEmpty(_anchor))
+        {
+            MoveHudTo(_anchor, fromUser: false);
+        }
+        else
+        {
+            var clamped = ClampToWorkArea(_hud.Bounds);
+            _hud.Location = clamped.Location;
+        }
     }
 
     /// <summary>
@@ -2681,17 +3491,17 @@ internal sealed class TrayApp : ApplicationContext
 
     private async Task SkipAsync(bool previous)
     {
-        var hasOwnPlayback = _playingFromQueue || _videoBvid.Length > 0 ||
+        var hasOwnPlayback = _playingFromQueue || _playingDefaultPlaylist || _videoBvid.Length > 0 ||
                              (_player != null && _player.Current != null);
 
         if (hasOwnPlayback)
         {
             if (!previous)
             {
-                // 切歌：停掉当前（视频/音乐），直接放队列下一首
+                // 切歌：停掉当前（视频/音乐），点歌队列优先，空了回默认歌单
                 Logger.Write("skip: next (own playback)");
                 StopOwnPlayback();
-                StartNextQueuedSong();
+                ContinuePlayback();
                 return;
             }
 
@@ -2774,6 +3584,11 @@ internal sealed class TrayApp : ApplicationContext
         }
 
         if (_latest.HasSession || !_hud.Visible) return;
+
+        // 离屏/遮挡是给采集软件用的：窗口一旦真 Hide，采集源会从列表里消失，
+        // 再 Show 时 PlaceHud 也会把窗口搬回桌面，采集模式实际失效。
+        if (_settings.CaptureOffscreen || _settings.CaptureOccluded) return;
+
         if ((DateTime.UtcNow - _lastSessionUtc).TotalSeconds < 4) return;
         HideHud();
     }

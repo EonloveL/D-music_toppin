@@ -48,6 +48,19 @@ namespace MusicToppin.Tests
 
             TestRun.Check(Netease.ParsePlayerUrl("{\"data\":[]}") == null, "取流：空 data");
             TestRun.Check(Netease.ParsePlayerUrl(null) == null, "取流：null");
+
+            var playlistJson =
+                "{\"playlist\":{\"name\":\"默认歌单\",\"tracks\":[" +
+                "{\"id\":1330348068,\"name\":\"起风了\",\"duration\":325868,\"artists\":[{\"name\":\"买辣椒也用券\"}]}," +
+                "{\"id\":185809,\"name\":\"彩虹\",\"duration\":263784,\"artists\":[{\"name\":\"周杰伦\"}]}" +
+                "]}}";
+            var playlist = Netease.ParsePlaylist(playlistJson, "12345");
+            TestRun.Check(playlist != null && playlist.Name == "默认歌单", "歌单：名称");
+            TestRun.Check(playlist != null && playlist.Tracks.Count == 2, "歌单：曲目数");
+            TestRun.Check(playlist != null && playlist.Tracks[0].Title == "起风了" && playlist.Tracks[0].Id == "1330348068", "歌单：曲目/ID");
+            TestRun.Check(playlist != null && playlist.Tracks[1].Artist == "周杰伦", "歌单：歌手");
+            TestRun.Check(Netease.ParsePlaylist("{\"playlist\":{\"tracks\":[]}}", "1") == null, "歌单：空");
+            TestRun.Check(Netease.ParsePlaylist(null, "1") == null, "歌单：null");
         }
     }
 }

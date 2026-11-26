@@ -85,7 +85,7 @@ internal sealed class RequestQueue
         return string.IsNullOrEmpty(request.Requester) ? "" : "n:" + request.Requester;
     }
 
-    public QueueResult Enqueue(SongRequest request)
+    public QueueResult Enqueue(SongRequest request, bool ignoreLimits = false)
     {
         if (request == null || string.IsNullOrWhiteSpace(request.Query))
         {
@@ -96,7 +96,7 @@ internal sealed class RequestQueue
         var userKey = UserKey(request);
 
         // 同一用户在冷却时间内只能点一次（按 uid，同名观众不互相影响、改昵称也绕不过）
-        if (UserCooldown > TimeSpan.Zero && userKey.Length > 0)
+        if (!ignoreLimits && UserCooldown > TimeSpan.Zero && userKey.Length > 0)
         {
             DateTime last;
             if (_userLastUtc.TryGetValue(userKey, out last) && now - last < UserCooldown)
@@ -108,7 +108,7 @@ internal sealed class RequestQueue
 
         // 同一首歌在冷却时间内不能重复点（含队列里已有的）
         var key = request.DedupeKey;
-        if (SongCooldown > TimeSpan.Zero)
+        if (!ignoreLimits && SongCooldown > TimeSpan.Zero)
         {
             DateTime seen;
             if (_songSeenUtc.TryGetValue(key, out seen) && now - seen < SongCooldown)
@@ -133,8 +133,11 @@ internal sealed class RequestQueue
         var item = new QueueItem { Request = request };
         _items.Add(item);
 
-        _songSeenUtc[key] = now;
-        if (userKey.Length > 0) _userLastUtc[userKey] = now;
+        if (!ignoreLimits)
+        {
+            _songSeenUtc[key] = now;
+            if (userKey.Length > 0) _userLastUtc[userKey] = now;
+        }
 
         RaiseChanged();
 

@@ -131,9 +131,11 @@ internal static class AudioSessions
     private static Activity Query(int pid)
     {
         IMMDeviceCollection devices = null;
+        object enumeratorObject = null;
         try
         {
-            var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+            enumeratorObject = new MMDeviceEnumeratorComObject();
+            var enumerator = (IMMDeviceEnumerator)enumeratorObject;
             if (enumerator.EnumAudioEndpoints(0 /*eRender*/, DEVICE_STATE_ACTIVE, out devices) != 0 || devices == null)
                 return Activity.Unknown;
 
@@ -208,6 +210,7 @@ internal static class AudioSessions
         finally
         {
             Release(devices);
+            Release(enumeratorObject);
         }
     }
 

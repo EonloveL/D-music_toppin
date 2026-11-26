@@ -64,25 +64,104 @@ internal static class QQMusic
         {
             if (tried++ >= MaxCandidates) break;
 
-            var url = Vkey(candidate.Mid);
-            if (string.IsNullOrEmpty(url))
-            {
-                Logger.Write("qq: no vkey for " + candidate.Mid + " " + candidate.Name);
-                continue;
-            }
+            var song = ResolveByMid(candidate.Mid, candidate.Name, candidate.Artist, candidate.Duration);
+            if (song != null) return song;
 
-            return new ResolvedSong
-            {
-                Title = candidate.Name,
-                Artist = candidate.Artist,
-                AudioUrl = url,
-                Duration = candidate.Duration,
-                SourceLabel = "QQ音乐",
-                PageUrl = "https://y.qq.com/n/ryqq/songDetail/" + candidate.Mid
-            };
+            Logger.Write("qq: no vkey for " + candidate.Mid + " " + candidate.Name);
         }
 
         return null;
+    }
+
+    public static ResolvedSong ResolveByMid(string mid, string title, string artist, TimeSpan duration)
+    {
+        if (string.IsNullOrWhiteSpace(mid)) return null;
+
+        var url = Vkey(mid);
+        if (string.IsNullOrEmpty(url)) return null;
+
+        return new ResolvedSong
+        {
+            Title = title ?? "",
+            Artist = artist ?? "",
+            AudioUrl = url,
+            Duration = duration,
+            SourceLabel = "QQ音乐",
+            PageUrl = "https://y.qq.com/n/ryqq/songDetail/" + mid
+        };
+    }
+
+    /// <summary>读取 QQ 音乐歌单（默认歌单用）；只取元信息，播放时再逐首取 vkey。</summary>
+    public static PlaylistData LoadPlaylist(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+
+        var url = "https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg" +
+                  "?type=1&json=1&utf8=1&onlysong=0&disstid=" + Uri.EscapeDataString(id) +
+                  "&format=json&g_tk=5381&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0";
+        var json = Get(url);
+        return ParsePlaylist(json, id);
+    }
+
+    public static PlaylistData ParsePlaylist(string json, string id)
+    {
+        var root = SafeParse(json);
+        if (root == null) return null;
+
+        var list = root["cdlist"];
+        if (list == null || list.Kind != JsonKind.Array || list.Count == 0)
+        {
+            var data = root["data"];
+            list = data != null ? data["cdlist"] : null;
+        }
+        if (list == null || list.Kind != JsonKind.Array || list.Count == 0) return null;
+
+        var first = list[0];
+        if (first == null) return null;
+
+        var playlist = new PlaylistData
+        {
+            Source = PlaylistSource.QQMusic,
+            Id = id,
+            Name = first["dissname"] != null ? (first["dissname"].AsString ?? "") : ""
+        };
+
+        var songs = first["songlist"];
+        if (songs == null || songs.Kind != JsonKind.Array) return null;
+
+        foreach (var item in songs.Items)
+        {
+            if (item == null) continue;
+
+            var mid = item["songmid"] != null ? item["songmid"].AsString : null;
+            if (string.IsNullOrWhiteSpace(mid)) continue;
+
+            var name = item["songname"] != null ? (item["songname"].AsString ?? "") : "";
+            var interval = item["interval"] != null ? item["interval"].AsLong : 0;
+
+            var names = new List<string>();
+            var artists = item["singer"];
+            if (artists != null && artists.Kind == JsonKind.Array)
+            {
+                foreach (var singer in artists.Items)
+                {
+                    var value = singer != null && singer["name"] != null ? singer["name"].AsString : null;
+                    if (!string.IsNullOrWhiteSpace(value)) names.Add(value);
+                    if (names.Count >= 2) break;
+                }
+            }
+
+            playlist.Tracks.Add(new PlaylistTrack
+            {
+                Source = PlaylistSource.QQMusic,
+                Id = mid,
+                Title = name,
+                Artist = string.Join(" / ", names),
+                Duration = interval > 0 ? TimeSpan.FromSeconds(interval) : TimeSpan.Zero
+            });
+        }
+
+        return playlist.Tracks.Count > 0 ? playlist : null;
     }
 
     // ---- 搜索 ----

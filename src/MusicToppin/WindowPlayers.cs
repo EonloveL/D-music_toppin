@@ -74,7 +74,16 @@ internal static class WindowPlayers
 
             if (Candidates.Count == 0) return false;
 
-            // 正序遍历：候选已按「可见优先」排序，不能倒着走，否则会先命中隐藏的辅助窗口
+            // 正序遍历：候选已按「可见优先」排序，不能倒着走，否则会先命中隐藏的辅助窗口。
+            // 有多个播放器时优先选「该进程音频会话正在出声」的那个，避免暂停的网易云压住正在放的 QQ 音乐。
+            string firstTitle = "";
+            string firstArtist = "";
+            string firstProcess = "";
+            int firstPid = 0;
+            bool firstVisible = false;
+            bool hasFirst = false;
+            var preferActive = Candidates.Count > 1;
+
             List<IntPtr> dead = null;
             for (var i = 0; i < Candidates.Count; i++)
             {
@@ -91,11 +100,39 @@ internal static class WindowPlayers
 
                 var cleaned = Clean(raw, candidate.Def);
                 if (cleaned.Length == 0) continue;
-                if (!TrySplit(cleaned, candidate.Def.ArtistFirst, out title, out artist)) continue;
 
-                processName = candidate.Def.Process;
-                pid = (int)candidate.Pid;
-                visible = candidate.Visible;
+                string candidateTitle, candidateArtist;
+                if (!TrySplit(cleaned, candidate.Def.ArtistFirst, out candidateTitle, out candidateArtist)) continue;
+
+                if (preferActive &&
+                    AudioSessions.GetProcessActivity((int)candidate.Pid) == AudioSessions.Activity.Active)
+                {
+                    title = candidateTitle;
+                    artist = candidateArtist;
+                    processName = candidate.Def.Process;
+                    pid = (int)candidate.Pid;
+                    visible = candidate.Visible;
+                    return true;
+                }
+
+                if (!hasFirst)
+                {
+                    firstTitle = candidateTitle;
+                    firstArtist = candidateArtist;
+                    firstProcess = candidate.Def.Process;
+                    firstPid = (int)candidate.Pid;
+                    firstVisible = candidate.Visible;
+                    hasFirst = true;
+                }
+            }
+
+            if (hasFirst)
+            {
+                title = firstTitle;
+                artist = firstArtist;
+                processName = firstProcess;
+                pid = firstPid;
+                visible = firstVisible;
                 return true;
             }
 
@@ -254,6 +291,9 @@ internal static class WindowPlayers
     private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     private const uint KEYEVENTF_KEYUP = 0x0002;
 
+    /// <summary>反作弊保守模式：关闭后不再向系统注入媒体键（只影响外部播放器切歌）。</summary>
+    public static bool MediaKeysEnabled = true;
+
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
@@ -286,6 +326,8 @@ internal static class WindowPlayers
 
     private static bool Press(byte vk)
     {
+        if (!MediaKeysEnabled) return false;
+
         try
         {
             keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, UIntPtr.Zero);
