@@ -186,6 +186,14 @@ internal sealed class RequestQueue
         RaiseChanged();
     }
 
+    /// <summary>回退到队列里已经播放过的一首：恢复 Current 用于去重，不重新入队。</summary>
+    public void RestoreCurrent(QueueItem item)
+    {
+        Current = item;
+        CurrentSinceUtc = item == null ? (DateTime?)null : DateTime.UtcNow;
+        RaiseChanged();
+    }
+
     /// <summary>按队列序号（1 起，和托盘列表一致）移除还没轮到的歌；成功返回被移除的项。</summary>
     public QueueItem RemoveAt(int oneBasedPosition)
     {

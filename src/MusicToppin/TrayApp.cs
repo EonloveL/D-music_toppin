@@ -224,7 +224,8 @@ internal sealed class TrayApp : ApplicationContext
 
         var controlsMenu = new ToolStripMenuItem("播放控制");
         controlsMenu.DropDownItems.Add(new ToolStripMenuItem("切歌（下一首）", null, (_, _) => _ = SkipAsync(previous: false)));
-        controlsMenu.DropDownItems.Add(new ToolStripMenuItem("重播（上一首）", null, (_, _) => _ = SkipAsync(previous: true)));
+        controlsMenu.DropDownItems.Add(new ToolStripMenuItem("上一首", null, (_, _) => _ = SkipAsync(previous: true)));
+        controlsMenu.DropDownItems.Add(new ToolStripMenuItem("重播当前（本应用播放）", null, (_, _) => RestartOwnPlayback()));
         controlsMenu.DropDownItems.Add(new ToolStripSeparator());
         _volumeMenu = BuildVolumeMenu();
         controlsMenu.DropDownItems.Add(_volumeMenu);
@@ -628,6 +629,10 @@ internal sealed class TrayApp : ApplicationContext
     private int _videoNonce;
     private int _playGeneration;
     private ResolvedSong _activeSong;
+    private OwnHistoryEntry _currentOwnEntry;
+    private readonly List<OwnHistoryEntry> _ownHistory = new List<OwnHistoryEntry>();
+    private readonly List<OwnHistoryEntry> _forwardOwn = new List<OwnHistoryEntry>();
+    private bool _suppressOwnHistory;
     private volatile OverlayState _overlaySnapshot;
     private volatile bool _exiting;
     private DateTime _lastSkipCommandUtc;
@@ -650,6 +655,19 @@ internal sealed class TrayApp : ApplicationContext
     private string _anchor = "";
     private bool _reanchoring;
 
+    private enum OwnKind { Queue, DefaultPlaylist, Bilibili }
+
+    /// <summary>应用自己播放过的一首，用于「上一首」真正回退（URL 过期时按需重解析）。</summary>
+    private sealed class OwnHistoryEntry
+    {
+        public OwnKind Kind;
+        public ResolvedSong Song;
+        public QueueItem QueueItem;
+        public PlaylistTrack Track;
+        public int TrackIndex = -1;
+        public string Bvid = "";
+        public bool Started;
+    }
     private void ApplyTheme()
     {
         var theme = new HudTheme
@@ -1048,6 +1066,7 @@ internal sealed class TrayApp : ApplicationContext
             // 单播放：手动点播前先停掉队列/默认歌单/视频里正在放的那首
             if (HasOwnPlayback) StopOwnPlayback();
             _manualPlaybackPending = true;
+            _forwardOwn.Clear();
             generation = ++_playGeneration;
 
             _tray.ShowBalloonTip(1500, "Music Toppin", "正在解析 " + bvid + " …", ToolTipIcon.Info);
@@ -1062,15 +1081,23 @@ internal sealed class TrayApp : ApplicationContext
 
             _activeSong = song;
             _videoBvid = bvid;
+            _currentOwnEntry = new OwnHistoryEntry
+            {
+                Kind = OwnKind.Bilibili,
+                Song = song,
+                Bvid = bvid
+            };
 
             if (_settings.VideoAudio == 1)
             {
+                if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
                 StartVideoPlayback(song);
                 return;
             }
 
             await EnsurePlayer().PlayAsync(song);
             if (generation != _playGeneration) return;
+            if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
         }
         catch (Exception ex)
@@ -1108,26 +1135,50 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (_service == null || song == null) return;
 
+        // 本应用播放时也把会话历史喂给 HUD/环状，让「上一首」显示真实曲目
+        var prevTitles = new string[NowPlaying.HistorySlots];
+        var prevArtists = new string[NowPlaying.HistorySlots];
+        var prevCount = 0;
+        for (var i = _ownHistory.Count - 1; i >= 0 && prevCount < NowPlaying.HistorySlots; i--)
+        {
+            var past = _ownHistory[i];
+            if (past == null || past.Song == null || string.IsNullOrWhiteSpace(past.Song.Title)) continue;
+            prevTitles[prevCount] = past.Song.Title;
+            prevArtists[prevCount] = past.Song.Artist ?? "";
+            prevCount++;
+        }
+
         var np = new NowPlaying(
             true, song.Title, song.Artist, state.Position,
             state.Duration > TimeSpan.Zero ? state.Duration : song.Duration,
             state.Playing, true,
-            new string[NowPlaying.HistorySlots], new string[NowPlaying.HistorySlots], 0, 0);
+            prevTitles, prevArtists, prevCount, 0);
 
-        // 点歌队列优先显示；没有点歌时显示默认歌单的下一首
-        var next = _queue.PeekNext();
-        if (next != null)
+        // 侧卡「下一首」优先显示前进栈里的歌（回退后点下一首会回到它）
+        var forward = _forwardOwn.Count > 0 ? _forwardOwn[_forwardOwn.Count - 1] : null;
+        if (forward != null && forward.Song != null)
         {
-            np.NextTitle = next.DisplayName;
-            np.NextArtist = next.Artist;
-            np.QueueCount = _queue.Count;
-        }
-        else if (_settings.DefaultPlaylistEnabled && _defaultPlaylistTracks.Count > 0)
-        {
-            var track = _defaultPlaylistTracks[_defaultPlaylistIndex % _defaultPlaylistTracks.Count];
-            np.NextTitle = track.Title;
-            np.NextArtist = track.Artist;
+            np.NextTitle = forward.Song.Title;
+            np.NextArtist = forward.Song.Artist;
             np.QueueCount = 1;
+        }
+        else
+        {
+            // 点歌队列优先显示；没有点歌时显示默认歌单的下一首
+            var next = _queue.PeekNext();
+            if (next != null)
+            {
+                np.NextTitle = next.DisplayName;
+                np.NextArtist = next.Artist;
+                np.QueueCount = _queue.Count;
+            }
+            else if (_settings.DefaultPlaylistEnabled && _defaultPlaylistTracks.Count > 0)
+            {
+                var track = _defaultPlaylistTracks[_defaultPlaylistIndex % _defaultPlaylistTracks.Count];
+                np.NextTitle = track.Title;
+                np.NextArtist = track.Artist;
+                np.QueueCount = 1;
+            }
         }
 
         _service.SetOwnPlayback(np);
@@ -1136,6 +1187,9 @@ internal sealed class TrayApp : ApplicationContext
 
     private void StopOwnPlayback(bool keepDisplayed = false)
     {
+        if (!_suppressOwnHistory) RememberOwnEntry(_currentOwnEntry);
+        _currentOwnEntry = null;
+
         _playingFromQueue = false;
         _playingDefaultPlaylist = false;
         _manualPlaybackPending = false;
@@ -1148,6 +1202,15 @@ internal sealed class TrayApp : ApplicationContext
         if (!keepDisplayed && _service != null) _service.SetOwnPlayback(null);
         UpdateQueueMenu();
         UpdateDefaultPlaylistMenu();
+    }
+
+    private void RememberOwnEntry(OwnHistoryEntry entry)
+    {
+        if (entry == null || entry.Song == null || !entry.Started) return;
+        if (_ownHistory.Count > 0 && ReferenceEquals(_ownHistory[_ownHistory.Count - 1], entry)) return;
+
+        _ownHistory.Add(entry);
+        while (_ownHistory.Count > 12) _ownHistory.RemoveAt(0);
     }
 
     private WebView2Player EnsurePlayer()
@@ -1469,6 +1532,7 @@ internal sealed class TrayApp : ApplicationContext
         _defaultPlaylistFailedKey = "";
         _defaultPlaylistPauseUntil = DateTime.MinValue;
         _defaultPlaylistFailStreak = 0;
+        _forwardOwn.Clear();
     }
 
     private async Task<bool> EnsureDefaultPlaylistAsync()
@@ -1565,6 +1629,7 @@ internal sealed class TrayApp : ApplicationContext
     private async Task StartNextDefaultSongAsync()
     {
         if (!_settings.DefaultPlaylistEnabled || _defaultPlaylistTracks.Count == 0) return;
+        _forwardOwn.Clear();
 
         if (_queue.Count > 0)
         {
@@ -1606,10 +1671,18 @@ internal sealed class TrayApp : ApplicationContext
             }
 
             _activeSong = song;
+            _currentOwnEntry = new OwnHistoryEntry
+            {
+                Kind = OwnKind.DefaultPlaylist,
+                Song = song,
+                Track = track,
+                TrackIndex = index
+            };
             try
             {
                 await EnsurePlayer().PlayAsync(song);
                 if (generation != _playGeneration) return;
+                if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
                 PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
                 Logger.Write("default playlist play: " + song.Title +
                              (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist));
@@ -1660,6 +1733,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         // 只停止当前曲目，不修改「默认歌单已启用」这个配置；
         // 要关闭自动续播请用「默认歌单 → 暂停」。
+        _forwardOwn.Clear();
         StopOwnPlayback();
         UpdateDefaultPlaylistMenu();
     }
@@ -1919,6 +1993,9 @@ internal sealed class TrayApp : ApplicationContext
     private void OnPlayerFailed(string message)
     {
         Logger.Write("player failed: " + message);
+
+        // 失败曲目不再写回「上一首」历史，避免反复重试同一首坏链
+        if (_currentOwnEntry != null) _currentOwnEntry.Started = false;
 
         // 直播中点歌是自动流程，默认不弹气泡（避免右下角通知干扰直播/游戏输入）
         if (_playingFromQueue || _playingDefaultPlaylist) LiveNotify("Music Toppin", message, ToolTipIcon.Warning);
@@ -2612,7 +2689,7 @@ internal sealed class TrayApp : ApplicationContext
         _lastRequestResult = "弹幕切歌：" + message.UserName;
         Logger.Write("danmaku skip: " + message.UserName + " (uid " + message.Uid + ")");
         ShowOverlayToast("已切歌：" + message.UserName);
-        _ = SkipAsync(previous: false);
+        _ = SkipAsync(previous: false, allowForward: false);
         return true;
     }
 
@@ -2770,6 +2847,7 @@ internal sealed class TrayApp : ApplicationContext
     private async void StartNextQueuedSong()
     {
         if (HasOwnPlayback) return;
+        _forwardOwn.Clear();
 
         var item = _queue.TakeNext();
         if (item == null) return;
@@ -2828,18 +2906,27 @@ internal sealed class TrayApp : ApplicationContext
         // 视频点播：叠加层 /video 小窗里同步播放
         _videoBvid = item.Request != null && item.Request.IsVideo ? ExtractVideoBvid(item, song) : "";
 
+        _activeSong = song;
+        _currentOwnEntry = new OwnHistoryEntry
+        {
+            Kind = OwnKind.Queue,
+            Song = song,
+            QueueItem = item,
+            Bvid = _videoBvid
+        };
+
         if (_videoBvid.Length > 0 && _settings.VideoAudio == 1)
         {
+            if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
             StartVideoPlayback(song);
             return;
         }
-
-        _activeSong = song;
 
         try
         {
             await EnsurePlayer().PlayAsync(song);
             if (generation != _playGeneration) return;
+            if (_currentOwnEntry != null) _currentOwnEntry.Started = true;
             PushOwnState(song, new PlaybackState { Playing = true, Duration = song.Duration });
             Logger.Write("queue play: " + song.Title + (string.IsNullOrEmpty(song.Artist) ? "" : " - " + song.Artist));
             LiveNotify("正在播放点歌",
@@ -2886,6 +2973,7 @@ internal sealed class TrayApp : ApplicationContext
     private void ClearQueue()
     {
         _queue.Clear();
+        _forwardOwn.Clear();
         UpdateQueueMenu();
         _tray.ShowBalloonTip(1800, "Music Toppin", "点歌队列已清空", ToolTipIcon.Info);
     }
@@ -3570,41 +3658,219 @@ internal sealed class TrayApp : ApplicationContext
         _menu.Show(Cursor.Position);
     }
 
-    private async Task SkipAsync(bool previous)
+    private async Task SkipAsync(bool previous, bool allowForward = true)
     {
-        var hasOwnPlayback = _playingFromQueue || _playingDefaultPlaylist || _videoBvid.Length > 0 ||
-                             (_player != null && _player.Current != null);
-
-        if (hasOwnPlayback)
+        if (previous)
         {
-            if (!previous)
+            // 手动 BV 还在解析：按上一首先取消这次待起播，避免随后又突然开播
+            if (_manualPlaybackPending)
             {
-                // 切歌：停掉当前（视频/音乐），点歌队列优先，空了回默认歌单
-                Logger.Write("skip: next (own playback)");
-                StopOwnPlayback(keepDisplayed: true);
-                ContinuePlayback();
-                return;
+                _manualPlaybackPending = false;
+                _playGeneration++;
             }
 
-            // 上一首：音乐回到开头；视频重开（计时器 + iframe 一起重置）
-            if (_videoSong != null)
+            // 历史非空就优先回退；播放已停止/自然播完时也能恢复上一首
+            if ((HasOwnPlayback || ShouldResumeOwnHistory()) && await PlayPreviousOwnAsync()) return;
+
+            if (HasOwnPlayback)
             {
-                Logger.Write("skip: restart video");
-                RestartVideo();
-                return;
+                // 还没有历史：把当前曲目重头播
+                if (_videoSong != null)
+                {
+                    Logger.Write("skip: restart video (no history)");
+                    RestartVideo();
+                    return;
+                }
+
+                if (_player != null && _player.Current != null)
+                {
+                    Logger.Write("skip: restart track (no history)");
+                    _ = _player.SeekAsync(TimeSpan.Zero);
+                    return;
+                }
             }
 
-            if (_player != null && _player.Current != null)
-            {
-                Logger.Write("skip: restart track");
-                _ = _player.SeekAsync(TimeSpan.Zero);
-                return;
-            }
+            if (_service is null) return;
+            await _service.SkipPreviousAsync();
+            return;
+        }
+
+        // 下一首：如果刚点过上一首，优先前进回退前那首；外部播放/弹幕切歌不要抢系统下一首
+        if (allowForward && HasOwnPlayback && await PlayForwardOwnAsync()) return;
+
+        _forwardOwn.Clear();
+
+        if (HasOwnPlayback)
+        {
+            // 切歌：停掉当前（视频/音乐），点歌队列优先，空了回默认歌单
+            Logger.Write("skip: next (own playback)");
+            StopOwnPlayback(keepDisplayed: true);
+            ContinuePlayback();
+            return;
         }
 
         if (_service is null) return;
-        if (previous) await _service.SkipPreviousAsync();
-        else await _service.SkipNextAsync();
+        await _service.SkipNextAsync();
+    }
+
+    /// <summary>本应用已停止播放时，如果历史顶部的标题仍是当前外部状态，说明是刚停掉的那首。</summary>
+    private bool ShouldResumeOwnHistory()
+    {
+        if (_ownHistory.Count == 0) return false;
+        if (!_latest.HasSession) return true;
+
+        var entry = _ownHistory[_ownHistory.Count - 1];
+        return entry != null && entry.Song != null &&
+               string.Equals(_latest.Title, entry.Song.Title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<bool> PlayPreviousOwnAsync()
+    {
+        while (_ownHistory.Count > 0 &&
+               (_ownHistory[_ownHistory.Count - 1] == null || _ownHistory[_ownHistory.Count - 1].Song == null))
+        {
+            _ownHistory.RemoveAt(_ownHistory.Count - 1);
+        }
+        if (_ownHistory.Count == 0) return false;
+
+        var entry = _ownHistory[_ownHistory.Count - 1];
+        _ownHistory.RemoveAt(_ownHistory.Count - 1);
+
+        // 当前这首留作「下一首」的前进目标
+        var current = _currentOwnEntry;
+        if (current != null && current.Started && !ReferenceEquals(current, entry))
+        {
+            if (_forwardOwn.Count == 0 || !ReferenceEquals(_forwardOwn[_forwardOwn.Count - 1], current))
+                _forwardOwn.Add(current);
+            while (_forwardOwn.Count > 12) _forwardOwn.RemoveAt(0);
+        }
+
+        return await PlayOwnHistoryEntryAsync(entry, goingBack: true);
+    }
+
+    private async Task<bool> PlayForwardOwnAsync()
+    {
+        while (_forwardOwn.Count > 0 &&
+               (_forwardOwn[_forwardOwn.Count - 1] == null || _forwardOwn[_forwardOwn.Count - 1].Song == null))
+        {
+            _forwardOwn.RemoveAt(_forwardOwn.Count - 1);
+        }
+        if (_forwardOwn.Count == 0) return false;
+
+        var entry = _forwardOwn[_forwardOwn.Count - 1];
+        _forwardOwn.RemoveAt(_forwardOwn.Count - 1);
+        return await PlayOwnHistoryEntryAsync(entry, goingBack: false);
+    }
+
+    private async Task<bool> PlayOwnHistoryEntryAsync(OwnHistoryEntry entry, bool goingBack)
+    {
+        if (entry == null || entry.Song == null) return false;
+
+        // 只有真正起播成功才重新计入历史；失败条目不会再次压回「上一首」
+        entry.Started = false;
+
+        if (goingBack)
+        {
+            _suppressOwnHistory = true;
+            try { StopOwnPlayback(keepDisplayed: true); }
+            finally { _suppressOwnHistory = false; }
+        }
+        else
+        {
+            StopOwnPlayback(keepDisplayed: true);
+        }
+
+        var generation = ++_playGeneration;
+        _activeSong = entry.Song;
+        _currentOwnEntry = entry;
+        _videoBvid = entry.Bvid ?? "";
+        _playingFromQueue = entry.Kind == OwnKind.Queue;
+        _playingDefaultPlaylist = entry.Kind == OwnKind.DefaultPlaylist;
+        StopVideoTimer();
+
+        if (entry.Kind == OwnKind.Queue && entry.QueueItem != null)
+            _queue.RestoreCurrent(entry.QueueItem);
+
+        // 视频跟随模式：直接用原 bvid 让 overlay 重开，不必等音频直链
+        if (_videoBvid.Length > 0 && _settings.VideoAudio == 1)
+        {
+            entry.Started = true;
+            StartVideoPlayback(entry.Song);
+            return true;
+        }
+
+        ResolvedSong fresh = null;
+        try
+        {
+            if (entry.Kind == OwnKind.DefaultPlaylist && entry.Track != null)
+                fresh = await Task.Run(() => DefaultPlaylist.Resolve(entry.Track));
+            else if (entry.Kind == OwnKind.Bilibili && !string.IsNullOrEmpty(entry.Bvid))
+                fresh = await Task.Run(() => Bilibili.Resolve(entry.Bvid));
+            else if (entry.Kind == OwnKind.Queue && entry.QueueItem != null && entry.QueueItem.Request != null)
+                fresh = await Task.Run(() => SongResolvers.Resolve(entry.QueueItem.Request));
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("history resolve: " + ex.Message);
+        }
+
+        if (generation != _playGeneration) return true;
+        if (fresh != null) entry.Song = fresh;
+        _activeSong = entry.Song;
+
+        if (entry.Song == null || string.IsNullOrWhiteSpace(entry.Song.AudioUrl))
+        {
+            StopOwnPlayback();
+            LiveNotify("Music Toppin", "这首歌暂时放不了", ToolTipIcon.Warning);
+            return true;
+        }
+
+        if (entry.Kind == OwnKind.DefaultPlaylist && entry.Track != null &&
+            entry.Track.Source == CurrentPlaylistSource &&
+            entry.TrackIndex >= 0 && entry.TrackIndex < _defaultPlaylistTracks.Count &&
+            string.Equals(_defaultPlaylistTracks[entry.TrackIndex].Id, entry.Track.Id, StringComparison.Ordinal))
+        {
+            _defaultPlaylistIndex = (entry.TrackIndex + 1) % _defaultPlaylistTracks.Count;
+        }
+
+        try
+        {
+            await EnsurePlayer().PlayAsync(entry.Song);
+            if (generation != _playGeneration) return true;
+            entry.Started = true;
+            PushOwnState(entry.Song, new PlaybackState { Playing = true, Duration = entry.Song.Duration });
+            if (entry.Kind == OwnKind.DefaultPlaylist) _defaultPlaylistFailStreak = 0;
+            Logger.Write((goingBack ? "previous" : "forward") + " play: " + entry.Song.Title +
+                         (string.IsNullOrEmpty(entry.Song.Artist) ? "" : " - " + entry.Song.Artist));
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("history play failed: " + ex.Message);
+            entry.Started = false;
+            StopOwnPlayback();
+            LiveNotify("Music Toppin", "这首歌暂时放不了：" + entry.Song.Title, ToolTipIcon.Warning);
+
+            // 回退失败不再自动前进，避免点「上一首」却跳到下一首
+        }
+
+        return true;
+    }
+
+    private void RestartOwnPlayback()
+    {
+        if (_videoSong != null)
+        {
+            RestartVideo();
+            return;
+        }
+
+        if (_player != null && _player.Current != null)
+        {
+            _ = _player.SeekAsync(TimeSpan.Zero);
+            return;
+        }
+
+        Logger.Write("restart current: no own playback");
     }
 
     private void RestartVideo()

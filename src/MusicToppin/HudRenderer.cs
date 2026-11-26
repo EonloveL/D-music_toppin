@@ -471,17 +471,22 @@ internal static class HudRenderer
             (int)(255f * fade), green, false);
     }
 
-    private static void DrawRingCard(Graphics g, float s, RingLayout layout, string title, string artist,
-        string tag, float angle, bool current, bool playing, bool editing,
-        TimeSpan position, TimeSpan duration, bool hasTimeline,
-        int alpha, bool green, bool rightAlign)
+    private static RectangleF RingCardRect(RingLayout layout, float angle, bool current)
     {
         var width = current ? layout.CurrentWidth : layout.SideWidth;
         var height = current ? layout.CurrentHeight : layout.SideHeight;
         var radians = angle * (float)Math.PI / 180f;
         var centerX = layout.CenterX + layout.Radius * (float)Math.Cos(radians);
         var centerY = layout.CenterY + layout.Radius * (float)Math.Sin(radians);
-        var rect = new RectangleF(centerX - width / 2f, centerY - height / 2f, width, height);
+        return new RectangleF(centerX - width / 2f, centerY - height / 2f, width, height);
+    }
+
+    private static void DrawRingCard(Graphics g, float s, RingLayout layout, string title, string artist,
+        string tag, float angle, bool current, bool playing, bool editing,
+        TimeSpan position, TimeSpan duration, bool hasTimeline,
+        int alpha, bool green, bool rightAlign)
+    {
+        var rect = RingCardRect(layout, angle, current);
 
         var radius = (current ? 18f : 15f) * s;
         var glass = green ? 1f : MF.Clamp(0.25f + Theme.CardOpacity * 0.55f, 0.28f, 0.82f);
@@ -562,7 +567,7 @@ internal static class HudRenderer
             var titleRect = new RectangleF(innerX, titleY, innerW, titleH);
 
             DrawGlowText(g, title, titleFont, titleRect, C_Title, alpha,
-                current ? 2.2f * s : 1.3f * s, rightAlign ? StringAlignment.Far : StringAlignment.Near);
+                current ? 0f : 0.9f * s, rightAlign ? StringAlignment.Far : StringAlignment.Near);
 
             if (!string.IsNullOrWhiteSpace(artist))
             {
@@ -571,7 +576,7 @@ internal static class HudRenderer
                 var artistH = Math.Min(MeasureWrapped(g, artist, artistFont, innerW), artistFont.Height * 2f);
                 if (artistH < artistFont.Height) artistH = artistFont.Height;
                 DrawGlowText(g, artist, artistFont, new RectangleF(innerX, artistY, innerW, artistH),
-                    C_Artist, Math.Min(255, (int)(alpha * 0.86f)), current ? 1.6f * s : 1f * s,
+                    C_Artist, Math.Min(255, (int)(alpha * 0.86f)), current ? 0f : 0.6f * s,
                     rightAlign ? StringAlignment.Far : StringAlignment.Near);
             }
 
@@ -599,21 +604,23 @@ internal static class HudRenderer
         using (var format = new StringFormat { Trimming = StringTrimming.None, Alignment = alignment })
         using (var main = new SolidBrush(Color.FromArgb(Math.Min(255, Math.Max(0, alpha)), color)))
         {
-            var glowAlpha = Math.Min(255, Math.Max(0, (int)(alpha * 0.26f)));
-            using (var glow = new SolidBrush(Color.FromArgb(glowAlpha, color)))
+            // 当前播放不发光；上一首/下一首保留一层很轻的同色柔光
+            if (glowRadius > 0f)
             {
-                var r = glowRadius;
-                var offsets = new[]
+                var glowAlpha = Math.Min(255, Math.Max(0, (int)(alpha * 0.16f)));
+                using (var glow = new SolidBrush(Color.FromArgb(glowAlpha, color)))
                 {
-                    new PointF(-r, 0f), new PointF(r, 0f), new PointF(0f, -r), new PointF(0f, r),
-                    new PointF(-r * 0.7f, -r * 0.7f), new PointF(r * 0.7f, -r * 0.7f),
-                    new PointF(-r * 0.7f, r * 0.7f), new PointF(r * 0.7f, r * 0.7f)
-                };
+                    var r = glowRadius;
+                    var offsets = new[]
+                    {
+                        new PointF(-r, 0f), new PointF(r, 0f), new PointF(0f, -r), new PointF(0f, r)
+                    };
 
-                foreach (var offset in offsets)
-                {
-                    g.DrawString(text, font, glow,
-                        new RectangleF(rect.X + offset.X, rect.Y + offset.Y, rect.Width, rect.Height), format);
+                    foreach (var offset in offsets)
+                    {
+                        g.DrawString(text, font, glow,
+                            new RectangleF(rect.X + offset.X, rect.Y + offset.Y, rect.Width, rect.Height), format);
+                    }
                 }
             }
 
