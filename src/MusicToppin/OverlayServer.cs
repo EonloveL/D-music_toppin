@@ -182,6 +182,11 @@ internal sealed class OverlayServer : IDisposable
                 var request = ReadRequest(stream);
                 if (request == null) return;
 
+                if (request.Path != "/state" && request.Path != "/state.json")
+                {
+                    Logger.Write("overlay req: " + request.Method + " " + request.Path + " host=" + request.Host);
+                }
+
                 // 只接受本机回环 Host，挡住 DNS rebinding（外部页面把域名解析到 127.0.0.1 来读 /state）
                 if (!IsAllowedHost(request.Host))
                 {
@@ -213,10 +218,20 @@ internal sealed class OverlayServer : IDisposable
                     body = Page;
                     contentType = "text/html; charset=utf-8";
                 }
+                else if (path == "/video/stream")
+                {
+                    ProxyVideo(stream, request);
+                    return;
+                }
                 else if (path == "/video")
                 {
                     body = VideoPage;
                     contentType = "text/html; charset=utf-8";
+                }
+                else if (path == "/ping")
+                {
+                    body = "ok";
+                    contentType = "text/plain; charset=utf-8";
                 }
                 else
                 {
@@ -230,6 +245,135 @@ internal sealed class OverlayServer : IDisposable
         catch
         {
             try { client?.Close(); } catch { }
+        }
+    }
+
+    // ---- 纯净视频：/video/stream?bvid=... 代理 ----
+
+    private string GetVideoUrl(string bvid)
+    {
+        lock (_videoLock)
+        {
+            CachedVideo cached;
+            if (_videoCache.TryGetValue(bvid, out cached) && cached.ExpiresUtc > DateTime.UtcNow)
+            {
+                return cached.Url;
+            }
+        }
+
+        var stream = Bilibili.ResolveVideoStream(bvid);
+        if (stream == null || string.IsNullOrEmpty(stream.Url)) return null;
+
+        lock (_videoLock)
+        {
+            _videoCache[bvid] = new CachedVideo { Url = stream.Url, ExpiresUtc = DateTime.UtcNow.AddMinutes(20) };
+        }
+
+        Logger.Write("video stream: " + bvid + " -> " + (stream.Title ?? ""));
+        Logger.Write("video url: " + (stream.Url.Length > 100 ? stream.Url.Substring(0, 100) : stream.Url));
+        return stream.Url;
+    }
+
+    private static void ApplyRange(HttpWebRequest request, string range)
+    {
+        if (string.IsNullOrWhiteSpace(range)) return;
+
+        var text = range.Trim();
+        if (!text.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase)) return;
+
+        var spec = text.Substring("bytes=".Length).Split(',')[0].Trim();
+        var dash = spec.IndexOf('-');
+        if (dash < 0) return;
+
+        long start;
+        if (!long.TryParse(spec.Substring(0, dash), out start)) return;
+
+        var endText = spec.Substring(dash + 1);
+        long end;
+        if (long.TryParse(endText, out end)) request.AddRange(start, end);
+        else request.AddRange(start);
+    }
+
+    private static string ExtractQueryValue(string path, string name)
+    {
+        var index = path.IndexOf('?');
+        if (index < 0) return "";
+
+        foreach (var part in path.Substring(index + 1).Split('&'))
+        {
+            var eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+
+            if (string.Equals(part.Substring(0, eq), name, StringComparison.OrdinalIgnoreCase))
+            {
+                try { return Uri.UnescapeDataString(part.Substring(eq + 1)); }
+                catch { return part.Substring(eq + 1); }
+            }
+        }
+
+        return "";
+    }
+
+    /// <summary>把 B 站 CDN 的 MP4 原样转发给页面（带 Referer / Range），页面只看到纯净画面，没有 B 站播放器 UI。</summary>
+    private void ProxyVideo(Stream client, HttpRequestInfo request)
+    {
+        var bvid = ExtractQueryValue(request.Path, "bvid");
+        if (string.IsNullOrWhiteSpace(bvid))
+        {
+            WriteResponse(client, "400 Bad Request", "text/plain; charset=utf-8", "bvid required");
+            return;
+        }
+
+        var url = GetVideoUrl(bvid);
+        if (string.IsNullOrEmpty(url))
+        {
+            WriteResponse(client, "404 Not Found", "text/plain; charset=utf-8", "video not found");
+            return;
+        }
+
+        try
+        {
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+            req.Referer = "https://www.bilibili.com/";
+            req.Timeout = 15000;
+            req.ReadWriteTimeout = 20000;
+            ApplyRange(req, request.Range);
+
+            using (var response = (HttpWebResponse)req.GetResponse())
+            using (var remote = response.GetResponseStream())
+            {
+                var partial = (int)response.StatusCode == 206;
+                var header = new StringBuilder();
+                header.Append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
+                header.Append("Content-Type: ").Append(string.IsNullOrEmpty(response.ContentType) ? "video/mp4" : response.ContentType).Append("\r\n");
+                if (response.ContentLength >= 0) header.Append("Content-Length: ").Append(response.ContentLength).Append("\r\n");
+
+                var contentRange = response.Headers["Content-Range"];
+                if (!string.IsNullOrEmpty(contentRange)) header.Append("Content-Range: ").Append(contentRange).Append("\r\n");
+
+                header.Append("Accept-Ranges: bytes\r\n");
+                header.Append("Cache-Control: no-store\r\n");
+                header.Append("Connection: close\r\n\r\n");
+
+                var headerBytes = Encoding.ASCII.GetBytes(header.ToString());
+                client.Write(headerBytes, 0, headerBytes.Length);
+
+                if (!string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase))
+                {
+                    var buffer = new byte[64 * 1024];
+                    int read;
+                    while ((read = remote.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        client.Write(buffer, 0, read);
+                    }
+                    client.Flush();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("video proxy: " + ex.Message);
         }
     }
 
@@ -280,7 +424,17 @@ internal sealed class OverlayServer : IDisposable
         public string Method = "GET";
         public string Path = "/";
         public string Host = "";
+        public string Range = "";
     }
+
+    private sealed class CachedVideo
+    {
+        public string Url = "";
+        public DateTime ExpiresUtc;
+    }
+
+    private readonly object _videoLock = new object();
+    private readonly Dictionary<string, CachedVideo> _videoCache = new Dictionary<string, CachedVideo>(StringComparer.Ordinal);
 
     /// <summary>
     /// 读完整个请求头再回包：只读第一行就关闭连接，内核会发 RST，
@@ -322,7 +476,12 @@ internal sealed class OverlayServer : IDisposable
             if (line.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))
             {
                 info.Host = line.Substring(5).Trim();
-                break;
+                continue;
+            }
+
+            if (line.StartsWith("Range:", StringComparison.OrdinalIgnoreCase))
+            {
+                info.Range = line.Substring(6).Trim();
             }
         }
 
@@ -336,7 +495,7 @@ internal sealed class OverlayServer : IDisposable
 <meta charset=""utf-8"">
 <title>Music Toppin Overlay</title>
 <style>
-  html,body{margin:0;padding:0;background:transparent;overflow:hidden;
+  html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;
     font-family:'Microsoft YaHei UI','Microsoft YaHei',sans-serif;-webkit-font-smoothing:antialiased;}
   #wrap{display:none;padding:6px 6px 2px 6px;width:388px;box-sizing:border-box;}
   #wrap.on{display:block;}
@@ -438,7 +597,12 @@ internal sealed class OverlayServer : IDisposable
   function tick(){
     fetch('/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});
   }
-  tick(); setInterval(tick,400);
+  var preview=location.search.indexOf('preview=1')>=0;
+  if(preview){
+    apply({show:true,playing:true,title:'预览模式：叠加层工作正常',artist:'Music Toppin',hasTimeline:true,position:15,duration:200,prevTitle:'',prevArtist:'',nextTitle:'示例：下一首',nextArtist:'',queueCount:1,toast:'',toastId:0});
+  }else{
+    tick(); setInterval(tick,400);
+  }
 })();
 </script>
 </body>
@@ -455,15 +619,15 @@ internal sealed class OverlayServer : IDisposable
 <meta charset=""utf-8"">
 <title>Music Toppin Video</title>
 <style>
-  html,body{margin:0;padding:0;background:transparent;overflow:hidden;}
+  html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;}
   #stage{position:fixed;left:0;top:0;right:0;bottom:0;display:none;border-radius:12px;overflow:hidden;
     background:#000;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 40px rgba(0,0,0,.55);}
   #stage.on{display:block;}
-  #player{width:100%;height:100%;border:0;display:block;}
+  #player{width:100%;height:100%;border:0;display:block;object-fit:contain;background:#000;}
 </style>
 </head>
 <body>
-<div id=""stage""><iframe id=""player"" allow=""autoplay; fullscreen"" allowfullscreen></iframe></div>
+<div id=""stage""><video id=""player"" playsinline preload=""auto""></video></div>
 <script>
 (function(){
   var stage=document.getElementById('stage');
@@ -475,15 +639,27 @@ internal sealed class OverlayServer : IDisposable
     var key=bv+(sound?'|1':'|0')+'|'+(st.videoNonce||0);
     if(key===current) return;
     current=key;
-    if(!bv){stage.className='';player.removeAttribute('src');return;}
+    if(!bv){stage.className='';try{player.pause();}catch(e){}player.removeAttribute('src');player.load();return;}
     stage.className='on';
-    player.src='https://player.bilibili.com/player.html?bvid='+encodeURIComponent(bv)+
-      '&p=1&autoplay=1&muted='+(sound?'0':'1')+'&danmaku=0&high_quality=1&as_wide=1';
+    player.muted=!sound;
+    player.src='/video/stream?bvid='+encodeURIComponent(bv);
+    var p=player.play();
+    if(p&&p.catch)p.catch(function(){});
   }
   function tick(){
     fetch('/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});
   }
-  tick();setInterval(tick,600);
+  if(location.search.indexOf('debug=1')>=0){
+    setInterval(function(){
+      document.title='rs='+player.readyState+' t='+player.currentTime.toFixed(1)+' vw='+player.videoWidth+' err='+(player.error?player.error.code:'-');
+    },500);
+  }
+  var preview=location.search.indexOf('preview=1')>=0;
+  if(preview){
+    stage.className='on';
+  }else{
+    tick();setInterval(tick,600);
+  }
 })();
 </script>
 </body>

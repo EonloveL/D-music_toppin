@@ -13,6 +13,87 @@ internal static class Bilibili
     private const string UserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+    /// <summary>纯净视频窗口用：直接给一个 MP4（durl）直链，避免 B 站 iframe 的播放器 UI。</summary>
+    internal sealed class VideoStream
+    {
+        public string Url = "";
+        public string Title = "";
+        public string Artist = "";
+        public TimeSpan Duration;
+    }
+
+    public static VideoStream ResolveVideoStream(string bvid)
+    {
+        if (string.IsNullOrWhiteSpace(bvid)) return null;
+
+        var viewJson = Get("https://api.bilibili.com/x/web-interface/view?bvid=" + bvid);
+        if (viewJson == null) return null;
+        if (JsonNumber(viewJson, "\"code\":") != 0) return null;
+
+        var cid = JsonNumber(viewJson, "\"cid\":");
+        if (cid <= 0) return null;
+
+        var title = StripTag(JsonString(viewJson, "\"title\":"));
+        var owner = JsonString(viewJson, "\"name\":");
+        var duration = JsonNumber(viewJson, "\"duration\":");
+
+        // fnval=1 返回 durl（音视频一体的 MP4），游客也能拿到 360/480p，页面用 <video> 直接播，没有任何 B 站 UI
+        var playJson = Get("https://api.bilibili.com/x/player/playurl?bvid=" + bvid + "&cid=" + cid +
+                           "&fnval=1&fnver=0&fourk=0&qn=64&platform=html5&high_quality=1");
+        if (playJson == null) return null;
+        if (JsonNumber(playJson, "\"code\":") != 0) return null;
+
+        var url = PickFirstDurl(playJson);
+        if (string.IsNullOrEmpty(url)) return null;
+
+        return new VideoStream
+        {
+            Url = url,
+            Title = title,
+            Artist = owner,
+            Duration = TimeSpan.FromSeconds(duration > 0 ? duration : 0)
+        };
+    }
+
+    private static string PickFirstDurl(string json)
+    {
+        // 优先用 JSON 解析器：B 站会把 & 转义成 \u0026，手写截取很容易得到坏 URL
+        try
+        {
+            var root = Json.Parse(json);
+            var data = root != null ? root["data"] : null;
+            var durl = data != null ? data["durl"] : null;
+            if (durl != null && durl.Kind == JsonKind.Array && durl.Items.Count > 0)
+            {
+                var url = durl.Items[0]["url"];
+                if (url != null && !string.IsNullOrEmpty(url.AsString)) return url.AsString;
+            }
+        }
+        catch { }
+
+        var index = json.IndexOf("\"durl\":[", StringComparison.Ordinal);
+        if (index < 0) return null;
+
+        var urlIndex = json.IndexOf("\"url\":\"", index, StringComparison.Ordinal);
+        if (urlIndex < 0) return null;
+
+        var start = urlIndex + "\"url\":\"".Length;
+        var end = json.IndexOf('"', start);
+        if (end <= start) return null;
+
+        return UnescapeJsonString(json.Substring(start, end - start));
+    }
+
+    private static string UnescapeJsonString(string text)
+    {
+        return text.Replace("\\/", "/")
+            .Replace("\\u0026", "&")
+            .Replace("\\u003d", "=")
+            .Replace("\\u003D", "=")
+            .Replace("\\u003f", "?")
+            .Replace("\\u003F", "?");
+    }
+
     private static readonly Regex BvRegex = new Regex(@"BV[0-9A-Za-z]{10}", RegexOptions.Compiled);
 
     public static bool TryExtractBvid(string text, out string bvid)

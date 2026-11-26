@@ -140,7 +140,7 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 - 截图：`docs/screenshots/hud-next.png`
 - 托盘「点歌队列（N 首）」展开列表（前 10 首：歌名 · 点歌人），带「下一首 / 清空」
 - 叠加层（OBS 浏览器源）同步「下一首 + 队列数」；点歌成功/放不了在叠加层底部弹 4.5 秒提示（`OverlayState.Toast / ToastId`）
-- **视频小窗**：`OverlayState.VideoBvid/VideoSound` → `/video` 页用 B 站官方嵌入播放器；默认 `videoSound=true`
+- **视频小窗**：`OverlayState.VideoBvid/VideoSound` → `/video` 页用 `<video>` 播本地代理的 MP4（`/video/stream?bvid=`，带 Referer/Range），无 B 站 UI；默认 `videoSound=false`
   （默认 `VideoAudio=0` 走应用播放器音量；OBS 允许带声自动播放时可切 `VideoAudio=1` 跟随视频）。
   播放 B 站视频时 `TrayApp._videoBvid` 置位，停止/下一首自动清空
 - 叠加层两个源共用一个端口：`OverlayServer.Start(preferredPort)` 优先上次端口、占用则 4681-4750 往后找，
