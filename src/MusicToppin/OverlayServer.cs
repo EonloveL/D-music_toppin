@@ -334,68 +334,171 @@ internal sealed class OverlayServer : IDisposable
             return;
         }
 
-        var url = GetVideoUrl(bvid);
-        if (string.IsNullOrEmpty(url))
+        var entry = VideoCache.Get(bvid);
+        if (entry == null)
         {
             WriteResponse(client, "404 Not Found", "text/plain; charset=utf-8", "video not found");
             return;
         }
 
-        var headerSent = false;
+        // 等解析出总长度（或失败）；下载本身在后台继续，页面可以先播已缓存的部分
+        var wait = Stopwatch.StartNew();
+        while (!entry.Failed && entry.Total <= 0 && wait.Elapsed < TimeSpan.FromSeconds(20))
+        {
+            lock (entry.Gate) Monitor.Wait(entry.Gate, 100);
+        }
+
+        if (entry.Failed && entry.Downloaded <= 0)
+        {
+            WriteResponse(client, "404 Not Found", "text/plain; charset=utf-8", "video not found");
+            return;
+        }
+
+        var total = entry.Total > 0 ? entry.Total : entry.Downloaded;
+
+        // 先缓冲一小段再开始回包：游戏抢带宽时，播放端拿到的是已落盘的稳定数据
+        var minBuffer = Math.Min(total, 8L * 1024 * 1024);
+        while (!entry.Failed && entry.Downloaded < minBuffer && wait.Elapsed < TimeSpan.FromSeconds(25))
+        {
+            lock (entry.Gate) Monitor.Wait(entry.Gate, 100);
+        }
+
+        long start;
+        long end;
+        var hasRange = TryParseRange(request.Range, total, out start, out end);
+        Logger.Write("video serve: range=" + request.Range + " total=" + total + " start=" + start + " end=" + end + " downloaded=" + entry.Downloaded + " rangeResp=" + hasRange);
+
+        var header = new StringBuilder();
+        header.Append(hasRange ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
+        header.Append("Content-Type: video/mp4\r\n");
+        header.Append("Content-Length: ").Append(end - start + 1).Append("\r\n");
+        if (hasRange)
+        {
+            header.Append("Content-Range: bytes ").Append(start).Append('-').Append(end).Append('/').Append(total).Append("\r\n");
+        }
+        header.Append("Accept-Ranges: bytes\r\n");
+        header.Append("Cache-Control: no-store\r\n");
+        header.Append("Connection: close\r\n\r\n");
+
+        var headerBytes = Encoding.ASCII.GetBytes(header.ToString());
+        client.Write(headerBytes, 0, headerBytes.Length);
+
+        if (string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase)) return;
+
+        ServeCachedVideo(client, entry, start, end);
+    }
+
+    /// <summary>从本地缓存文件按区间输出；未下载到的部分等后台下载追上。</summary>
+    private static void ServeCachedVideo(Stream client, VideoCacheEntry entry, long start, long end)
+    {
+        FileStream file = null;
+        var buffer = new byte[64 * 1024];
+
         try
         {
-            var req = (HttpWebRequest)WebRequest.Create(url);
-            req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-            req.Referer = "https://www.bilibili.com/";
-            req.Timeout = 15000;
-            req.ReadWriteTimeout = 20000;
-            ApplyRange(req, request.Range);
-
-            using (var response = (HttpWebResponse)req.GetResponse())
-            using (var remote = response.GetResponseStream())
+            var openWait = Stopwatch.StartNew();
+            while (file == null && openWait.Elapsed < TimeSpan.FromSeconds(20))
             {
-                var partial = (int)response.StatusCode == 206;
-                var header = new StringBuilder();
-                header.Append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
-                header.Append("Content-Type: ").Append(string.IsNullOrEmpty(response.ContentType) ? "video/mp4" : response.ContentType).Append("\r\n");
-                if (response.ContentLength >= 0) header.Append("Content-Length: ").Append(response.ContentLength).Append("\r\n");
+                if (entry.Failed && entry.Downloaded <= 0) return;
 
-                var contentRange = response.Headers["Content-Range"];
-                if (!string.IsNullOrEmpty(contentRange)) header.Append("Content-Range: ").Append(contentRange).Append("\r\n");
-
-                header.Append("Accept-Ranges: bytes\r\n");
-                header.Append("Cache-Control: no-store\r\n");
-                header.Append("Connection: close\r\n\r\n");
-
-                var headerBytes = Encoding.ASCII.GetBytes(header.ToString());
-                client.Write(headerBytes, 0, headerBytes.Length);
-                headerSent = true;
-
-                if (!string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase))
-                {
-                    var buffer = new byte[64 * 1024];
-                    int read;
-                    while ((read = remote.Read(buffer, 0, buffer.Length)) > 0)
-                    {
-                        client.Write(buffer, 0, read);
-                    }
-                    client.Flush();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Write("video proxy: " + ex.Message);
-            if (!headerSent)
-            {
                 try
                 {
-                    WriteResponse(client, "502 Bad Gateway", "text/plain; charset=utf-8",
-                        "video upstream failed");
+                    file = new FileStream(entry.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 }
-                catch { }
+                catch (FileNotFoundException)
+                {
+                    lock (entry.Gate) Monitor.Wait(entry.Gate, 50);
+                }
+                catch (IOException)
+                {
+                    lock (entry.Gate) Monitor.Wait(entry.Gate, 50);
+                }
             }
+
+            if (file == null) return;
+
+            file.Seek(start, SeekOrigin.Begin);
+            var position = start;
+
+            while (position <= end)
+            {
+                long available;
+                lock (entry.Gate) available = entry.Downloaded;
+
+                if (position < available)
+                {
+                    var want = (int)Math.Min(buffer.Length, Math.Min(available - position, end - position + 1));
+                    var read = file.Read(buffer, 0, want);
+                    if (read <= 0)
+                    {
+                        Thread.Sleep(15);
+                        continue;
+                    }
+
+                    client.Write(buffer, 0, read);
+                    position += read;
+                }
+                else if (entry.Complete || entry.Failed)
+                {
+                    break;
+                }
+                else
+                {
+                    lock (entry.Gate) Monitor.Wait(entry.Gate, 100);
+                }
+            }
+
+            client.Flush();
         }
+        catch (IOException) { }
+        catch (ObjectDisposedException) { }
+        finally
+        {
+            try { if (file != null) file.Dispose(); } catch { }
+        }
+    }
+
+    private static bool TryParseRange(string range, long total, out long start, out long end)
+    {
+        start = 0;
+        end = total > 0 ? total - 1 : 0;
+
+        if (total <= 0 || string.IsNullOrWhiteSpace(range)) return false;
+
+        var text = range.Trim();
+        if (!text.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var spec = text.Substring("bytes=".Length).Split(',')[0].Trim();
+        var dash = spec.IndexOf('-');
+        if (dash < 0) return false;
+
+        var startText = spec.Substring(0, dash).Trim();
+        var endText = spec.Substring(dash + 1).Trim();
+
+        long s;
+        long e;
+
+        if (startText.Length == 0)
+        {
+            // bytes=-N：最后 N 字节
+            if (!long.TryParse(endText, out e)) return false;
+            s = Math.Max(0, total - e);
+            e = total - 1;
+        }
+        else
+        {
+            if (!long.TryParse(startText, out s)) return false;
+            if (endText.Length == 0) e = total - 1;
+            else if (!long.TryParse(endText, out e)) return false;
+        }
+
+        if (s < 0) s = 0;
+        if (e >= total) e = total - 1;
+        if (e < s) return false;
+
+        start = s;
+        end = e;
+        return true;
     }
 
     /// <summary>只接受 BV1 + 10 位字母数字，避免任意字符串拼进 B 站接口。</summary>

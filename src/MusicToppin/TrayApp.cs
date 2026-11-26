@@ -55,6 +55,7 @@ internal sealed class TrayApp : ApplicationContext
         _settings = AppSettings.Load();
 
         Logger.Write("args: " + string.Join(" | ", Environment.GetCommandLineArgs()));
+        VideoCache.CleanupOld();
 
         // 曲源登录态：cookie 存注册表，启动时装回静态字段
         Netease.Cookie = _settings.NeteaseCookie ?? "";
@@ -1084,6 +1085,7 @@ internal sealed class TrayApp : ApplicationContext
 
             _activeSong = song;
             _videoBvid = bvid;
+            VideoCache.Prefetch(bvid);
             _currentOwnEntry = new OwnHistoryEntry
             {
                 Kind = OwnKind.Bilibili,
@@ -2915,6 +2917,8 @@ internal sealed class TrayApp : ApplicationContext
 
         // 视频点播：叠加层 /video 小窗里同步播放
         _videoBvid = item.Request != null && item.Request.IsVideo ? ExtractVideoBvid(item, song) : "";
+
+        if (!string.IsNullOrEmpty(_videoBvid)) VideoCache.Prefetch(_videoBvid);
 
         _activeSong = song;
         _currentOwnEntry = new OwnHistoryEntry
