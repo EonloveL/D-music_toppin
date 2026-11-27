@@ -921,9 +921,8 @@ internal sealed class OverlayServer : IDisposable
   // 宠物图透明留白不同：按内容底边只搭在圆环上沿计算 top（相对圆环直径）
   var owCatTop={siamese:-0.803,dachshund:-0.753,devon:-1.015};
   var owRingPx=104, owRingY=925, owCatVisibleTop=null, owCatMetrics={}, owPetOffset=0;
-  // 尾巴长度不同：devon 长尾要更深地垂进圆环，身体才会压在环沿上
-  // 统一规则：肚皮底边（底轮廓最高点）先对住外圆边，再下移一个圆环厚度
-  var owRingThicknessRatio=0.08;
+  // 三张图按同一视觉接触校准：身体底边压在外圆上，尾巴/腿自然垂进圈内
+  var owCatSink={siamese:26,dachshund:30,devon:70};
   function updateCompactTop(){
     if(!owCompact) return;
     // 紧凑源里圆环位置保持固定（不随主题/猫图变化），这样切主题不用重新对位
@@ -941,8 +940,8 @@ internal sealed class OverlayServer : IDisposable
       updateCompactTop();
       return;
     }
-    var thickness = Math.max(4, ring*owRingThicknessRatio);
-    var elementTop = thickness - m.belly*H + owPetOffset;
+    var sink = hasKey(owCatSink, theme) ? owCatSink[theme] : 26;
+    var elementTop = sink - m.bottom*H + owPetOffset;
     owCat.style.top = elementTop.toFixed(1)+'px';
     var shift = H/2 - (m.left+m.right)/2*H;
     owCat.style.transform='translateX(-50%) translateX('+shift.toFixed(1)+'px)';
@@ -972,7 +971,9 @@ internal sealed class OverlayServer : IDisposable
               colBottom=y; colCount++;
             }
           }
-          if(colBottom>=0 && colCount>=3) bottoms.push(colBottom);
+          // 只看身体中段（避开左右两侧的腿/尾巴），取中段底轮廓最高点作为「肚皮底边」
+          var inMiddle = (x >= minX + (maxX-minX)*0.28) && (x <= maxX - (maxX-minX)*0.28);
+          if(colBottom>=0 && colCount>=3 && inMiddle) bottoms.push(colBottom);
         }
         if(maxY>=0){
           bottoms.sort(function(a,b){return a-b;});
