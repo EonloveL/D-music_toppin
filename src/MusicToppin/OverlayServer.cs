@@ -915,7 +915,7 @@ internal sealed class OverlayServer : IDisposable
   var owThemeNames={none:'无装饰',siamese:'暹罗猫',dachshund:'腊肠狗',devon:'德文猫',spring:'春节',xmas:'圣诞',halloween:'万圣',midautumn:'中秋',valentine:'情人'};
   var owFestAccent={spring:'#ff4d4d',xmas:'#4ddf88',halloween:'#ff9f43',midautumn:'#ffd666',valentine:'#ff6ba9'};
   // 宠物图透明留白不同：按内容底边只搭在圆环上沿计算 top（相对圆环直径）
-  var owCatTop={siamese:-0.893,dachshund:-0.843,devon:-1.105};
+  var owCatTop={siamese:-0.803,dachshund:-0.753,devon:-1.015};
   var owFestIcons={
     spring:[['🏮',-53,-29],['🧨',50,-26],['🧧',44,47],['💮',-50,40],['✨',7,-50]],
     xmas:[['❄️',-53,-29],['🎄',50,-26],['🎁',44,47],['🔔',-50,40],['☃️',7,-50]],
@@ -935,8 +935,8 @@ internal sealed class OverlayServer : IDisposable
 
   var owCompact=location.search.indexOf('compact')>=0;
   var owAlign=location.search.indexOf('align')>=0;
-  function compactTop(ring, ringY){
-    var petTop = ringY - ring/2 - ring*0.9;
+  function compactTop(ring, ringY, offset){
+    var petTop = ringY - ring/2 + ring*offset;
     return -(petTop - 12);
   }
   function resizeOw(){
@@ -1038,7 +1038,8 @@ internal sealed class OverlayServer : IDisposable
       var ringY=Number(st.ringY); if(!isFinite(ringY)) ringY=925; ringY=Math.max(820,Math.min(1020,ringY));
       owStage.style.setProperty('--ow-ring', ring+'px');
       owStage.style.setProperty('--ow-ring-bottom', (1080 - ringY - ring/2)+'px');
-      if(owCompact) owStage.style.top = compactTop(ring, ringY) + 'px';
+      var catOffset = hasKey(owCatTop, theme) ? owCatTop[theme] : -0.9;
+      if(owCompact) owStage.style.top = compactTop(ring, ringY, catOffset) + 'px';
 
       // 卡片背景透明度跟随「背景透明度」设置（与普通卡片一致）
       var op = Number(st.opacity);
