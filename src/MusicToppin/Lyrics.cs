@@ -148,6 +148,8 @@ internal static class LyricsService
     {
         lock (Sync)
         {
+            if (_key.Length == 0 && _lines.Count == 0 && _loadingKey.Length == 0) return;
+
             _key = "";
             _title = "";
             _artist = "";

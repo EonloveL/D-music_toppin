@@ -33,6 +33,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _itemCompact;
     private readonly ToolStripMenuItem _itemKillfeed;
     private readonly ToolStripMenuItem _itemRing;
+    private readonly ToolStripMenuItem _itemOverwatch;
     private ToolStripMenuItem _itemSafeMedia;
     private readonly ToolStripMenuItem _itemAutoStart;
 
@@ -126,6 +127,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemKillfeed = new ToolStripMenuItem("击杀播报", null, (_, _) => SetStyle(0)) { Checked = _settings.Style == 0 };
         _itemCompact = new ToolStripMenuItem("极简", null, (_, _) => SetStyle(1)) { Checked = _settings.Style == 1 };
         _itemRing = new ToolStripMenuItem("环状毛玻璃（新）", null, (_, _) => SetStyle(2)) { Checked = _settings.Style == 2 };
+        _itemOverwatch = new ToolStripMenuItem("守望先锋模式（显示歌词）", null, (_, _) => SetStyle(3)) { Checked = _settings.Style == 3 };
         _itemAutoStart = new ToolStripMenuItem("开机自启", null, (_, _) => ToggleAutoStart()) { Checked = _settings.AutoStart };
 
         _itemWizard = new ToolStripMenuItem("上屏向导…", null, (_, _) => ShowWizard());
@@ -206,12 +208,13 @@ internal sealed class TrayApp : ApplicationContext
         _itemCopyVideo = new ToolStripMenuItem("复制视频小窗地址", null, (_, _) => CopyOverlayUrl("video")) { Enabled = false };
         _itemLyricsOverlay = new ToolStripMenuItem("歌词叠层", null, (_, _) => ToggleLyricsOverlay()) { Checked = _settings.LyricsOverlayEnabled };
         _itemCopyLyrics = new ToolStripMenuItem("复制歌词叠层地址", null, (_, _) => CopyOverlayUrl("lyrics")) { Enabled = false };
-        var lyricsThemeMenu = BuildLyricsThemeMenu();
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
         styleMenu.DropDownItems.Add(_itemCompact);
         styleMenu.DropDownItems.Add(_itemRing);
+        styleMenu.DropDownItems.Add(_itemOverwatch);
+        styleMenu.DropDownItems.Add(BuildLyricsThemeMenu());
 
         _colorMenu = BuildColorMenu();
 
@@ -268,7 +271,6 @@ internal sealed class TrayApp : ApplicationContext
             _itemCopyOverlay,
             _itemCopyVideo,
             _itemLyricsOverlay,
-            lyricsThemeMenu,
             _itemCopyLyrics,
             _itemOffscreen,
             _itemOccluded,
@@ -501,7 +503,7 @@ internal sealed class TrayApp : ApplicationContext
 
         // 启动时按保存的锚点重新贴边（屏幕分辨率/缩放变化后也能回到正确位置）
         if (!string.IsNullOrEmpty(_settings.Anchor) && !_settings.CaptureOffscreen) MoveHudTo(_settings.Anchor);
-        if (_settings.Overlay)
+        if (_settings.Overlay || _settings.Style == 3 || _settings.LyricsOverlayEnabled)
         {
             StartOverlay(notify: false);
         }
@@ -1216,7 +1218,7 @@ internal sealed class TrayApp : ApplicationContext
 
     private void UpdateLyrics(ResolvedSong song)
     {
-        if (!_settings.LyricsOverlayEnabled || song == null)
+        if (!(_settings.Style == 3 || _settings.LyricsOverlayEnabled) || song == null)
         {
             LyricsService.Clear();
             return;
@@ -3155,6 +3157,7 @@ internal sealed class TrayApp : ApplicationContext
             VideoSound = _settings.VideoAudio == 1,
             VideoNonce = _videoNonce,
             LyricsTheme = _settings.LyricsTheme ?? "siamese",
+            Style = _settings.Style,
             Show = np.HasSession && np.Title.Length > 0 && (_hud.Visible || _settings.Overlay)
         };
     }
@@ -3241,7 +3244,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _itemCopyOverlay.Enabled = true;
         _itemCopyVideo.Enabled = true;
-        _itemCopyLyrics.Enabled = _settings.LyricsOverlayEnabled;
+        _itemCopyLyrics.Enabled = _settings.LyricsOverlayEnabled || _settings.Style == 3;
         _itemCopyOverlay.Text = "复制叠加层地址（端口 " + _overlay.Port + "）";
         RefreshOverlaySnapshot();
 
@@ -3608,14 +3611,30 @@ internal sealed class TrayApp : ApplicationContext
 
     private void SetStyle(int style)
     {
-        style = Math.Max(0, Math.Min(2, style));
+        style = Math.Max(0, Math.Min(3, style));
         _settings.Style = style;
         _hud.SetCompact(style == 1);
         _hud.SetRing(style == 2);
         _itemCompact.Checked = style == 1;
         _itemKillfeed.Checked = style == 0;
         _itemRing.Checked = style == 2;
+        _itemOverwatch.Checked = style == 3;
         _settings.Save();
+
+        if (style == 3)
+        {
+            StartOverlay(notify: false);
+            if (_activeSong != null)
+            {
+                LyricsService.SetSong(_activeSong.Title, _activeSong.Artist, _activeSong.SourceLabel, _activeSong.PageUrl);
+            }
+        }
+        else if (!_settings.LyricsOverlayEnabled)
+        {
+            LyricsService.Clear();
+        }
+
+        RefreshOverlaySnapshot();
 
         if (!string.IsNullOrEmpty(_anchor))
         {

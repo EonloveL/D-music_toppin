@@ -11,6 +11,7 @@ internal sealed class OverlayState
     public string Artist = "";
     public string Requester = "";
     public string LyricsTheme = "siamese";
+    public int Style;
     public bool Playing;
     public double Position;
     public double Duration;
@@ -62,6 +63,7 @@ internal sealed class OverlayState
         builder.Append(",\"videoNonce\":").Append(VideoNonce);
         builder.Append(",\"queueCount\":").Append(QueueCount);
         builder.Append(",\"toastId\":").Append(ToastId);
+        builder.Append(",\"style\":").Append(Style);
         builder.Append(",\"playing\":").Append(Playing ? "true" : "false");
         builder.Append(",\"hasTimeline\":").Append(HasTimeline ? "true" : "false");
         builder.Append(",\"show\":").Append(Show ? "true" : "false");
@@ -592,6 +594,11 @@ internal sealed class OverlayServer : IDisposable
         OverlayState.AppendString(builder, "nextTitle", state.NextTitle ?? "");
         OverlayState.AppendString(builder, "nextArtist", state.NextArtist ?? "");
         OverlayState.AppendString(builder, "theme", state.LyricsTheme ?? "siamese");
+        OverlayState.AppendString(builder, "accent", state.Accent ?? "#FF3B30");
+        OverlayState.AppendString(builder, "titleColor", state.TitleColor ?? "#F5F8FC");
+        OverlayState.AppendString(builder, "artistColor", state.ArtistColor ?? "#9FB0C6");
+        builder.Append(",\"opacity\":").Append(state.Opacity.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(",\"style\":").Append(state.Style);
         builder.Append(",\"playing\":").Append(state.Playing ? "true" : "false");
         builder.Append(",\"show\":").Append(snap.Lines.Count > 0 ? "true" : "false");
         builder.Append(",\"position\":").Append(state.Position.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
@@ -766,6 +773,30 @@ internal sealed class OverlayServer : IDisposable
   .prev .tag2{font-size:10.5px;color:rgba(159,176,198,.62);}
   .prev .t2{margin-top:6px;font-size:16px;font-weight:700;color:rgba(245,248,252,.55);word-break:break-word;}
   .prev .a2{margin-top:3px;font-size:12.5px;color:rgba(159,176,198,.55);word-break:break-word;}
+
+  /* 守望先锋模式（显示歌词）：1920×1080 画布，中央圆圈留空，左右卡片 */
+  .hidden{display:none!important;}
+  #ow{display:none;position:fixed;inset:0;}
+  #ow.on{display:block;}
+  .ow-stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#8fb8ff;}
+  .ow-hud{position:absolute;left:0;right:0;bottom:0;height:210px;display:flex;align-items:center;justify-content:center;}
+  .ow-circle{position:relative;width:148px;height:148px;border-radius:50%;}
+  .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.12);box-shadow:0 0 18px color-mix(in srgb, var(--accent) 28%, transparent);}
+  .ow-cat{position:absolute;left:50%;top:-88px;transform:translateX(-50%);width:230px;height:230px;pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .ow-card{position:absolute;bottom:34px;width:340px;padding:16px 18px;border-radius:18px;background:rgba(10,15,24,.70);
+    box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),0 10px 26px rgba(0,0,0,.38);
+    backdrop-filter:blur(4px);color:#eaf2ff;transition:opacity .2s;}
+  .ow-left{left:500px;text-align:right;}
+  .ow-right{left:1080px;text-align:left;}
+  .ow-tag{font-size:12px;color:color-mix(in srgb, var(--accent) 75%, #9fb0c6);letter-spacing:1px;margin-bottom:6px;}
+  .ow-title{font-size:25px;font-weight:700;line-height:1.25;margin-bottom:4px;}
+  .ow-artist{font-size:16px;color:#a9bcd3;margin-bottom:10px;}
+  .ow-meta{font-size:12px;color:#8ea1b8;margin-bottom:8px;}
+  .ow-bar{height:4px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden;margin:8px 0 6px;}
+  .ow-fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#ff8a5c);}
+  .ow-time{font-size:12px;color:#9fb0c6;display:flex;justify-content:space-between;}
+  .ow-lyric{font-size:18px;line-height:1.6;color:#eaf2ff;transition:opacity .18s;}
+  .ow-lyric.next{opacity:.72;font-size:16px;margin-top:6px;}
 </style>
 </head>
 <body>
@@ -791,9 +822,31 @@ internal sealed class OverlayServer : IDisposable
   </div>
   <div id=""toast""></div>
 </div>
+<div id=""ow"">
+  <div class=""ow-stage"" id=""owStage"">
+    <div class=""ow-hud"">
+      <div class=""ow-circle""><div class=""ow-halo""></div><img class=""ow-cat"" id=""owCat"" alt=""""></div>
+    </div>
+    <div class=""ow-card ow-left"" id=""owLeft"">
+      <div class=""ow-tag"" id=""owTag""></div>
+      <div class=""ow-title"" id=""owTitle""></div>
+      <div class=""ow-artist"" id=""owArtist""></div>
+      <div class=""ow-meta"" id=""owMeta""></div>
+      <div class=""ow-bar""><div class=""ow-fill"" id=""owFill""></div></div>
+      <div class=""ow-time""><span id=""owPos"">0:00</span><span id=""owDur"">0:00</span></div>
+    </div>
+    <div class=""ow-card ow-right"" id=""owRight"">
+      <div class=""ow-tag"">当前歌词</div>
+      <div class=""ow-lyric"" id=""owLyric1""></div>
+      <div class=""ow-lyric next"" id=""owLyric2""></div>
+      <div class=""ow-meta"" id=""owNext""></div>
+    </div>
+  </div>
+</div>
 <script>
 (function(){
   var wrap=document.getElementById('wrap');
+  var ow=document.getElementById('ow');
   var card=document.getElementById('card');
   var lastToast=0, toastTimer=null;
   function showToast(text){
@@ -804,7 +857,44 @@ internal sealed class OverlayServer : IDisposable
   }
   function pad(n){return (n<10?'0':'')+n;}
   function fmt(s){s=Math.max(0,s||0);return pad(Math.floor(s/60))+':'+pad(Math.floor(s%60));}
+
+  var owStage=document.getElementById('owStage');
+  var owLeft=document.getElementById('owLeft');
+  var owRight=document.getElementById('owRight');
+  var owTag=document.getElementById('owTag');
+  var owTitle=document.getElementById('owTitle');
+  var owArtist=document.getElementById('owArtist');
+  var owMeta=document.getElementById('owMeta');
+  var owFill=document.getElementById('owFill');
+  var owPos=document.getElementById('owPos');
+  var owDur=document.getElementById('owDur');
+  var owLyric1=document.getElementById('owLyric1');
+  var owLyric2=document.getElementById('owLyric2');
+  var owNext=document.getElementById('owNext');
+  var owCat=document.getElementById('owCat');
+  var owThemeNames={none:'无装饰',siamese:'暹罗猫',dachshund:'腊肠狗',devon:'德文猫'};
+
+  function owThemeUrl(theme){
+    if(!owThemeNames[theme]) theme='siamese';
+    if(theme==='none') return '';
+    return '/assets/themes/' + theme + '.png?v=149';
+  }
+
+  function resizeOw(){
+    var s=Math.min(innerWidth/1920,innerHeight/1080);
+    owStage.style.transform='translate(-50%,-50%) scale('+s+')';
+  }
+  addEventListener('resize',resizeOw); resizeOw();
+
   function apply(st){
+    if(st && st.style === 3){
+      wrap.className='';
+      ow.className='on';
+      applyOw();
+      return;
+    }
+
+    ow.className='';
     if(!st.show){wrap.className='';return;}
     wrap.className='on';
     document.documentElement.style.setProperty('--accent',st.accent||'#FF3B30');
@@ -835,6 +925,56 @@ internal sealed class OverlayServer : IDisposable
     }else{nr.className='nav next';}
     if(st.toast&&st.toastId&&st.toastId!==lastToast){lastToast=st.toastId;showToast(st.toast);}
   }
+
+  function applyOw(){
+    fetch('/lyrics/state?t='+Date.now()).then(function(r){return r.json();}).then(function(st){
+      if(!st || st.style !== 3){ ow.className=''; return; }
+
+      owStage.style.setProperty('--accent', st.accent || '#8fb8ff');
+      owTitle.style.color = st.titleColor || '#eaf2ff';
+      owArtist.style.color = st.artistColor || '#a9bcd3';
+
+      var show=!!st.show && (st.lines||[]).length>0;
+      owLeft.classList.toggle('hidden', !st.title);
+      owRight.classList.toggle('hidden', !show);
+
+      owTag.textContent = st.playing ? '正在播放' : '已暂停';
+      if(st.requester) owTag.textContent += ' · 点歌人 ' + st.requester;
+      owTitle.textContent = st.title || '';
+      owArtist.textContent = st.artist || '';
+
+      var theme = st.theme || 'siamese';
+      var url = owThemeUrl(theme);
+      if(!url){
+        owCat.classList.add('hidden');
+        owCat.removeAttribute('src');
+      } else {
+        owCat.classList.remove('hidden');
+        if(owCat.getAttribute('src') !== url) owCat.src = url;
+      }
+      owMeta.textContent = '歌词叠层 · 主题：' + (owThemeNames[theme] || theme);
+
+      var p = st.duration > 0 ? Math.min(1, (st.position||0)/st.duration) : 0;
+      owFill.style.width = (p*100).toFixed(1) + '%';
+      owPos.textContent = fmt(st.position||0);
+      owDur.textContent = fmt(st.duration||0);
+
+      if(!show){
+        owLyric1.textContent='';
+        owLyric2.textContent='';
+        owNext.textContent='';
+        return;
+      }
+
+      var lines=st.lines;
+      var idx=0;
+      for(var i=0;i<lines.length;i++){ if((lines[i].t||0) <= (st.position||0)) idx=i; }
+      owLyric1.textContent=(st.position||0) < (lines[0].t||0) ? '' : (lines[idx].text||'');
+      owLyric2.textContent=(idx+1<lines.length)?(lines[idx+1].text||''):'';
+      owNext.textContent = st.nextTitle ? ('下一首：' + st.nextTitle + (st.nextArtist ? ' · ' + st.nextArtist : '')) : '';
+    }).catch(function(){});
+  }
+
   function tick(){
     fetch('/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});
   }
@@ -1050,7 +1190,7 @@ internal sealed class OverlayServer : IDisposable
   function themeUrl(theme){
     if(!themeNames[theme]) theme='siamese';
     if(theme==='none') return '';
-    return '/assets/themes/' + theme + '.png?v=148';
+    return '/assets/themes/' + theme + '.png?v=149';
   }
 
   function fmt(t){
