@@ -239,23 +239,14 @@ internal sealed class OverlayServer : IDisposable
                 }
                 else if (path == "/lyrics/state")
                 {
+                    // 端点名是历史沿用：独立歌词页已移除，此数据端点供守望先锋模式取歌词
                     body = CurrentLyricsJson();
                     contentType = "application/json; charset=utf-8";
-                }
-                else if (path == "/lyrics" || path == "/lyrics.html")
-                {
-                    body = LyricsPage;
-                    contentType = "text/html; charset=utf-8";
                 }
                 else if (path.StartsWith("/assets/themes/", StringComparison.OrdinalIgnoreCase))
                 {
                     var name = path.Substring("/assets/themes/".Length);
                     ServeThemeAsset(stream, name, includeBody);
-                    return;
-                }
-                else if (path == "/assets/siamese-cat-small.png")
-                {
-                    ServeThemeAsset(stream, "siamese", includeBody);
                     return;
                 }
                 else if (path == "/ping")
@@ -783,6 +774,7 @@ internal sealed class OverlayServer : IDisposable
   .ow-circle{position:relative;width:148px;height:148px;border-radius:50%;}
   .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.12);box-shadow:0 0 18px color-mix(in srgb, var(--accent) 28%, transparent);}
   .ow-cat{position:absolute;left:50%;top:-88px;transform:translateX(-50%);width:230px;height:230px;pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .ow-deco span{position:absolute;left:50%;top:50%;font-size:24px;pointer-events:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
   .ow-card{position:absolute;bottom:34px;width:340px;padding:16px 18px;border-radius:18px;background:rgba(10,15,24,.70);
     box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),0 10px 26px rgba(0,0,0,.38);
     backdrop-filter:blur(4px);color:#eaf2ff;transition:opacity .2s;}
@@ -825,7 +817,7 @@ internal sealed class OverlayServer : IDisposable
 <div id=""ow"">
   <div class=""ow-stage"" id=""owStage"">
     <div class=""ow-hud"">
-      <div class=""ow-circle""><div class=""ow-halo""></div><img class=""ow-cat"" id=""owCat"" alt=""""></div>
+      <div class=""ow-circle""><div class=""ow-halo""></div><div class=""ow-deco"" id=""owDeco""></div><img class=""ow-cat"" id=""owCat"" alt=""""></div>
     </div>
     <div class=""ow-card ow-left"" id=""owLeft"">
       <div class=""ow-tag"" id=""owTag""></div>
@@ -872,12 +864,21 @@ internal sealed class OverlayServer : IDisposable
   var owLyric2=document.getElementById('owLyric2');
   var owNext=document.getElementById('owNext');
   var owCat=document.getElementById('owCat');
-  var owThemeNames={none:'无装饰',siamese:'暹罗猫',dachshund:'腊肠狗',devon:'德文猫'};
+  var owDeco=document.getElementById('owDeco');
+  var owThemeNames={none:'无装饰',siamese:'暹罗猫',dachshund:'腊肠狗',devon:'德文猫',spring:'春节',xmas:'圣诞',halloween:'万圣',midautumn:'中秋',valentine:'情人'};
+  var owFestAccent={spring:'#ff4d4d',xmas:'#4ddf88',halloween:'#ff9f43',midautumn:'#ffd666',valentine:'#ff6ba9'};
+  var owFestIcons={
+    spring:[['🏮',-74,-40],['🧨',70,-36],['🧧',62,66],['💮',-70,56],['✨',10,-70]],
+    xmas:[['❄️',-74,-40],['🎄',70,-36],['🎁',62,66],['🔔',-70,56],['☃️',10,-70]],
+    halloween:[['🎃',-74,-40],['🦇',70,-36],['👻',62,66],['🍬',-70,56],['✦️',10,-70]],
+    midautumn:[['🌕',-74,-40],['🐇',70,-36],['🥮',62,66],['🌙',-70,56],['✨',10,-70]],
+    valentine:[['💗',-74,-40],['💘',70,-36],['🌹',62,66],['💝',-70,56],['✨',10,-70]]
+  };
+  var lastOwTheme='';
 
   function owThemeUrl(theme){
-    if(!owThemeNames[theme]) theme='siamese';
-    if(theme==='none') return '';
-    return '/assets/themes/' + theme + '.png?v=149';
+    if(theme==='none' || owFestIcons[theme]) return '';
+    return '/assets/themes/' + theme + '.png?v=150';
   }
 
   function resizeOw(){
@@ -930,7 +931,10 @@ internal sealed class OverlayServer : IDisposable
     fetch('/lyrics/state?t='+Date.now()).then(function(r){return r.json();}).then(function(st){
       if(!st || st.style !== 3){ ow.className=''; return; }
 
-      owStage.style.setProperty('--accent', st.accent || '#8fb8ff');
+      var theme = st.theme || 'siamese';
+      if(!owThemeNames[theme]) theme = 'siamese';
+
+      owStage.style.setProperty('--accent', owFestAccent[theme] || st.accent || '#8fb8ff');
       owTitle.style.color = st.titleColor || '#eaf2ff';
       owArtist.style.color = st.artistColor || '#a9bcd3';
 
@@ -943,16 +947,31 @@ internal sealed class OverlayServer : IDisposable
       owTitle.textContent = st.title || '';
       owArtist.textContent = st.artist || '';
 
-      var theme = st.theme || 'siamese';
-      var url = owThemeUrl(theme);
-      if(!url){
-        owCat.classList.add('hidden');
-        owCat.removeAttribute('src');
-      } else {
-        owCat.classList.remove('hidden');
-        if(owCat.getAttribute('src') !== url) owCat.src = url;
+      if(theme !== lastOwTheme){
+        lastOwTheme = theme;
+        owDeco.innerHTML = '';
+        var icons = owFestIcons[theme];
+        if(icons){
+          owCat.classList.add('hidden');
+          owCat.removeAttribute('src');
+          for(var k=0;k<icons.length;k++){
+            var d=document.createElement('span');
+            d.textContent=icons[k][0];
+            d.style.transform='translate(-50%,-50%) translate('+icons[k][1]+'px,'+icons[k][2]+'px)';
+            owDeco.appendChild(d);
+          }
+        } else {
+          var url = owThemeUrl(theme);
+          if(!url){
+            owCat.classList.add('hidden');
+            owCat.removeAttribute('src');
+          } else {
+            owCat.classList.remove('hidden');
+            if(owCat.getAttribute('src') !== url) owCat.src = url;
+          }
+        }
       }
-      owMeta.textContent = '歌词叠层 · 主题：' + (owThemeNames[theme] || theme);
+      owMeta.textContent = '守望先锋 · 主题：' + (owThemeNames[theme] || theme);
 
       var p = st.duration > 0 ? Math.min(1, (st.position||0)/st.duration) : 0;
       owFill.style.width = (p*100).toFixed(1) + '%';
@@ -1095,154 +1114,6 @@ internal sealed class OverlayServer : IDisposable
   }else{
     tick();setInterval(tick,600);
   }
-})();
-</script>
-</body>
-</html>";
-
-    /// <summary>
-    /// 歌词叠层：以 1920×1080 为画布，底部中央圆圈留空给直播姬/游戏画面，
-    /// 左侧播放信息、右侧歌词；主题图从安装目录 assets/themes 读，不塞进主程序。
-    /// </summary>
-    private const string LyricsPage = @"<!DOCTYPE html>
-<html lang=""zh-CN"">
-<head>
-<meta charset=""utf-8"">
-<title>Music Toppin Lyrics</title>
-<style>
-  html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;font-family:""Microsoft YaHei UI"",""Segoe UI"",sans-serif;}
-  .stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#8fb8ff;}
-  .hud{position:absolute;left:0;right:0;bottom:0;height:210px;display:flex;align-items:center;justify-content:center;}
-  .circle{position:relative;width:148px;height:148px;border-radius:50%;}
-  .halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.12);box-shadow:0 0 18px color-mix(in srgb, var(--accent) 28%, transparent);}
-  .catimg{position:absolute;left:50%;top:-88px;transform:translateX(-50%);width:230px;height:230px;pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
-  .card{position:absolute;bottom:34px;width:360px;padding:16px 18px;border-radius:18px;background:rgba(10,15,24,.70);
-        box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),0 10px 26px rgba(0,0,0,.38);
-        backdrop-filter:blur(4px);color:#eaf2ff;transition:opacity .2s;}
-  .left{left:440px;text-align:right;}
-  .right{left:1120px;text-align:left;}
-  .tag{font-size:12px;color:color-mix(in srgb, var(--accent) 75%, #9fb0c6);letter-spacing:1px;margin-bottom:6px;}
-  .title{font-size:25px;font-weight:700;line-height:1.25;margin-bottom:4px;}
-  .artist{font-size:16px;color:#a9bcd3;margin-bottom:10px;}
-  .meta{font-size:12px;color:#8ea1b8;margin-bottom:8px;}
-  .bar{height:4px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden;margin:8px 0 6px;}
-  .fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#ff8a5c);}
-  .time{font-size:12px;color:#9fb0c6;display:flex;justify-content:space-between;}
-  .lyric{font-size:18px;line-height:1.6;color:#eaf2ff;transition:opacity .18s, transform .18s;}
-  .lyric.next{opacity:.72;font-size:16px;margin-top:6px;}
-  .empty{position:absolute;left:0;right:0;bottom:0;height:210px;display:flex;align-items:center;justify-content:center;color:rgba(220,232,255,.35);font-size:14px;letter-spacing:2px;}
-  .hidden{display:none!important;}
-</style>
-</head>
-<body>
-<div class=""stage"" id=""stage"">
-  <div class=""hud"">
-    <div class=""circle"">
-      <div class=""halo""></div>
-      <img class=""catimg hidden"" id=""cat"" alt="">
-    </div>
-  </div>
-
-  <div class=""card left"" id=""leftCard"">
-    <div class=""tag"" id=""tag"">正在播放</div>
-    <div class=""title"" id=""title""></div>
-    <div class=""artist"" id=""artist""></div>
-    <div class=""meta"" id=""meta""></div>
-    <div class=""bar""><div class=""fill"" id=""fill""></div></div>
-    <div class=""time""><span id=""pos"">0:00</span><span id=""dur"">0:00</span></div>
-  </div>
-
-  <div class=""card right"" id=""rightCard"">
-    <div class=""tag"">当前歌词</div>
-    <div class=""lyric"" id=""lyric1""></div>
-    <div class=""lyric next"" id=""lyric2""></div>
-    <div class=""meta"" style=""margin-top:10px"" id=""next""></div>
-  </div>
-
-  <div class=""empty"" id=""empty"">没有歌词</div>
-</div>
-<script>
-(function(){
-  var stage=document.getElementById('stage');
-  function resize(){
-    var s=Math.min(innerWidth/1920,innerHeight/1080);
-    stage.style.transform='translate(-50%,-50%) scale('+s+')';
-  }
-  addEventListener('resize',resize); resize();
-
-  var empty=document.getElementById('empty');
-  var left=document.getElementById('leftCard');
-  var right=document.getElementById('rightCard');
-  var tag=document.getElementById('tag');
-  var title=document.getElementById('title');
-  var artist=document.getElementById('artist');
-  var meta=document.getElementById('meta');
-  var fill=document.getElementById('fill');
-  var pos=document.getElementById('pos');
-  var dur=document.getElementById('dur');
-  var lyric1=document.getElementById('lyric1');
-  var lyric2=document.getElementById('lyric2');
-  var next=document.getElementById('next');
-  var cat=document.getElementById('cat');
-  var lastVersion=0;
-  var themeNames={none:'无装饰',siamese:'暹罗猫',dachshund:'腊肠狗',devon:'德文猫'};
-
-  function themeUrl(theme){
-    if(!themeNames[theme]) theme='siamese';
-    if(theme==='none') return '';
-    return '/assets/themes/' + theme + '.png?v=149';
-  }
-
-  function fmt(t){
-    t=Math.max(0,t||0);
-    var m=Math.floor(t/60), s=Math.floor(t%60);
-    return (m<10?'0':'')+m+':'+(s<10?'0':'')+s;
-  }
-
-  function apply(st){
-    var show=!!st.show && (st.lines||[]).length>0;
-    empty.classList.add('hidden');
-    left.classList.toggle('hidden', !show && !st.title);
-    right.classList.toggle('hidden', !show);
-
-    tag.textContent = st.playing ? '正在播放' : '已暂停';
-    if(st.requester) tag.textContent += ' · 点歌人 ' + st.requester;
-    title.textContent = st.title || '';
-    artist.textContent = st.artist || '';
-    var theme = st.theme || 'siamese';
-    var url = themeUrl(theme);
-    if(!url){
-      cat.classList.add('hidden');
-    } else {
-      cat.classList.remove('hidden');
-      if(cat.getAttribute('src') !== url) cat.src = url;
-    }
-    meta.textContent = '歌词叠层 · 主题：' + (themeNames[theme] || theme);
-    var p = st.duration > 0 ? Math.min(1, (st.position||0)/st.duration) : 0;
-    fill.style.width = (p*100).toFixed(1) + '%';
-    pos.textContent = fmt(st.position||0);
-    dur.textContent = fmt(st.duration||0);
-
-    if(!show){
-      lyric1.textContent='';
-      lyric2.textContent='';
-      next.textContent='';
-      return;
-    }
-
-    var lines=st.lines;
-    var idx=0;
-    for(var i=0;i<lines.length;i++){ if((lines[i].t||0) <= (st.position||0)) idx=i; }
-    lyric1.textContent=(st.position||0) < (lines[0].t||0) ? '' : (lines[idx].text||'');
-    lyric2.textContent=(idx+1<lines.length)?(lines[idx+1].text||''):'';
-    next.textContent = st.nextTitle ? ('下一首：' + st.nextTitle + (st.nextArtist ? ' · ' + st.nextArtist : '')) : '';
-    lastVersion = st.version || 0;
-  }
-
-  function tick(){
-    fetch('/lyrics/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});
-  }
-  tick(); setInterval(tick,500);
 })();
 </script>
 </body>

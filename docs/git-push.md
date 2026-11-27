@@ -38,8 +38,8 @@ git push -u origin main
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 # 3. 提交 + 打 tag（tag 必须指向版本提交）
 git add -A
-git commit -m "release: v1.4.9"
-git tag -a v1.4.9 -m "Music Toppin v1.4.9"
+git commit -m "release: v1.5.0"
+git tag -a v1.5.0 -m "Music Toppin v1.5.0"
 git push origin main --tags
 # 4. 在 GitHub 上建 Release（已发布、Latest、不能 draft/prerelease）
 #    只传 build\MusicToppin-Setup.exe，并确认 asset digest 为 sha256:… 非空

@@ -206,8 +206,6 @@ internal sealed class TrayApp : ApplicationContext
         _itemOccluded = new ToolStripMenuItem("遮挡模式（压在其他窗口后面）", null, (_, _) => ToggleOccluded()) { Checked = _settings.CaptureOccluded };
         _itemCopyOverlay = new ToolStripMenuItem("复制叠加层地址", null, (_, _) => CopyOverlayUrl("")) { Enabled = false };
         _itemCopyVideo = new ToolStripMenuItem("复制视频小窗地址", null, (_, _) => CopyOverlayUrl("video")) { Enabled = false };
-        _itemLyricsOverlay = new ToolStripMenuItem("歌词叠层", null, (_, _) => ToggleLyricsOverlay()) { Checked = _settings.LyricsOverlayEnabled };
-        _itemCopyLyrics = new ToolStripMenuItem("复制歌词叠层地址", null, (_, _) => CopyOverlayUrl("lyrics")) { Enabled = false };
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -270,8 +268,6 @@ internal sealed class TrayApp : ApplicationContext
             _itemOverlay,
             _itemCopyOverlay,
             _itemCopyVideo,
-            _itemLyricsOverlay,
-            _itemCopyLyrics,
             _itemOffscreen,
             _itemOccluded,
             _itemAutoStart,
@@ -503,7 +499,7 @@ internal sealed class TrayApp : ApplicationContext
 
         // 启动时按保存的锚点重新贴边（屏幕分辨率/缩放变化后也能回到正确位置）
         if (!string.IsNullOrEmpty(_settings.Anchor) && !_settings.CaptureOffscreen) MoveHudTo(_settings.Anchor);
-        if (_settings.Overlay || _settings.Style == 3 || _settings.LyricsOverlayEnabled)
+        if (_settings.Overlay || _settings.Style == 3)
         {
             StartOverlay(notify: false);
         }
@@ -575,8 +571,6 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _volumeMenu;
     private ToolStripMenuItem _itemCopyOverlay;
     private ToolStripMenuItem _itemCopyVideo;
-    private ToolStripMenuItem _itemLyricsOverlay;
-    private ToolStripMenuItem _itemCopyLyrics;
     private ToolStripMenuItem _itemSkipPolicy;
     private ToolStripMenuItem _itemRequestPolicy;
     private ToolStripMenuItem _permissionMenu;
@@ -1218,7 +1212,7 @@ internal sealed class TrayApp : ApplicationContext
 
     private void UpdateLyrics(ResolvedSong song)
     {
-        if (!(_settings.Style == 3 || _settings.LyricsOverlayEnabled) || song == null)
+        if (_settings.Style != 3 || song == null)
         {
             LyricsService.Clear();
             return;
@@ -2010,16 +2004,32 @@ internal sealed class TrayApp : ApplicationContext
 
     private ToolStripMenuItem BuildLyricsThemeMenu()
     {
-        var menu = new ToolStripMenuItem("歌词主题");
-        var themes = new[]
+        var menu = new ToolStripMenuItem("主题");
+        var pets = new[]
         {
             new KeyValuePair<string, string>("none", "无装饰"),
             new KeyValuePair<string, string>("siamese", "暹罗猫"),
             new KeyValuePair<string, string>("dachshund", "腊肠狗"),
             new KeyValuePair<string, string>("devon", "德文猫")
         };
+        var festivals = new[]
+        {
+            new KeyValuePair<string, string>("spring", "春节"),
+            new KeyValuePair<string, string>("xmas", "圣诞"),
+            new KeyValuePair<string, string>("halloween", "万圣"),
+            new KeyValuePair<string, string>("midautumn", "中秋"),
+            new KeyValuePair<string, string>("valentine", "情人")
+        };
 
-        foreach (var pair in themes)
+        foreach (var pair in pets)
+        {
+            var key = pair.Key;
+            var item = new ToolStripMenuItem(pair.Value, null, (_, _) => SetLyricsTheme(key));
+            item.Tag = key;
+            menu.DropDownItems.Add(item);
+        }
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        foreach (var pair in festivals)
         {
             var key = pair.Key;
             var item = new ToolStripMenuItem(pair.Value, null, (_, _) => SetLyricsTheme(key));
@@ -2036,7 +2046,7 @@ internal sealed class TrayApp : ApplicationContext
                     menuItem.Checked = string.Equals(_settings.LyricsTheme, tag, StringComparison.OrdinalIgnoreCase);
                 }
             }
-            menu.Text = "歌词主题：" + DescribeLyricsTheme(_settings.LyricsTheme);
+            menu.Text = "主题：" + DescribeLyricsTheme(_settings.LyricsTheme);
         };
 
         return menu;
@@ -2044,11 +2054,16 @@ internal sealed class TrayApp : ApplicationContext
 
     private static string DescribeLyricsTheme(string theme)
     {
-        switch (theme)
+        switch ((theme ?? "").ToLowerInvariant())
         {
             case "none": return "无装饰";
             case "dachshund": return "腊肠狗";
             case "devon": return "德文猫";
+            case "spring": return "春节";
+            case "xmas": return "圣诞";
+            case "halloween": return "万圣";
+            case "midautumn": return "中秋";
+            case "valentine": return "情人";
             default: return "暹罗猫";
         }
     }
@@ -2059,7 +2074,7 @@ internal sealed class TrayApp : ApplicationContext
         _settings.LyricsTheme = theme;
         _settings.Save();
         RefreshOverlaySnapshot();
-        Logger.Write("lyrics theme: " + theme);
+        Logger.Write("overlay theme: " + theme);
     }
 
     private ToolStripMenuItem BuildVideoAudioMenu()
@@ -3172,31 +3187,6 @@ internal sealed class TrayApp : ApplicationContext
         SetOverlayEnabled(!_settings.Overlay);
     }
 
-    private void ToggleLyricsOverlay()
-    {
-        _settings.LyricsOverlayEnabled = !_settings.LyricsOverlayEnabled;
-        _itemLyricsOverlay.Checked = _settings.LyricsOverlayEnabled;
-        _settings.Save();
-
-        if (_settings.LyricsOverlayEnabled)
-        {
-            StartOverlay(notify: false);
-            _itemCopyLyrics.Enabled = _overlay != null;
-            if (_activeSong != null)
-            {
-                LyricsService.SetSong(_activeSong.Title, _activeSong.Artist, _activeSong.SourceLabel, _activeSong.PageUrl);
-            }
-            Logger.Write("lyrics overlay: on");
-            _tray.ShowBalloonTip(3000, "Music Toppin", "歌词叠层已开启：" + (_overlay != null ? _overlay.Url + "lyrics" : ""), ToolTipIcon.Info);
-        }
-        else
-        {
-            _itemCopyLyrics.Enabled = false;
-            LyricsService.Clear();
-            Logger.Write("lyrics overlay: off");
-        }
-    }
-
     /// <summary>托盘和上屏向导共用：显式开启/关闭浏览器源叠加层。</summary>
     private void SetOverlayEnabled(bool enabled)
     {
@@ -3244,7 +3234,6 @@ internal sealed class TrayApp : ApplicationContext
 
         _itemCopyOverlay.Enabled = true;
         _itemCopyVideo.Enabled = true;
-        _itemCopyLyrics.Enabled = _settings.LyricsOverlayEnabled || _settings.Style == 3;
         _itemCopyOverlay.Text = "复制叠加层地址（端口 " + _overlay.Port + "）";
         RefreshOverlaySnapshot();
 
@@ -3269,7 +3258,6 @@ internal sealed class TrayApp : ApplicationContext
         _overlay = null;
         _itemCopyOverlay.Enabled = false;
         _itemCopyVideo.Enabled = false;
-        _itemCopyLyrics.Enabled = false;
         _itemCopyOverlay.Text = "复制叠加层地址";
         Logger.Write("overlay server stopped");
     }
@@ -3629,9 +3617,11 @@ internal sealed class TrayApp : ApplicationContext
                 LyricsService.SetSong(_activeSong.Title, _activeSong.Artist, _activeSong.SourceLabel, _activeSong.PageUrl);
             }
         }
-        else if (!_settings.LyricsOverlayEnabled)
+        else
         {
             LyricsService.Clear();
+            // 离开守望先锋模式后，若没显式开「直播叠加层」就停掉服务器，不白占端口
+            if (!_settings.Overlay && _overlay != null) StopOverlay();
         }
 
         RefreshOverlaySnapshot();

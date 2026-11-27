@@ -61,10 +61,7 @@ internal sealed class AppSettings
     /// <summary>是否允许 BV 视频点播（弹幕点歌 BV / 手动 BV 测试）。默认开启。</summary>
     public bool VideoRequestEnabled = true;
 
-    /// <summary>是否开启歌词叠层（OBS 浏览器源 /lyrics）。</summary>
-    public bool LyricsOverlayEnabled;
-
-    /// <summary>歌词叠层主题：none / siamese / dachshund / devon。默认 siamese。</summary>
+    /// <summary>守望先锋模式主题：none / siamese / dachshund / devon / spring / xmas / halloween / midautumn / valentine。默认 siamese。</summary>
     public string LyricsTheme = "siamese";
 
     /// <summary>叠加层上次用的端口（0 = 没记录）。</summary>
@@ -142,6 +139,7 @@ internal sealed class AppSettings
     public static AppSettings Load()
     {
         var s = new AppSettings();
+        var legacyLyrics = -1;
         try
         {
             using (var key = Registry.CurrentUser.OpenSubKey(KeyPath))
@@ -166,7 +164,7 @@ internal sealed class AppSettings
                 s.PlayerVolume = ReadInt(key, "PlayerVolume", 60);
                 s.VideoAudio = ReadInt(key, "VideoAudio", 0);
                 s.VideoRequestEnabled = ReadInt(key, "VideoRequestEnabled", 1) == 1;
-                s.LyricsOverlayEnabled = ReadInt(key, "LyricsOverlayEnabled", 0) == 1;
+                legacyLyrics = ReadInt(key, "LyricsOverlayEnabled", -1);
                 s.LyricsTheme = ReadString(key, "LyricsTheme", "siamese");
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
 
@@ -205,7 +203,25 @@ internal sealed class AppSettings
                 s.Anchor = anchorValue ?? "";
             }
         }
-        catch { }
+        // 读取中途异常时不能迁移：此时 s 是半成品，Save 会用默认值覆写注册表
+        catch { legacyLyrics = -1; }
+
+        // v1.5：独立歌词叠层并入「守望先锋模式」样式。开过歌词叠层的用户一次性迁到 Style=3，并删掉旧键避免重复迁移。
+        if (legacyLyrics >= 0)
+        {
+            if (legacyLyrics == 1) s.Style = 3;
+            try
+            {
+                using (var wkey = Registry.CurrentUser.OpenSubKey(KeyPath, true))
+                {
+                    if (wkey != null) wkey.DeleteValue("LyricsOverlayEnabled", false);
+                }
+            }
+            catch { }
+            Logger.Write("legacy lyrics migrated: style=" + s.Style);
+            // Schema 迁移块随后会 Save；只有 Schema 已最新时才需要这里单独落盘
+            if (s.Schema >= CurrentSchema) s.Save();
+        }
 
         // 旧版本默认是可交互的，升级后统一改成穿透，避免打游戏被吞点击
         if (s.Schema < CurrentSchema)
@@ -289,7 +305,6 @@ internal sealed class AppSettings
                 WriteInt(key, "PlayerVolume", PlayerVolume);
                 WriteInt(key, "VideoAudio", VideoAudio);
                 WriteInt(key, "VideoRequestEnabled", VideoRequestEnabled ? 1 : 0);
-                WriteInt(key, "LyricsOverlayEnabled", LyricsOverlayEnabled ? 1 : 0);
                 try { key.SetValue("LyricsTheme", LyricsTheme ?? "siamese", RegistryValueKind.String); } catch { }
                 WriteInt(key, "OverlayPort", OverlayPort);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
