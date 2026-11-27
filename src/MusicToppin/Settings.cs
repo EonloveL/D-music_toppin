@@ -64,6 +64,9 @@ internal sealed class AppSettings
     /// <summary>是否开启歌词叠层（OBS 浏览器源 /lyrics）。</summary>
     public bool LyricsOverlayEnabled;
 
+    /// <summary>歌词叠层主题：none / siamese / dachshund / devon。默认 siamese。</summary>
+    public string LyricsTheme = "siamese";
+
     /// <summary>叠加层上次用的端口（0 = 没记录）。</summary>
     public int OverlayPort;
 
@@ -164,6 +167,7 @@ internal sealed class AppSettings
                 s.VideoAudio = ReadInt(key, "VideoAudio", 0);
                 s.VideoRequestEnabled = ReadInt(key, "VideoRequestEnabled", 1) == 1;
                 s.LyricsOverlayEnabled = ReadInt(key, "LyricsOverlayEnabled", 0) == 1;
+                s.LyricsTheme = ReadString(key, "LyricsTheme", "siamese");
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 1);
@@ -286,6 +290,7 @@ internal sealed class AppSettings
                 WriteInt(key, "VideoAudio", VideoAudio);
                 WriteInt(key, "VideoRequestEnabled", VideoRequestEnabled ? 1 : 0);
                 WriteInt(key, "LyricsOverlayEnabled", LyricsOverlayEnabled ? 1 : 0);
+                try { key.SetValue("LyricsTheme", LyricsTheme ?? "siamese", RegistryValueKind.String); } catch { }
                 WriteInt(key, "OverlayPort", OverlayPort);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
                 WriteInt(key, "RequestPolicy", RequestPolicy);

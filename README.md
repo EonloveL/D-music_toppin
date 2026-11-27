@@ -2,7 +2,7 @@
 
 在游戏 / 直播画面上，用「击杀播报」的方式显示**系统正在播放的音乐**。
 
-纯显示模式不需要登录账号，也不需要配置播放器：装上就自动读当前在放什么。**V2 已加入 B 站弹幕点歌**；点歌按平台登录情况取流，登录是可选的，只影响能放哪些歌。当前版本 **1.4.7**。
+纯显示模式不需要登录账号，也不需要配置播放器：装上就自动读当前在放什么。**V2 已加入 B 站弹幕点歌**；点歌按平台登录情况取流，登录是可选的，只影响能放哪些歌。当前版本 **1.4.8**。
 
 ![击杀播报浮窗](docs/screenshots/hud-stack.png)
 
@@ -199,7 +199,7 @@ Uninstall.exe /S                                      静默卸载
 发布方只需要挂一个静态 JSON：
 
 ```json
-{ "version": "1.4.7", "url": "https://…/MusicToppin-Setup.exe", "sha256": "…", "notes": "更新说明" }
+{ "version": "1.4.8", "url": "https://…/MusicToppin-Setup.exe", "sha256": "…", "notes": "更新说明" }
 ```
 
 - 也直接支持 GitHub Releases API（自动读 `tag_name` + `browser_download_url` + `body`）
@@ -255,8 +255,8 @@ Uninstall.exe /S                                      静默卸载
 
 | 项目 | 实测（本机 Win11，V2 构建，纯显示模式） |
 |---|---|
-| 安装包 | **约 956 KB** |
-| 主程序 | **约 505 KB**（.NET Framework 4.8，系统自带运行时） |
+| 安装包 | **约 1196 KB** |
+| 主程序 | **约 393 KB**（.NET Framework 4.8，系统自带运行时） |
 | 内存（私有） | **25–33 MB**（点歌播放时才加载 WebView2，约 +160 MB） |
 | 内存（含共享） | 56 MB |
 | CPU | 空闲 **≈0 %**（500ms 轮询 + 2 秒缓存；点歌播放时由 WebView2 占用） |
@@ -282,9 +282,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 产物：
 
 ```
-build\app\MusicToppin.exe        约 505 KB
+build\app\MusicToppin.exe        约 393 KB
 build\app\Uninstall.exe          约 15 KB
-build\MusicToppin-Setup.exe      约 956 KB
+build\MusicToppin-Setup.exe      约 1196 KB
 ```
 
 构建链路：`toolchain.ps1` 定位 Roslyn `csc`（`Microsoft.Net.Compilers.Toolset`）、.NET Framework 4.8 引用程序集、WinRT 元数据（`Microsoft.Windows.SDK.Contracts`）→ 编译主程序（引用 `Windows.Media.winmd` 调 SMTC）→ 编译卸载器 → 打包 payload → 嵌入安装器。
@@ -370,7 +370,7 @@ Uninstall.exe /S                              静默卸载
 - 视频小窗是**本地代理的 MP4**（画面里没有 B 站播放器 UI / 登录提示 / 小程序信息）；版权限制或 UP 主关闭站外播放的视频可能取不到流（音频不受影响）
 - **视频本地缓存**：边下边播，先缓冲 8MB 再起播；下载限速 3MB/s（避免抢游戏带宽），缓存放在 `%TEMP%\MusicToppin\video`，上限 2GB、2 天自动清理
 - **点歌人显示**：当前歌曲是观众点歌时，HUD（经典/环状）和 OBS 叠加层会显示「点歌人：xxx」
-- **歌词叠层**：托盘「歌词叠层（暹罗猫）」开启后，OBS 再加一个浏览器源指向叠加层地址 + `/lyrics`；底部中央圆圈留空给直播姬显示大招状态与能量，左侧播放信息，右侧当前/下一句歌词（网易云 / QQ 音乐，只对本应用播放生效）
+- **歌词叠层**：托盘「歌词叠层」开启后，OBS 再加一个浏览器源指向叠加层地址 + `/lyrics`；底部中央圆圈留空给直播姬显示大招状态与能量，左侧播放信息，右侧当前/下一句歌词（网易云 / QQ 音乐，只对本应用播放生效）。托盘「歌词主题」可切 无装饰 / 暹罗猫 / 腊肠狗 / 德文猫，主题图放在安装目录 `assets/themes/`
 - 酷我经实测免费歌只有移动端能用（桌面只给 ~11 秒试听），已放弃接入
 - 抖音直播间暂不支持：链接能识别但弹幕要签名 + protobuf，后续再接（现在只支持 B 站房间号 / 链接）
 - B 站弹幕在部分房间要求**登录**（游客只收到人气包）；用「B 站：登录（扫码，弹幕用）」登录即可
@@ -394,7 +394,7 @@ Uninstall.exe /S                              静默卸载
 
 > 弹幕「连上了但收不到」的完整复盘与排查方法：[docs/postmortem-danmaku.md](docs/postmortem-danmaku.md)
 
-播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 **约 505 KB / 25–33 MB** 的轻量形态（弹幕 brotli 解码库约 +1.3 MB 只在安装包里）。
+播放依赖 **WebView2 Runtime**（Windows 11 自带；Windows 10 一般随 Edge 安装）。不用点歌功能时不会加载它，纯显示模式仍是 **约 393 KB / 25–33 MB** 的轻量形态（弹幕 brotli 解码库约 +1.3 MB 只在安装包里）。
 ## 下一步（V2）
 
 - S3 剩余：Apple Music（只有试听）；酷狗/酷我按需求先不做，见 [docs/v2-sources.md](docs/v2-sources.md)

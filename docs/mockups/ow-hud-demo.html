@@ -21,7 +21,7 @@
         font-size:24px;opacity:.92;transition:all .2s;transform:translate(-50%,-50%);}
   .catimg{position:absolute;left:50%;top:-88px;transform:translateX(-50%);width:230px;height:230px;pointer-events:none;
        filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
-  .card{position:absolute;bottom:34px;width:360px;padding:16px 18px;border-radius:18px;background:rgba(10,15,24,.70);
+  .card{position:absolute;bottom:34px;width:340px;padding:16px 18px;border-radius:18px;background:rgba(10,15,24,.70);
         box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),0 10px 26px rgba(0,0,0,.38);
         backdrop-filter:blur(4px);color:#eaf2ff;}
   .pixel .card{border:2px solid var(--accent);border-radius:0;background-color:rgba(10,15,24,.82);
@@ -34,8 +34,8 @@
   .pixel .halo{display:none;}
   .pxring{position:absolute;left:50%;top:50%;width:6px;height:6px;background:var(--accent);
           box-shadow:0 0 8px var(--accent);transform:translate(-50%,-50%);}
-  .left{left:440px;text-align:right;}
-  .right{left:1120px;text-align:left;}
+  .left{left:500px;text-align:right;width:340px;}
+  .right{left:1080px;text-align:left;width:340px;}
   .tag{font-size:12px;color:color-mix(in srgb, var(--accent) 75%, #9fb0c6);letter-spacing:1px;margin-bottom:6px;}
   .title{font-size:25px;font-weight:700;line-height:1.25;margin-bottom:4px;}
   .artist{font-size:16px;color:#a9bcd3;margin-bottom:10px;}
@@ -99,7 +99,9 @@ var themes = {
   midautumn:{name:'中秋', accent:'#ffd666', icons:[['🌕',-74,-40],['🐇',70,-36],['🥮',62,66],['🌙',-70,56],['✨',10,-70]]},
   valentine:{name:'情人', accent:'#ff6ba9', icons:[['💗',-74,-40],['💘',70,-36],['🌹',62,66],['💝',-70,56],['✨',10,-70]]},
   pixel:    {name:'8bit', accent:'#4dff7a', icons:[['👾',-74,-40],['🍄',70,-36],['❤️',62,66],['⭐',-70,56],['⚡',10,-70]]},
-  siamese:  {name:'暹罗猫', accent:'#8fb8ff', icons:[['🐈',-74,-40],['🐾',70,-36],['🥛',62,66],['🐟',-70,56],['💙',10,-70]]}
+  siamese:  {name:'暹罗猫', accent:'#8fb8ff', img:'siamese-cat-small.png'},
+  dachshund:{name:'腊肠狗', accent:'#c98f5a', img:'dachshund.png'},
+  devon:    {name:'德文猫', accent:'#b9a7e8', img:'devon.png'}
 };
 var currentTheme='def';
 function buildThemes(){
@@ -128,14 +130,21 @@ function setTheme(k){
   var oldCat=circle.querySelector('.cat');
   if(oldCat) oldCat.remove();
   Array.prototype.slice.call(circle.querySelectorAll('.catimg')).forEach(function(d){d.remove();});
-  t.icons.forEach(function(ic){
-    var d=document.createElement('div');
-    d.className='deco';
-    d.textContent=ic[0];
-    d.style.transform='translate(-50%,-50%) translate(' + ic[1] + 'px,' + ic[2] + 'px)';
-    circle.appendChild(d);
-  });
-  if(k==='siamese') circle.insertAdjacentHTML('beforeend', siameseCatImg());
+  if(t.img){
+    var img=document.createElement('img');
+    img.className='catimg';
+    img.src='assets/' + t.img;
+    img.alt='';
+    circle.appendChild(img);
+  } else {
+    t.icons.forEach(function(ic){
+      var d=document.createElement('div');
+      d.className='deco';
+      d.textContent=ic[0];
+      d.style.transform='translate(-50%,-50%) translate(' + ic[1] + 'px,' + ic[2] + 'px)';
+      circle.appendChild(d);
+    });
+  }
   if(k==='pixel') addPixelRing(circle);
   buildThemes();
 }

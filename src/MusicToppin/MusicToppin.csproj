@@ -15,7 +15,7 @@
     <AssemblyName>MusicToppin</AssemblyName>
     <RootNamespace>MusicToppin</RootNamespace>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>1.4.7</Version>
+    <Version>1.4.8</Version>
     <Product>Music Toppin</Product>
     <Company>Music Toppin</Company>
     <Description>系统正在播放 · 击杀播报风格悬浮窗</Description>

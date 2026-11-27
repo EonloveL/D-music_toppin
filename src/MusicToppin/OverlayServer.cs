@@ -10,6 +10,7 @@ internal sealed class OverlayState
     public string Title = "";
     public string Artist = "";
     public string Requester = "";
+    public string LyricsTheme = "siamese";
     public bool Playing;
     public double Position;
     public double Duration;
@@ -244,9 +245,15 @@ internal sealed class OverlayServer : IDisposable
                     body = LyricsPage;
                     contentType = "text/html; charset=utf-8";
                 }
+                else if (path.StartsWith("/assets/themes/", StringComparison.OrdinalIgnoreCase))
+                {
+                    var name = path.Substring("/assets/themes/".Length);
+                    ServeThemeAsset(stream, name, includeBody);
+                    return;
+                }
                 else if (path == "/assets/siamese-cat-small.png")
                 {
-                    ServeAsset(stream, "siamese-cat-small.png", "image/png", includeBody);
+                    ServeThemeAsset(stream, "siamese", includeBody);
                     return;
                 }
                 else if (path == "/ping")
@@ -584,6 +591,7 @@ internal sealed class OverlayServer : IDisposable
         OverlayState.AppendString(builder, "requester", state.Requester ?? "");
         OverlayState.AppendString(builder, "nextTitle", state.NextTitle ?? "");
         OverlayState.AppendString(builder, "nextArtist", state.NextArtist ?? "");
+        OverlayState.AppendString(builder, "theme", state.LyricsTheme ?? "siamese");
         builder.Append(",\"playing\":").Append(state.Playing ? "true" : "false");
         builder.Append(",\"show\":").Append(snap.Lines.Count > 0 ? "true" : "false");
         builder.Append(",\"position\":").Append(state.Position.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
@@ -607,18 +615,24 @@ internal sealed class OverlayServer : IDisposable
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> AssetCache =
         new System.Collections.Concurrent.ConcurrentDictionary<string, byte[]>(StringComparer.Ordinal);
 
-    private static void ServeAsset(Stream client, string name, string contentType, bool includeBody)
+    private static void ServeThemeAsset(Stream client, string name, bool includeBody)
     {
-        var bytes = AssetCache.GetOrAdd(name, n => LoadEmbeddedResource(n) ?? new byte[0]);
-        if (bytes == null || bytes.Length == 0)
+        if (name.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+        {
+            name = name.Substring(0, name.Length - 4);
+        }
+
+        var file = ThemeAssetPath(name);
+        if (file == null || !File.Exists(file))
         {
             WriteResponse(client, "404 Not Found", "text/plain; charset=utf-8", "not found", includeBody);
             return;
         }
 
+        var bytes = AssetCache.GetOrAdd(file, File.ReadAllBytes);
         var header =
             "HTTP/1.1 200 OK\r\n" +
-            "Content-Type: " + contentType + "\r\n" +
+            "Content-Type: image/png\r\n" +
             "Content-Length: " + bytes.Length + "\r\n" +
             "Cache-Control: public, max-age=86400\r\n" +
             "Connection: close\r\n\r\n";
@@ -628,30 +642,27 @@ internal sealed class OverlayServer : IDisposable
         client.Write(bytes, 0, bytes.Length);
     }
 
-    private static byte[] LoadEmbeddedResource(string name)
+    private static string ThemeAssetPath(string name)
     {
-        try
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        name = name.Trim();
+        if (name.IndexOfAny(new[] { '/', '\\', ':' }) >= 0 || name.Contains("..")) return null;
+        if (!RegexSafeName(name)) return null;
+
+        var baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "themes");
+        var path = Path.Combine(baseDir, name + ".png");
+        return path;
+    }
+
+    private static bool RegexSafeName(string name)
+    {
+        if (name.Length == 0 || name.Length > 40) return false;
+        for (var i = 0; i < name.Length; i++)
         {
-            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-            using (var stream = assembly.GetManifestResourceStream(name))
-            {
-                if (stream == null) return null;
-                var bytes = new byte[stream.Length];
-                var offset = 0;
-                while (offset < bytes.Length)
-                {
-                    var read = stream.Read(bytes, offset, bytes.Length - offset);
-                    if (read <= 0) break;
-                    offset += read;
-                }
-                return bytes;
-            }
+            var c = name[i];
+            if (!char.IsLetterOrDigit(c) && c != '-' && c != '_') return false;
         }
-        catch (Exception ex)
-        {
-            Logger.Write("asset load: " + ex.Message);
-            return null;
-        }
+        return true;
     }
 
     private sealed class HttpRequestInfo
@@ -950,8 +961,8 @@ internal sealed class OverlayServer : IDisposable
 </html>";
 
     /// <summary>
-    /// 歌词叠层：以 1920×1080 为画布，中央圆圈留空给直播姬/游戏画面，
-    /// 左侧播放信息、右侧歌词；主题图从嵌入资源读。
+    /// 歌词叠层：以 1920×1080 为画布，底部中央圆圈留空给直播姬/游戏画面，
+    /// 左侧播放信息、右侧歌词；主题图从安装目录 assets/themes 读，不塞进主程序。
     /// </summary>
     private const string LyricsPage = @"<!DOCTYPE html>
 <html lang=""zh-CN"">
@@ -988,7 +999,7 @@ internal sealed class OverlayServer : IDisposable
   <div class=""hud"">
     <div class=""circle"">
       <div class=""halo""></div>
-      <img class=""catimg"" src=""/assets/siamese-cat-small.png"" alt="""">
+      <img class=""catimg hidden"" id=""cat"" alt="">
     </div>
   </div>
 
@@ -1032,7 +1043,15 @@ internal sealed class OverlayServer : IDisposable
   var lyric1=document.getElementById('lyric1');
   var lyric2=document.getElementById('lyric2');
   var next=document.getElementById('next');
+  var cat=document.getElementById('cat');
   var lastVersion=0;
+  var themeNames={none:'无装饰',siamese:'暹罗猫',dachshund:'腊肠狗',devon:'德文猫'};
+
+  function themeUrl(theme){
+    if(!themeNames[theme]) theme='siamese';
+    if(theme==='none') return '';
+    return '/assets/themes/' + theme + '.png?v=148';
+  }
 
   function fmt(t){
     t=Math.max(0,t||0);
@@ -1050,7 +1069,15 @@ internal sealed class OverlayServer : IDisposable
     if(st.requester) tag.textContent += ' · 点歌人 ' + st.requester;
     title.textContent = st.title || '';
     artist.textContent = st.artist || '';
-    meta.textContent = '歌词叠层 · 主题：暹罗猫';
+    var theme = st.theme || 'siamese';
+    var url = themeUrl(theme);
+    if(!url){
+      cat.classList.add('hidden');
+    } else {
+      cat.classList.remove('hidden');
+      if(cat.getAttribute('src') !== url) cat.src = url;
+    }
+    meta.textContent = '歌词叠层 · 主题：' + (themeNames[theme] || theme);
     var p = st.duration > 0 ? Math.min(1, (st.position||0)/st.duration) : 0;
     fill.style.width = (p*100).toFixed(1) + '%';
     pos.textContent = fmt(st.position||0);

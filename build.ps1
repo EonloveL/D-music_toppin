@@ -102,7 +102,6 @@ $appArgs = @(
     "/out:`"$appExe`"",
     "/win32icon:`"$icon`"",
     "/win32manifest:`"$manifest`"",
-    "/resource:`"$(Join-Path $root 'src\MusicToppin\Assets\siamese-cat-small.png')`",siamese-cat-small.png",
     '/optimize+',
     '/debug-',
     '/platform:anycpu'
@@ -122,6 +121,12 @@ if (Test-Path (Join-Path $webView2 'Microsoft.Web.WebView2.Core.dll'))
 }
 Copy-Item $brotli $appOut -Force
 Copy-Item $unsafe $appOut -Force
+
+# 主题图放安装目录 assets/themes，不塞进 exe，避免主程序变大
+$themeOut = Join-Path $appOut 'assets\themes'
+New-Item -ItemType Directory -Force -Path $themeOut | Out-Null
+Copy-Item (Join-Path $root 'src\MusicToppin\Assets\themes\*.png') $themeOut -Force
+
 Write-Host ("   MusicToppin.exe = " + [math]::Round((Get-Item $appExe).Length / 1KB, 1) + " KB")
 
 Write-Host "== [3/5] 编译卸载器" -ForegroundColor Cyan

@@ -1,8 +1,8 @@
-# B 站直播弹幕接入笔记（V2 · S2，按 v1.4.7 更新）
+# B 站直播弹幕接入笔记（V2 · S2，按 v1.4.8 更新）
 
 > 记录协议事实、为什么这么做、以及再踩坑时先看哪里。代码在 `src/MusicToppin/Danmaku.cs`。
 >
-> 本文以 **v1.4.7** 为准。更早的 v1.2.0 只支持 getConf + zlib，已被 v1.2.5 的 brotli / getDanmuInfo / 登录 uid 方案取代。
+> 本文以 **v1.4.8** 为准。更早的 v1.2.0 只支持 getConf + zlib，已被 v1.2.5 的 brotli / getDanmuInfo / 登录 uid 方案取代。
 
 ## 1. 链路
 

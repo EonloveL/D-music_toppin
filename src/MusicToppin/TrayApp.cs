@@ -204,8 +204,9 @@ internal sealed class TrayApp : ApplicationContext
         _itemOccluded = new ToolStripMenuItem("遮挡模式（压在其他窗口后面）", null, (_, _) => ToggleOccluded()) { Checked = _settings.CaptureOccluded };
         _itemCopyOverlay = new ToolStripMenuItem("复制叠加层地址", null, (_, _) => CopyOverlayUrl("")) { Enabled = false };
         _itemCopyVideo = new ToolStripMenuItem("复制视频小窗地址", null, (_, _) => CopyOverlayUrl("video")) { Enabled = false };
-        _itemLyricsOverlay = new ToolStripMenuItem("歌词叠层（暹罗猫）", null, (_, _) => ToggleLyricsOverlay()) { Checked = _settings.LyricsOverlayEnabled };
+        _itemLyricsOverlay = new ToolStripMenuItem("歌词叠层", null, (_, _) => ToggleLyricsOverlay()) { Checked = _settings.LyricsOverlayEnabled };
         _itemCopyLyrics = new ToolStripMenuItem("复制歌词叠层地址", null, (_, _) => CopyOverlayUrl("lyrics")) { Enabled = false };
+        var lyricsThemeMenu = BuildLyricsThemeMenu();
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -267,6 +268,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemCopyOverlay,
             _itemCopyVideo,
             _itemLyricsOverlay,
+            lyricsThemeMenu,
             _itemCopyLyrics,
             _itemOffscreen,
             _itemOccluded,
@@ -2004,6 +2006,60 @@ internal sealed class TrayApp : ApplicationContext
         _videoSong = null;
     }
 
+    private ToolStripMenuItem BuildLyricsThemeMenu()
+    {
+        var menu = new ToolStripMenuItem("歌词主题");
+        var themes = new[]
+        {
+            new KeyValuePair<string, string>("none", "无装饰"),
+            new KeyValuePair<string, string>("siamese", "暹罗猫"),
+            new KeyValuePair<string, string>("dachshund", "腊肠狗"),
+            new KeyValuePair<string, string>("devon", "德文猫")
+        };
+
+        foreach (var pair in themes)
+        {
+            var key = pair.Key;
+            var item = new ToolStripMenuItem(pair.Value, null, (_, _) => SetLyricsTheme(key));
+            item.Tag = key;
+            menu.DropDownItems.Add(item);
+        }
+
+        menu.DropDownOpening += (_, _) =>
+        {
+            foreach (ToolStripItem item in menu.DropDownItems)
+            {
+                if (item is ToolStripMenuItem menuItem && menuItem.Tag is string tag)
+                {
+                    menuItem.Checked = string.Equals(_settings.LyricsTheme, tag, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            menu.Text = "歌词主题：" + DescribeLyricsTheme(_settings.LyricsTheme);
+        };
+
+        return menu;
+    }
+
+    private static string DescribeLyricsTheme(string theme)
+    {
+        switch (theme)
+        {
+            case "none": return "无装饰";
+            case "dachshund": return "腊肠狗";
+            case "devon": return "德文猫";
+            default: return "暹罗猫";
+        }
+    }
+
+    private void SetLyricsTheme(string theme)
+    {
+        if (string.IsNullOrWhiteSpace(theme)) theme = "siamese";
+        _settings.LyricsTheme = theme;
+        _settings.Save();
+        RefreshOverlaySnapshot();
+        Logger.Write("lyrics theme: " + theme);
+    }
+
     private ToolStripMenuItem BuildVideoAudioMenu()
     {
         var menu = new ToolStripMenuItem("视频声音");
@@ -3098,6 +3154,7 @@ internal sealed class TrayApp : ApplicationContext
             VideoBvid = _videoBvid,
             VideoSound = _settings.VideoAudio == 1,
             VideoNonce = _videoNonce,
+            LyricsTheme = _settings.LyricsTheme ?? "siamese",
             Show = np.HasSession && np.Title.Length > 0 && (_hud.Visible || _settings.Overlay)
         };
     }
