@@ -205,6 +205,20 @@ internal sealed class RequestQueue
         return item;
     }
 
+    /// <summary>把队列里的一首歌从一个序号挪到另一个序号（0 起）。</summary>
+    public bool Move(int fromIndex, int toIndex)
+    {
+        if (fromIndex == toIndex) return true;
+        if (fromIndex < 0 || fromIndex >= _items.Count) return false;
+        if (toIndex < 0 || toIndex >= _items.Count) return false;
+
+        var item = _items[fromIndex];
+        _items.RemoveAt(fromIndex);
+        _items.Insert(toIndex, item);
+        RaiseChanged();
+        return true;
+    }
+
     /// <summary>移除某个观众还没轮到的第一首（按 uid，避免同名观众误删）。</summary>
     public QueueItem RemoveByRequesterUid(long uid)
     {

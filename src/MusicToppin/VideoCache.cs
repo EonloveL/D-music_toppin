@@ -9,8 +9,8 @@ internal sealed class VideoCacheEntry
     public string Path = "";
     public long Total;
     public long Downloaded;
-    public bool Complete;
-    public bool Failed;
+    public volatile bool Complete;
+    public volatile bool Failed;
     public string Error = "";
     public DateTime StartedUtc = DateTime.UtcNow;
 
@@ -47,7 +47,18 @@ internal static class VideoCache
         lock (Sync)
         {
             VideoCacheEntry entry;
-            if (Entries.TryGetValue(bvid, out entry)) return entry;
+            if (Entries.TryGetValue(bvid, out entry))
+            {
+                // 失败过、或文件已被清掉：按新任务重建，避免永久黑屏/空等
+                if (entry.Failed || (entry.Complete && !File.Exists(entry.Path)))
+                {
+                    Entries.Remove(bvid);
+                }
+                else
+                {
+                    return entry;
+                }
+            }
 
             entry = new VideoCacheEntry
             {
@@ -58,6 +69,49 @@ internal static class VideoCache
 
             ThreadPool.QueueUserWorkItem(_ => Download(entry));
             return entry;
+        }
+    }
+
+    public static void Remove(string bvid)
+    {
+        if (string.IsNullOrWhiteSpace(bvid)) return;
+        lock (Sync) Entries.Remove(bvid);
+    }
+
+    /// <summary>只在字典里仍是同一个任务时才移除，避免删掉刚重建的新任务。</summary>
+    public static void RemoveIfSame(string bvid, VideoCacheEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(bvid) || entry == null) return;
+        lock (Sync)
+        {
+            VideoCacheEntry current;
+            if (Entries.TryGetValue(bvid, out current) && ReferenceEquals(current, entry))
+            {
+                Entries.Remove(bvid);
+            }
+        }
+    }
+
+    private static void RemoveByPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        lock (Sync)
+        {
+            List<string> stale = null;
+            foreach (var pair in Entries)
+            {
+                if (string.Equals(pair.Value.Path, path, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (stale == null) stale = new List<string>();
+                    stale.Add(pair.Key);
+                }
+            }
+
+            if (stale != null)
+            {
+                foreach (var key in stale) Entries.Remove(key);
+            }
         }
     }
 
@@ -89,7 +143,7 @@ internal static class VideoCache
             using (var remote = response.GetResponseStream())
             using (var file = new FileStream(entry.Path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
             {
-                entry.Total = response.ContentLength;
+                lock (entry.Gate) entry.Total = response.ContentLength;
 
                 var buffer = new byte[128 * 1024];
                 var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -138,6 +192,16 @@ internal static class VideoCache
     {
         try
         {
+            HashSet<string> busy;
+            lock (Sync)
+            {
+                busy = new HashSet<string>(
+                    Entries.Values
+                        .Where(e => !e.Complete && !e.Failed)
+                        .Select(e => e.Path),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+
             var files = new DirectoryInfo(DirectoryPath).GetFiles("*.part");
             var ordered = files.OrderBy(f => f.LastWriteTimeUtc).ToList();
             long total = ordered.Sum(f => f.Length);
@@ -145,14 +209,13 @@ internal static class VideoCache
             foreach (var file in ordered)
             {
                 if (total <= MaxCacheBytes) break;
-
-                var busy = Entries.Values.Any(e => string.Equals(e.Path, file.FullName, StringComparison.OrdinalIgnoreCase) && !e.Complete && !e.Failed);
-                if (busy) continue;
+                if (busy.Contains(file.FullName)) continue;
 
                 try
                 {
                     total -= file.Length;
                     file.Delete();
+                    RemoveByPath(file.FullName);
                 }
                 catch { }
             }
@@ -165,7 +228,17 @@ internal static class VideoCache
         entry.Failed = true;
         entry.Error = error;
         Logger.Write("video cache: " + entry.Bvid + " 失败：" + error);
+
+        // 失败条目不要留在字典里，否则之后每次都把部分文件当完整视频播
+        lock (Sync) Entries.Remove(entry.Bvid);
+        TryDelete(entry.Path);
+
         lock (entry.Gate) Monitor.PulseAll(entry.Gate);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) File.Delete(path); } catch { }
     }
 
     /// <summary>启动时清掉两天前的缓存，避免临时目录膨胀。</summary>
@@ -179,7 +252,12 @@ internal static class VideoCache
                 var info = new FileInfo(file);
                 if (info.Exists && (DateTime.UtcNow - info.LastWriteTimeUtc).TotalDays > 2)
                 {
-                    try { info.Delete(); } catch { }
+                    try
+                    {
+                        info.Delete();
+                        RemoveByPath(info.FullName);
+                    }
+                    catch { }
                 }
             }
         }

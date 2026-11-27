@@ -108,6 +108,16 @@ namespace MusicToppin.Tests
             TestRun.Check(queue.Promote(queue.Items[1].Id), "顶歌");
             TestRun.Check(queue.Items[0].Request.Query == "Lemon", "顶歌后排第一");
 
+            var moveQueue = new RequestQueue { MaxSize = 3 };
+            moveQueue.Enqueue(Parse("点歌 起风了", "观众A", 3001));
+            moveQueue.Enqueue(Parse("点歌 群青", "观众B", 3002));
+            moveQueue.Enqueue(Parse("点歌 Lemon", "观众C", 3003));
+            TestRun.Check(moveQueue.Move(1, 0), "队列第二首上移一位");
+            TestRun.Check(moveQueue.Items[0].Request.Query == "群青", "上移后排第一");
+            TestRun.Check(moveQueue.Items[1].Request.Query == "起风了", "上移后排第二");
+            TestRun.Check(moveQueue.Move(0, 0), "原地移动视为成功");
+            TestRun.Check(!moveQueue.Move(-1, 0) && !moveQueue.Move(0, 3), "越界不移动");
+
             TestRun.Check(queue.RemoveByRequester("观众B"), "撤回自己的点歌");
 
             queue.ClearCurrent();

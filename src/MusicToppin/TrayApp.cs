@@ -2841,9 +2841,27 @@ internal sealed class TrayApp : ApplicationContext
             var index = 1;
             foreach (var item in _queue.Items.Take(10))
             {
-                var text = index + ". " + item.DisplayName +
+                var position = index;
+                var text = position + ". " + item.DisplayName +
                            (string.IsNullOrWhiteSpace(item.Requester) ? "" : "  ·  " + item.Requester);
-                _itemQueueList.DropDownItems.Add(new ToolStripMenuItem(text) { Enabled = false });
+                var songItem = new ToolStripMenuItem(text);
+
+                songItem.DropDownItems.Add(new ToolStripMenuItem("上移一位", null, (_, _) =>
+                {
+                    if (_queue.Move(position - 1, position - 2)) UpdateQueueMenu();
+                }) { Enabled = position > 1 });
+
+                songItem.DropDownItems.Add(new ToolStripMenuItem("下移一位", null, (_, _) =>
+                {
+                    if (_queue.Move(position - 1, position)) UpdateQueueMenu();
+                }) { Enabled = position < _queue.Count });
+
+                songItem.DropDownItems.Add(new ToolStripMenuItem("移除", null, (_, _) =>
+                {
+                    if (_queue.RemoveAt(position) != null) UpdateQueueMenu();
+                }));
+
+                _itemQueueList.DropDownItems.Add(songItem);
                 index++;
             }
 
@@ -3013,7 +3031,7 @@ internal sealed class TrayApp : ApplicationContext
         {
             Title = np.HasSession ? np.Title : "",
             Artist = np.HasSession ? np.Artist : "",
-            Requester = np.Requester ?? "",
+            Requester = np.HasSession ? (np.Requester ?? "") : "",
             Playing = np.Playing,
             Position = np.Position.TotalSeconds,
             Duration = np.Duration.TotalSeconds,

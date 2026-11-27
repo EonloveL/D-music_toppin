@@ -254,51 +254,7 @@ internal sealed class OverlayServer : IDisposable
         }
     }
 
-    // ---- 纯净视频：/video/stream?bvid=... 代理 ----
-
-    private string GetVideoUrl(string bvid)
-    {
-        lock (_videoLock)
-        {
-            CachedVideo cached;
-            if (_videoCache.TryGetValue(bvid, out cached) && cached.ExpiresUtc > DateTime.UtcNow)
-            {
-                return cached.Url;
-            }
-        }
-
-        var stream = Bilibili.ResolveVideoStream(bvid);
-        if (stream == null || string.IsNullOrEmpty(stream.Url)) return null;
-
-        lock (_videoLock)
-        {
-            _videoCache[bvid] = new CachedVideo { Url = stream.Url, ExpiresUtc = DateTime.UtcNow.AddMinutes(20) };
-        }
-
-        Logger.Write("video stream: " + bvid + " -> " + (stream.Title ?? ""));
-        Logger.Write("video url: " + (stream.Url.Length > 100 ? stream.Url.Substring(0, 100) : stream.Url));
-        return stream.Url;
-    }
-
-    private static void ApplyRange(HttpWebRequest request, string range)
-    {
-        if (string.IsNullOrWhiteSpace(range)) return;
-
-        var text = range.Trim();
-        if (!text.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase)) return;
-
-        var spec = text.Substring("bytes=".Length).Split(',')[0].Trim();
-        var dash = spec.IndexOf('-');
-        if (dash < 0) return;
-
-        long start;
-        if (!long.TryParse(spec.Substring(0, dash), out start)) return;
-
-        var endText = spec.Substring(dash + 1);
-        long end;
-        if (long.TryParse(endText, out end)) request.AddRange(start, end);
-        else request.AddRange(start);
-    }
+    // ---- 纯净视频：/video/stream?bvid=... 本地缓存代理 ----
 
     private static string ExtractQueryValue(string path, string name)
     {
@@ -337,8 +293,9 @@ internal sealed class OverlayServer : IDisposable
         }
 
         var entry = VideoCache.Get(bvid);
-        if (entry == null)
+        if (entry == null || entry.Failed)
         {
+            VideoCache.RemoveIfSame(bvid, entry);
             WriteResponse(client, "404 Not Found", "text/plain; charset=utf-8", "video not found");
             return;
         }
@@ -350,19 +307,32 @@ internal sealed class OverlayServer : IDisposable
             lock (entry.Gate) Monitor.Wait(entry.Gate, 100);
         }
 
-        if (entry.Failed && entry.Downloaded <= 0)
+        if (entry.Failed)
         {
+            VideoCache.RemoveIfSame(bvid, entry);
             WriteResponse(client, "404 Not Found", "text/plain; charset=utf-8", "video not found");
             return;
         }
 
         var total = entry.Total > 0 ? entry.Total : entry.Downloaded;
+        var isHead = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
+
+        // Range 起点越界：不要回 200 从头重发，按 416 拒绝
+        long rangeStart;
+        if (total > 0 && TryGetRangeStart(request.Range, out rangeStart) && rangeStart >= total)
+        {
+            WriteResponse(client, "416 Requested Range Not Satisfiable", "text/plain; charset=utf-8", "range out of bounds");
+            return;
+        }
 
         // 先缓冲一小段再开始回包：游戏抢带宽时，播放端拿到的是已落盘的稳定数据
-        var minBuffer = Math.Min(total, 8L * 1024 * 1024);
-        while (!entry.Failed && entry.Downloaded < minBuffer && wait.Elapsed < TimeSpan.FromSeconds(25))
+        if (!isHead)
         {
-            lock (entry.Gate) Monitor.Wait(entry.Gate, 100);
+            var minBuffer = Math.Min(total, 8L * 1024 * 1024);
+            while (!entry.Failed && entry.Downloaded < minBuffer && wait.Elapsed < TimeSpan.FromSeconds(25))
+            {
+                lock (entry.Gate) Monitor.Wait(entry.Gate, 100);
+            }
         }
 
         long start;
@@ -458,6 +428,22 @@ internal sealed class OverlayServer : IDisposable
         {
             try { if (file != null) file.Dispose(); } catch { }
         }
+    }
+
+    private static bool TryGetRangeStart(string range, out long start)
+    {
+        start = 0;
+        if (string.IsNullOrWhiteSpace(range)) return false;
+
+        var text = range.Trim();
+        if (!text.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var spec = text.Substring("bytes=".Length).Split(',')[0].Trim();
+        var dash = spec.IndexOf('-');
+        if (dash < 0) return false;
+
+        var startText = spec.Substring(0, dash).Trim();
+        return startText.Length > 0 && long.TryParse(startText, out start);
     }
 
     private static bool TryParseRange(string range, long total, out long start, out long end)
@@ -568,15 +554,6 @@ internal sealed class OverlayServer : IDisposable
         public string Host = "";
         public string Range = "";
     }
-
-    private sealed class CachedVideo
-    {
-        public string Url = "";
-        public DateTime ExpiresUtc;
-    }
-
-    private readonly object _videoLock = new object();
-    private readonly Dictionary<string, CachedVideo> _videoCache = new Dictionary<string, CachedVideo>(StringComparer.Ordinal);
 
     /// <summary>
     /// 读完整个请求头再回包：只读第一行就关闭连接，内核会发 RST，
@@ -821,6 +798,14 @@ internal sealed class OverlayServer : IDisposable
     player.style.display='none';
   }
   player.addEventListener('error', showFallback);
+  var stallTimer=null;
+  function clearStall(){ if(stallTimer){clearTimeout(stallTimer);stallTimer=null;} }
+  function armStall(){ clearStall(); stallTimer=setTimeout(function(){ if(player.readyState<3) showFallback(); },15000); }
+  player.addEventListener('waiting',armStall);
+  player.addEventListener('stalled',armStall);
+  player.addEventListener('playing',clearStall);
+  player.addEventListener('canplay',clearStall);
+  player.addEventListener('pause',clearStall);
   function apply(st){
     var bv=st.videoBvid||'';
     var sound=!!st.videoSound;

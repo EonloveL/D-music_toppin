@@ -514,7 +514,7 @@ internal static class HudRenderer
         }
 
         var ringTag = editing ? "编辑中" : (np.Playing ? "正在播放" : "已暂停");
-        if (!string.IsNullOrWhiteSpace(np.Requester)) ringTag += " · " + np.Requester;
+        if (!string.IsNullOrWhiteSpace(np.Requester)) ringTag += " · 点歌人 " + np.Requester;
 
         DrawRingCard(g, s, layout, np.Title, np.Artist,
             ringTag,

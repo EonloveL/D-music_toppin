@@ -14,8 +14,8 @@
 | 分支 | `main` 是唯一开发线（V2 + v1.1.1 已合并）；`fix/v1` 保留为 v1.1.1 发布点 |
 | 最新提交 | 见 `git log -1` |
 | 构建 | `powershell -ExecutionPolicy Bypass -File .\build.ps1`（**不需要 .NET SDK**，首次自动下载工具链到 `.cache\nuget`） |
-| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（186 项，退出码 0 = 全过） |
-| 产物 | `build\MusicToppin-Setup.exe`（约 830 KB）、`build\app\`（主程序约 350 KB） |
+| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（191 项，退出码 0 = 全过） |
+| 产物 | `build\MusicToppin-Setup.exe`（约 833 KB）、`build\app\`（主程序约 360 KB） |
 | 运行 | 装好后从托盘启动；调试直接跑 `build\app\MusicToppin.exe` |
 
 **重要**：项目是 `.NET Framework 4.8` + 直接调 Roslyn `csc`（**不是** `dotnet build`，仓库里的 `MusicToppin.csproj` 是历史遗留，不要用它构建）。
@@ -44,7 +44,7 @@
 | `src/MusicToppin/Json.cs` | 零依赖只读 JSON（对象→Dictionary / 数组→List） |
 | `src/MusicToppin/TrayApp.cs` | 「弹幕点歌」菜单：连接/断开、队列状态、自动播放、放不了就跳下一首 |
 | `src/MusicToppin/Settings.cs` | `LiveRoomId`、`LiveAutoConnect`（记住直播间，启动自动重连） |
-| `tests/` | 186 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
+| `tests/` | 191 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
 
 行为要点：
 
@@ -160,7 +160,7 @@ NowPlaying.NextTitle / NextArtist / QueueCount
 
 | 决策 | 原因 | 代价 |
 |---|---|---|
-| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **约 830 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
+| 播放用 **WebView2** 而不是 mpv/ffmpeg | Chromium 原生支持 B 站 DASH(fMP4)，且能注入 Referer 绕过热链；mpv 要多 30–70 MB | 安装包 → **约 833 KB**；播放时多 7 个 `msedgewebview2` 进程，约 **+160 MB** 内存 |
 | **双模式**：纯显示 / 点歌 | 保住 V1「轻量」卖点 | 首次播放时才创建 WebView2（纯显示模式 25–33 MB） |
 | 弹幕优先 **getDanmuInfo（wbi）+ 2245**，旧 getConf 兜底 | 旧接口对部分房间只推人气包；新接口能正常订阅弹幕 | 需要 wbi 签名；旧接口随时可能下线 |
 | 鉴权 **protover=3**，支持 **brotli + zlib** | 部分房间只下发 brotli；只支持 zlib 会「鉴权成功但 0 条弹幕」 | 内置 BrotliSharpLib + Unsafe，安装包约 +1.3 MB |
@@ -230,13 +230,13 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - 日志：`%TEMP%\musictoppin.log`（`sources:`、`netease client:`、`netease account:`、`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`qq:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
 - 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded`、`DefaultPlaylistSource`、`NeteasePlaylistId`、`QQPlaylistId` 等）
 - 安装目录：默认 `%LocalAppData%\Programs\MusicToppin`，可自定义
-- 单元测试：`run-tests.ps1`（186 项，不必联网；已引用 `src\MusicToppin\lib` 下的 brotli 依赖）
+- 单元测试：`run-tests.ps1`（191 项，不必联网；已引用 `src\MusicToppin\lib` 下的 brotli 依赖）
 - 叠加层：托盘开启后日志里有 `overlay server started at http://127.0.0.1:<port>/`，浏览器可直接打开验证
 
 ## 7. 新会话建议的第一次动作
 
 1. `git checkout main && git pull`
-2. `run-tests.ps1` + `build.ps1` 确认环境（应全绿、约 830 KB）
+2. `run-tests.ps1` + `build.ps1` 确认环境（应全绿、约 833 KB）
 3. `MusicToppin.exe --room=5050` 跑 30 秒，看日志里有没有 `danmaku auth ok` 与 `song request`
 4. `MusicToppin.exe --fake-danmaku="点歌 起风了"` 验证网易云链路（日志应有 `resolved:` + `queue play:`）
 5. 接着做 **S3 剩余**：Apple Music（只有试听），或按用户要求再评估酷狗/酷我
@@ -246,5 +246,5 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - `main`：唯一开发线，已用 merge 提交把 **v1.1.1**（叠加层 / 离屏采集 / 遮挡模式）合进来，冲突点都在
   `TrayApp.cs`（菜单项/字段）、`Settings.cs`（注册表项）、`CHANGELOG.md`，处理原则是**两边都保留**。
 - `fix/v1`：停在 v1.1.1 发布点，只做 V1 修复；不要在这里加 V2 功能。
-- **版本号 1.4.3**（`VersionInfo.cs` + `installer/Installer.cs`）。
+- **版本号 1.4.5**（`VersionInfo.cs` + `installer/Installer.cs`）。
   发版时确认 GitHub Release 的 tag 与之一致，否则更新器会比对失败。

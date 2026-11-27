@@ -247,7 +247,9 @@ internal static class SongRequestParser
             Raw = raw,
             Source = source,
             Query = query.Trim(),
-            Requester = string.IsNullOrWhiteSpace(requester) ? "未知" : requester.Trim(),
+            Requester = string.IsNullOrWhiteSpace(requester)
+                ? "未知"
+                : requester.Trim().Replace('\r', ' ').Replace('\n', ' '),
             RequesterUid = uid,
             IsId = isId,
             IsVideo = isVideo
