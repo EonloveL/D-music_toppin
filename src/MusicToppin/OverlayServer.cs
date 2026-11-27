@@ -781,20 +781,23 @@ internal sealed class OverlayServer : IDisposable
   #ow{display:none;position:fixed;inset:0;}
   #ow.on{display:block;}
   .ow-stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#8fb8ff;}
-  .ow-hud{position:absolute;left:0;right:0;bottom:0;height:210px;display:flex;align-items:center;justify-content:center;}
-  .ow-circle{position:relative;width:148px;height:148px;border-radius:50%;}
-  .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 18px rgba(143,184,255,.30);}
-  .ow-cat{position:absolute;left:50%;top:-88px;transform:translateX(-50%);width:230px;height:230px;pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
-  .ow-deco span{position:absolute;left:50%;top:50%;font-size:24px;pointer-events:none;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
-  .ow-toast{position:absolute;left:50%;bottom:320px;transform:translateX(-50%);padding:10px 20px;border-radius:10px;
+  /* 圆圈对齐守望先锋大招圆环（1280×720 实测：中心 640,627、直径约 70px → 1920 画布中心 960,940、直径 106px） */
+  .ow-hud{position:absolute;left:0;right:0;bottom:87px;height:106px;display:flex;align-items:center;justify-content:center;}
+  .ow-circle{position:relative;width:106px;height:106px;border-radius:50%;}
+  .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 10px rgba(143,184,255,.30);}
+  /* 宠物压在圆圈上沿：底边不进入大招图标带（≤810），身体不遮圆心（940） */
+  .ow-cat{position:absolute;left:50%;top:-78px;transform:translateX(-50%);width:136px;height:136px;pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .ow-deco span{position:absolute;left:50%;top:50%;font-size:17px;pointer-events:none;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
+  .ow-toast{position:absolute;left:50%;bottom:400px;transform:translateX(-50%);padding:10px 20px;border-radius:10px;
     background:rgba(14,17,23,.92);color:#eaf2ff;font-size:18px;white-space:nowrap;opacity:0;transition:opacity .2s;pointer-events:none;}
   .ow-toast.on{opacity:1;}
   .ow-card{position:absolute;bottom:34px;width:340px;padding:16px 18px;box-sizing:border-box;border-radius:18px;background:rgba(14,17,23,.96);
     box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 0 1px rgba(143,184,255,.16),0 10px 26px rgba(0,0,0,.38);
     backdrop-filter:blur(4px);color:#eaf2ff;text-shadow:0 1px 4px rgba(0,0,0,.75);transition:opacity .2s;}
-  .ow-left{left:500px;text-align:right;}
-  .ow-right{left:1080px;text-align:left;}
-  .ow-tag{font-size:12px;color:#a9bdd9;letter-spacing:1px;margin-bottom:6px;}
+  /* 卡片避开天使（技能图标最多）的左右 UI：左卡 0.277-0.454，右卡 0.546-0.723；右下技能区从 0.744 开始 */
+  .ow-left{left:532px;text-align:right;}
+  .ow-right{left:1048px;text-align:left;}
+  .ow-tag{font-size:12px;color:#a9bdd9;letter-spacing:1px;margin-bottom:6px;overflow-wrap:anywhere;}
   .ow-title{font-size:25px;font-weight:700;line-height:1.25;margin-bottom:4px;overflow-wrap:anywhere;}
   .ow-artist{font-size:16px;color:#a9bcd3;margin-bottom:10px;overflow-wrap:anywhere;}
   .ow-meta{font-size:12px;color:#8ea1b8;margin-bottom:8px;overflow-wrap:anywhere;}
@@ -858,9 +861,9 @@ internal sealed class OverlayServer : IDisposable
   var lastToast=0, toastTimer=null;
   function showToast(text, el){
     el = el || document.getElementById('toast');
-    el.textContent=text; el.className='on';
+    el.textContent=text; el.classList.add('on');
     if(toastTimer) clearTimeout(toastTimer);
-    toastTimer=setTimeout(function(){ el.className=''; },4500);
+    toastTimer=setTimeout(function(){ el.classList.remove('on'); },4500);
   }
   function pad(n){return (n<10?'0':'')+n;}
   function fmt(s){s=Math.max(0,s||0);return pad(Math.floor(s/60))+':'+pad(Math.floor(s%60));}
@@ -893,11 +896,11 @@ internal sealed class OverlayServer : IDisposable
   var owThemeNames={none:'无装饰',siamese:'暹罗猫',dachshund:'腊肠狗',devon:'德文猫',spring:'春节',xmas:'圣诞',halloween:'万圣',midautumn:'中秋',valentine:'情人'};
   var owFestAccent={spring:'#ff4d4d',xmas:'#4ddf88',halloween:'#ff9f43',midautumn:'#ffd666',valentine:'#ff6ba9'};
   var owFestIcons={
-    spring:[['🏮',-74,-40],['🧨',70,-36],['🧧',62,66],['💮',-70,56],['✨',10,-70]],
-    xmas:[['❄️',-74,-40],['🎄',70,-36],['🎁',62,66],['🔔',-70,56],['☃️',10,-70]],
-    halloween:[['🎃',-74,-40],['🦇',70,-36],['👻',62,66],['🍬',-70,56],['✦️',10,-70]],
-    midautumn:[['🌕',-74,-40],['🐇',70,-36],['🥮',62,66],['🌙',-70,56],['✨',10,-70]],
-    valentine:[['💗',-74,-40],['💘',70,-36],['🌹',62,66],['💝',-70,56],['✨',10,-70]]
+    spring:[['🏮',-53,-29],['🧨',50,-26],['🧧',44,47],['💮',-50,40],['✨',7,-50]],
+    xmas:[['❄️',-53,-29],['🎄',50,-26],['🎁',44,47],['🔔',-50,40],['☃️',7,-50]],
+    halloween:[['🎃',-53,-29],['🦇',50,-26],['👻',44,47],['🍬',-50,40],['✦️',7,-50]],
+    midautumn:[['🌕',-53,-29],['🐇',50,-26],['🥮',44,47],['🌙',-50,40],['✨',7,-50]],
+    valentine:[['💗',-53,-29],['💘',50,-26],['🌹',44,47],['💝',-50,40],['✨',7,-50]]
   };
   var lastOwTheme='';
   var lastOwCardKey='';
@@ -930,7 +933,9 @@ internal sealed class OverlayServer : IDisposable
     }
 
     ow.className='';
-    document.getElementById('owToast').className='';
+    var owToastEl=document.getElementById('owToast');
+    owToastEl.classList.remove('on');
+    owToastEl.textContent='';
     lastOwTheme=''; lastOwCardKey='';
     if(!st.show){wrap.className='';return;}
     wrap.className='on';
@@ -968,8 +973,10 @@ internal sealed class OverlayServer : IDisposable
     var timer = ctrl ? setTimeout(function(){ ctrl.abort(); }, 2500) : null;
     var opts = ctrl ? { signal: ctrl.signal } : {};
     return fetch(url, opts).then(function(r){
-      if(timer) clearTimeout(timer);
       return r.json();
+    }).then(function(data){
+      if(timer) clearTimeout(timer);
+      return data;
     }, function(e){
       if(timer) clearTimeout(timer);
       throw e;
@@ -1068,8 +1075,10 @@ internal sealed class OverlayServer : IDisposable
         // 同一时间戳可能有多行（原文/翻译）：只取组内第一行
         if((lines[i].t||0) <= pos && (i===0 || lines[i].t !== lines[i-1].t)) idx=i;
       }
+      var next=idx+1;
+      while(next<lines.length && lines[next].t===lines[idx].t) next++;
       owLyric1.textContent = before ? '' : (lines[idx].text||'');
-      owLyric2.textContent = before ? (lines[0].text||'') : ((idx+1<lines.length)?(lines[idx+1].text||''):'');
+      owLyric2.textContent = before ? (lines[0].text||'') : ((next<lines.length)?(lines[next].text||''):'');
       owNext.textContent = st.nextTitle ? ('下一首：' + st.nextTitle + (st.nextArtist ? ' · ' + st.nextArtist : '')) : '';
     }).catch(function(){ owBusy=false; });
   }

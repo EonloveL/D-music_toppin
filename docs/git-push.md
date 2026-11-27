@@ -38,16 +38,16 @@ git push -u origin main
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 # 3. 提交 + 打 tag（tag 必须指向版本提交）
 git add -A
-git commit -m "release: v1.5.0"
-git tag -a v1.5.0 -m "Music Toppin v1.5.0"
+git commit -m "release: v1.5.2"
+git tag -a v1.5.2 -m "Music Toppin v1.5.2"
 # 只推 main 和这一个 tag，不要用 --tags（避免把已删除的旧 tag 重新推回远端）
 git push origin main
-git push origin v1.5.0
+git push origin v1.5.2
 # 4. 在 GitHub 上建 Release（已发布、Latest、不能 draft/prerelease）
 #    只传 build\MusicToppin-Setup.exe，并确认 asset digest 为 sha256:… 非空
 
 > 一次性收编旧版本时：先删 GitHub Release（`gh release delete <tag> --yes --cleanup-tag`，从新到旧），
-> 再删本地 tag `git tag -d v1.4.6 v1.4.7 v1.4.8 v1.4.9 v1.5.0 v1.5.1`，
+> 再删本地 tag `git tag -d v1.4.6 v1.4.7 v1.4.8 v1.4.9 v1.5.1`（v1.5.0 是线上正式发布，保留），
 > 用 `git ls-remote --tags origin` 确认远端干净后，再在新提交上打目标 tag 并只推这一个 tag。
 ```
 
