@@ -791,6 +791,10 @@ internal sealed class OverlayServer : IDisposable
   #ow{display:none;position:fixed;inset:0;}
   #ow.on{display:block;}
   .ow-stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#8fb8ff;}
+  /* 紧凑模式：?ow=compact。900×300 的浏览器源，按 1920×1080 的 1:1 像素裁出「圆环 + 左右卡片」区域，
+     用户直接把源拖到大招圆环上对齐即可，不需要铺满全屏，也不需要缩放 */
+  .ow-stage.compact{left:-520px;top:-757px;transform:none!important;}
+  .ow-stage.compact .ow-toast{position:fixed;left:50%;top:10px;bottom:auto;transform:translateX(-50%);}
   /* 圆圈对齐守望先锋大招圆环（1280×720 实测：中心 640,627、直径约 70px → 1920 画布中心 960,940、直径 106px） */
   .ow-hud{position:absolute;left:0;right:0;bottom:var(--ow-ring-bottom,103px);height:var(--ow-ring,104px);display:flex;align-items:center;justify-content:center;}
   .ow-circle{position:relative;width:var(--ow-ring,104px);height:var(--ow-ring,104px);border-radius:50%;}
@@ -925,7 +929,17 @@ internal sealed class OverlayServer : IDisposable
     return '/assets/themes/' + theme + '.png?v=150';
   }
 
+  var owCompact=location.search.indexOf('compact')>=0;
+  function compactTop(ring, ringY){
+    var petTop = ringY - ring/2 - ring*0.9;
+    return -(petTop - 12);
+  }
   function resizeOw(){
+    if(owCompact){
+      owStage.className='ow-stage compact';
+      return;
+    }
+    owStage.className='ow-stage';
     // 非等比铺满视口：OBS 浏览器源内部尺寸常是 800×600，拖满画布时会被拉伸；
     // 这里按 x/y 分别缩放，正好抵消 OBS 的拉伸，画布上仍是 1920×1080 的比例
     var sx=innerWidth/1920, sy=innerHeight/1080;
@@ -1019,6 +1033,7 @@ internal sealed class OverlayServer : IDisposable
       var ringY=Number(st.ringY); if(!isFinite(ringY)) ringY=925; ringY=Math.max(820,Math.min(1020,ringY));
       owStage.style.setProperty('--ow-ring', ring+'px');
       owStage.style.setProperty('--ow-ring-bottom', (1080 - ringY - ring/2)+'px');
+      if(owCompact) owStage.style.top = compactTop(ring, ringY) + 'px';
 
       // 卡片背景透明度跟随「背景透明度」设置（与普通卡片一致）
       var op = Number(st.opacity);
@@ -1161,7 +1176,7 @@ internal sealed class OverlayServer : IDisposable
   }else{
     tip.textContent='⚠️ 当前浏览器源只有 '+w+'×'+h+' 像素。拖满 1920×1080 画布时会被放大，文字和卡片会发糊。请把浏览器源的「宽度 / 高度」改成 1920 / 1080，再铺满画布。';
   }
-  document.getElementById('extra').textContent='视频小窗源建议 480×270；经典/环状样式也建议 1920×1080（内容按边缘定位，不会变小）。直播姬：添加素材 → 浏览器，在属性里改宽度/高度。';
+  document.getElementById('extra').textContent='视频小窗源建议 480×270；经典/环状样式也建议 1920×1080（内容按边缘定位，不会变小）。守望先锋模式还可以用紧凑源：地址后面加 ?ow=compact，宽 900 高 320，直接拖到大招圆环上对齐，不用铺满全屏。';
 </script>
 </body>
 </html>";
