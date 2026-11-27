@@ -64,6 +64,12 @@ internal sealed class AppSettings
     /// <summary>守望先锋模式主题：none / siamese / dachshund / devon / spring / xmas / halloween / midautumn / valentine。默认 siamese。</summary>
     public string LyricsTheme = "siamese";
 
+    /// <summary>守望先锋对位：圆环直径（1920×1080 画布像素），默认 104。</summary>
+    public int OverlayRingSize = 104;
+
+    /// <summary>守望先锋对位：圆环中心 Y（1920×1080 画布像素），默认 925。</summary>
+    public int OverlayRingY = 925;
+
     /// <summary>叠加层上次用的端口（0 = 没记录）。</summary>
     public int OverlayPort;
 
@@ -166,6 +172,8 @@ internal sealed class AppSettings
                 s.VideoRequestEnabled = ReadInt(key, "VideoRequestEnabled", 1) == 1;
                 legacyLyrics = ReadInt(key, "LyricsOverlayEnabled", -1);
                 s.LyricsTheme = ReadString(key, "LyricsTheme", "siamese");
+                s.OverlayRingSize = Math.Max(80, Math.Min(140, ReadInt(key, "OverlayRingSize", 104)));
+                s.OverlayRingY = Math.Max(820, Math.Min(1020, ReadInt(key, "OverlayRingY", 925)));
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 1);
@@ -312,6 +320,8 @@ internal sealed class AppSettings
                 WriteInt(key, "VideoAudio", VideoAudio);
                 WriteInt(key, "VideoRequestEnabled", VideoRequestEnabled ? 1 : 0);
                 try { key.SetValue("LyricsTheme", LyricsTheme ?? "siamese", RegistryValueKind.String); } catch { }
+                WriteInt(key, "OverlayRingSize", OverlayRingSize);
+                WriteInt(key, "OverlayRingY", OverlayRingY);
                 WriteInt(key, "OverlayPort", OverlayPort);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
                 WriteInt(key, "RequestPolicy", RequestPolicy);

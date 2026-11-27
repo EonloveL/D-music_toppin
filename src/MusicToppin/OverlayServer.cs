@@ -11,6 +11,9 @@ internal sealed class OverlayState
     public string Artist = "";
     public string Requester = "";
     public string LyricsTheme = "siamese";
+    /// <summary>守望先锋对位：圆环直径 / 中心 Y（1920×1080 画布像素）。</summary>
+    public int RingSize = 104;
+    public int RingY = 925;
     public int Style;
     public bool Playing;
     public double Position;
@@ -604,6 +607,8 @@ internal sealed class OverlayServer : IDisposable
         OverlayState.AppendString(builder, "nextTitle", state.NextTitle ?? "");
         OverlayState.AppendString(builder, "nextArtist", state.NextArtist ?? "");
         OverlayState.AppendString(builder, "theme", state.LyricsTheme ?? "siamese");
+        builder.Append(",\"ringSize\":").Append(state.RingSize);
+        builder.Append(",\"ringY\":").Append(state.RingY);
         OverlayState.AppendString(builder, "accent", state.Accent ?? "#FF3B30");
         OverlayState.AppendString(builder, "titleColor", state.TitleColor ?? "#F5F8FC");
         OverlayState.AppendString(builder, "artistColor", state.ArtistColor ?? "#9FB0C6");
@@ -782,11 +787,12 @@ internal sealed class OverlayServer : IDisposable
   #ow.on{display:block;}
   .ow-stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#8fb8ff;}
   /* 圆圈对齐守望先锋大招圆环（1280×720 实测：中心 640,627、直径约 70px → 1920 画布中心 960,940、直径 106px） */
-  .ow-hud{position:absolute;left:0;right:0;bottom:87px;height:106px;display:flex;align-items:center;justify-content:center;}
-  .ow-circle{position:relative;width:106px;height:106px;border-radius:50%;}
+  .ow-hud{position:absolute;left:0;right:0;bottom:var(--ow-ring-bottom,103px);height:var(--ow-ring,104px);display:flex;align-items:center;justify-content:center;}
+  .ow-circle{position:relative;width:var(--ow-ring,104px);height:var(--ow-ring,104px);border-radius:50%;}
   .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 10px rgba(143,184,255,.30);}
   /* 宠物压在圆圈上沿：底边不进入大招图标带（≤810），身体不遮圆心（940） */
-  .ow-cat{position:absolute;left:50%;top:-78px;transform:translateX(-50%);width:136px;height:136px;pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .ow-cat{position:absolute;left:50%;top:calc(var(--ow-ring,104px) * -0.75);transform:translateX(-50%);
+    width:calc(var(--ow-ring,104px) * 1.31);height:calc(var(--ow-ring,104px) * 1.31);pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
   .ow-deco span{position:absolute;left:50%;top:50%;font-size:17px;pointer-events:none;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
   .ow-toast{position:absolute;left:50%;bottom:400px;transform:translateX(-50%);padding:10px 20px;border-radius:10px;
     background:rgba(14,17,23,.92);color:#eaf2ff;font-size:18px;white-space:nowrap;opacity:0;transition:opacity .2s;pointer-events:none;}
@@ -913,8 +919,12 @@ internal sealed class OverlayServer : IDisposable
   }
 
   function resizeOw(){
-    var s=Math.min(innerWidth/1920,innerHeight/1080)||1;
-    owStage.style.transform='translate(-50%,-50%) scale('+s+')';
+    // 非等比铺满视口：OBS 浏览器源内部尺寸常是 800×600，拖满画布时会被拉伸；
+    // 这里按 x/y 分别缩放，正好抵消 OBS 的拉伸，画布上仍是 1920×1080 的比例
+    var sx=innerWidth/1920, sy=innerHeight/1080;
+    if(!isFinite(sx)||sx<=0) sx=1;
+    if(!isFinite(sy)||sy<=0) sy=1;
+    owStage.style.transform='translate(-50%,-50%) scale('+sx+','+sy+')';
   }
   addEventListener('resize',resizeOw); resizeOw();
 
@@ -996,6 +1006,12 @@ internal sealed class OverlayServer : IDisposable
 
       var accent = owFestAccent[theme] || st.accent || '#8fb8ff';
       if(!/^#[0-9a-f]{6}$/i.test(accent)) accent = '#8fb8ff';
+
+      // 对位微调：圆环直径 / 中心 Y（托盘「样式 → 守望先锋对位微调」）
+      var ring=Number(st.ringSize); if(!isFinite(ring)) ring=104; ring=Math.max(80,Math.min(140,ring));
+      var ringY=Number(st.ringY); if(!isFinite(ringY)) ringY=925; ringY=Math.max(820,Math.min(1020,ringY));
+      owStage.style.setProperty('--ow-ring', ring+'px');
+      owStage.style.setProperty('--ow-ring-bottom', (1080 - ringY - ring/2)+'px');
 
       // 卡片背景透明度跟随「背景透明度」设置（与普通卡片一致）
       var op = Number(st.opacity);

@@ -213,6 +213,7 @@ internal sealed class TrayApp : ApplicationContext
         styleMenu.DropDownItems.Add(_itemRing);
         styleMenu.DropDownItems.Add(_itemOverwatch);
         styleMenu.DropDownItems.Add(BuildLyricsThemeMenu());
+        styleMenu.DropDownItems.Add(BuildAlignMenu());
 
         _colorMenu = BuildColorMenu();
 
@@ -2059,6 +2060,32 @@ internal sealed class TrayApp : ApplicationContext
         return menu;
     }
 
+    private ToolStripMenuItem BuildAlignMenu()
+    {
+        var menu = new ToolStripMenuItem("守望先锋对位微调");
+        menu.DropDownItems.Add(new ToolStripMenuItem("圆环上移 10px", null, (_, _) => AdjustRing(0, -10)));
+        menu.DropDownItems.Add(new ToolStripMenuItem("圆环下移 10px", null, (_, _) => AdjustRing(0, 10)));
+        menu.DropDownItems.Add(new ToolStripMenuItem("圆环放大 4px", null, (_, _) => AdjustRing(4, 0)));
+        menu.DropDownItems.Add(new ToolStripMenuItem("圆环缩小 4px", null, (_, _) => AdjustRing(-4, 0)));
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(new ToolStripMenuItem("恢复默认（104px / Y 925）", null, (_, _) =>
+            AdjustRing(104 - _settings.OverlayRingSize, 925 - _settings.OverlayRingY)));
+        menu.DropDownOpening += (_, _) =>
+        {
+            menu.Text = "守望先锋对位：" + _settings.OverlayRingSize + "px · Y " + _settings.OverlayRingY;
+        };
+        return menu;
+    }
+
+    private void AdjustRing(int deltaSize, int deltaY)
+    {
+        _settings.OverlayRingSize = Math.Max(80, Math.Min(140, _settings.OverlayRingSize + deltaSize));
+        _settings.OverlayRingY = Math.Max(820, Math.Min(1020, _settings.OverlayRingY + deltaY));
+        _settings.Save();
+        RefreshOverlaySnapshot();
+        Logger.Write("overlay ring: size=" + _settings.OverlayRingSize + " y=" + _settings.OverlayRingY);
+    }
+
     private static string DescribeLyricsTheme(string theme)
     {
         switch ((theme ?? "").ToLowerInvariant())
@@ -3185,6 +3212,8 @@ internal sealed class TrayApp : ApplicationContext
             VideoSound = _settings.VideoAudio == 1,
             VideoNonce = _videoNonce,
             LyricsTheme = _settings.LyricsTheme ?? "siamese",
+            RingSize = _settings.OverlayRingSize,
+            RingY = _settings.OverlayRingY,
             Style = _settings.Style,
             Show = np.HasSession && np.Title.Length > 0 && (_hud.Visible || _settings.Overlay)
         };
