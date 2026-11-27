@@ -794,6 +794,10 @@ internal sealed class OverlayServer : IDisposable
   /* 紧凑模式：?ow=compact。900×300 的浏览器源，按 1920×1080 的 1:1 像素裁出「圆环 + 左右卡片」区域，
      用户直接把源拖到大招圆环上对齐即可，不需要铺满全屏，也不需要缩放 */
   .ow-stage.compact{left:-520px;top:-757px;transform:none!important;}
+  /* ?ow=compact&align=1：对位辅助线，套准游戏大招圆环后去掉 &align=1 */
+  .ow-stage.align .ow-halo{border:2px dashed rgba(255,110,110,.95);box-shadow:0 0 18px rgba(255,90,90,.75);}
+  .ow-stage.align .ow-circle::after{content:' ';position:absolute;left:-28px;right:-28px;top:-1px;height:2px;background:#ff6b6b;box-shadow:0 0 8px #ff6b6b;}
+  .ow-stage.align::before{content:""对齐：红圈套住大招圆环（非卡片），对好后去掉 &align=1"";position:fixed;right:8px;top:6px;color:#fff;background:rgba(0,0,0,.7);padding:4px 10px;border-radius:8px;font-size:11px;white-space:nowrap;}
   .ow-stage.compact .ow-toast{position:fixed;left:50%;top:10px;bottom:auto;transform:translateX(-50%);}
   /* 圆圈对齐守望先锋大招圆环（1280×720 实测：中心 640,627、直径约 70px → 1920 画布中心 960,940、直径 106px） */
   .ow-hud{position:absolute;left:0;right:0;bottom:var(--ow-ring-bottom,103px);height:var(--ow-ring,104px);display:flex;align-items:center;justify-content:center;}
@@ -930,13 +934,14 @@ internal sealed class OverlayServer : IDisposable
   }
 
   var owCompact=location.search.indexOf('compact')>=0;
+  var owAlign=location.search.indexOf('align')>=0;
   function compactTop(ring, ringY){
     var petTop = ringY - ring/2 - ring*0.9;
     return -(petTop - 12);
   }
   function resizeOw(){
     if(owCompact){
-      owStage.className='ow-stage compact';
+      owStage.className='ow-stage compact' + (owAlign ? ' align' : '');
       return;
     }
     owStage.className='ow-stage';
