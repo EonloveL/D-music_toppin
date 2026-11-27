@@ -789,11 +789,11 @@ internal sealed class OverlayServer : IDisposable
   /* 圆圈对齐守望先锋大招圆环（1280×720 实测：中心 640,627、直径约 70px → 1920 画布中心 960,940、直径 106px） */
   .ow-hud{position:absolute;left:0;right:0;bottom:var(--ow-ring-bottom,103px);height:var(--ow-ring,104px);display:flex;align-items:center;justify-content:center;}
   .ow-circle{position:relative;width:var(--ow-ring,104px);height:var(--ow-ring,104px);border-radius:50%;}
-  .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 10px rgba(143,184,255,.30);}
-  /* 宠物压在圆圈上沿：底边不进入大招图标带（≤810），身体不遮圆心（940） */
-  .ow-cat{position:absolute;left:50%;top:calc(var(--ow-ring,104px) * -0.75);transform:translateX(-50%);
+  /* 发光圆环画在宠物上面：猫趴在上沿，圈内始终完整可见 */
+  .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 10px rgba(143,184,255,.30);z-index:2;}
+  .ow-cat{position:absolute;left:50%;top:calc(var(--ow-ring,104px) * -0.9);transform:translateX(-50%);z-index:1;
     width:calc(var(--ow-ring,104px) * 1.31);height:calc(var(--ow-ring,104px) * 1.31);pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
-  .ow-deco span{position:absolute;left:50%;top:50%;font-size:17px;pointer-events:none;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
+  .ow-deco span{position:absolute;left:50%;top:50%;font-size:17px;pointer-events:none;z-index:3;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
   .ow-toast{position:absolute;left:50%;bottom:400px;transform:translateX(-50%);padding:10px 20px;border-radius:10px;
     background:rgba(14,17,23,.92);color:#eaf2ff;font-size:18px;white-space:nowrap;opacity:0;transition:opacity .2s;pointer-events:none;}
   .ow-toast.on{opacity:1;}
@@ -901,6 +901,8 @@ internal sealed class OverlayServer : IDisposable
   }
   var owThemeNames={none:'无装饰',siamese:'暹罗猫',dachshund:'腊肠狗',devon:'德文猫',spring:'春节',xmas:'圣诞',halloween:'万圣',midautumn:'中秋',valentine:'情人'};
   var owFestAccent={spring:'#ff4d4d',xmas:'#4ddf88',halloween:'#ff9f43',midautumn:'#ffd666',valentine:'#ff6ba9'};
+  // 宠物图透明留白不同：按内容底边只搭在圆环上沿计算 top（相对圆环直径）
+  var owCatTop={siamese:-0.893,dachshund:-0.843,devon:-1.105};
   var owFestIcons={
     spring:[['🏮',-53,-29],['🧨',50,-26],['🧧',44,47],['💮',-50,40],['✨',7,-50]],
     xmas:[['❄️',-53,-29],['🎄',50,-26],['🎁',44,47],['🔔',-50,40],['☃️',7,-50]],
@@ -1048,6 +1050,7 @@ internal sealed class OverlayServer : IDisposable
       if(theme !== lastOwTheme){
         lastOwTheme = theme;
         owDeco.innerHTML = '';
+        owCat.style.top = hasKey(owCatTop, theme) ? ((owCatTop[theme] * ring).toFixed(1) + 'px') : '';
         var icons = hasKey(owFestIcons, theme) ? owFestIcons[theme] : null;
         if(icons){
           owCat.classList.add('hidden');

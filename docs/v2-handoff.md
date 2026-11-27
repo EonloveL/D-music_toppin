@@ -15,7 +15,7 @@
 | 最新提交 | 见 `git log -1` |
 | 构建 | `powershell -ExecutionPolicy Bypass -File .\build.ps1`（**不需要 .NET SDK**，首次自动下载工具链到 `.cache\nuget`） |
 | 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（214 项，退出码 0 = 全过） |
-| 产物 | `build\MusicToppin-Setup.exe`（约 1204 KB）、`build\app\`（主程序约 430 KB） |
+| 产物 | `build\MusicToppin-Setup.exe`（约 1204 KB）、`build\app\`（主程序约 431 KB） |
 | 运行 | 装好后从托盘启动；调试直接跑 `build\app\MusicToppin.exe` |
 
 **重要**：项目是 `.NET Framework 4.8` + 直接调 Roslyn `csc`（**不是** `dotnet build`，仓库里的 `MusicToppin.csproj` 是历史遗留，不要用它构建）。
@@ -246,5 +246,5 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - `main`：唯一开发线，已用 merge 提交把 **v1.1.1**（叠加层 / 离屏采集 / 遮挡模式）合进来，冲突点都在
   `TrayApp.cs`（菜单项/字段）、`Settings.cs`（注册表项）、`CHANGELOG.md`，处理原则是**两边都保留**。
 - `fix/v1`：停在 v1.1.1 发布点，只做 V1 修复；不要在这里加 V2 功能。
-- **版本号 1.5.3**（`VersionInfo.cs` + `installer/Installer.cs`）。
+- **版本号 1.5.4**（`VersionInfo.cs` + `installer/Installer.cs`）。
   发版时确认 GitHub Release 的 tag 与之一致，否则更新器会比对失败。
