@@ -859,6 +859,33 @@ internal sealed class OverlayServer : IDisposable
   .ow-time{font-size:12px;color:#9fb0c6;display:flex;justify-content:space-between;}
   .ow-lyric{font-size:18px;line-height:1.6;color:#eaf2ff;transition:opacity .18s;overflow-wrap:anywhere;}
   .ow-lyric.next{opacity:.72;font-size:16px;margin-top:6px;}
+
+  /* 黑胶卡片（样式 4，浏览器源 440×230 1:1 像素） */
+  #vinyl{display:none;position:fixed;inset:0;align-items:center;justify-content:center;font-family:'Microsoft YaHei UI',sans-serif;}
+  #vinyl.on{display:flex;}
+  .vcard{width:400px;height:200px;box-sizing:border-box;border-radius:24px;padding:14px 16px;display:flex;gap:14px;overflow:hidden;
+    background:rgba(15,17,22,.96);box-shadow:0 0 0 1px rgba(255,255,255,.08),0 18px 48px rgba(0,0,0,.45);color:#eaf2ff;}
+  .vdisc{width:140px;height:140px;border-radius:50%;flex:0 0 auto;align-self:center;position:relative;
+    background:radial-gradient(circle at 50% 50%, #2a2e37 0 18%, #14171d 19% 22%, #1d2129 23% 38%, #12151a 39% 58%, #1b1f27 59% 74%, #101319 75% 100%);
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.06),inset 0 0 22px rgba(0,0,0,.8),0 6px 18px rgba(0,0,0,.45);
+    animation:vinylspin 9s linear infinite;animation-play-state:paused;}
+  #vinyl.playing .vdisc{animation-play-state:running;}
+  .vlabel{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;background:var(--accent,#FF3B30);box-shadow:inset 0 0 0 3px rgba(0,0,0,.18);}
+  .vhole{position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:#0b0d11;}
+  .vtext{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;}
+  .vtitle{font-size:20px;font-weight:700;line-height:1.25;max-height:2.5em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+  .vartist{font-size:13px;color:#9fb0c6;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .vreq{font-size:11px;color:#7f8ea4;margin-top:2px;min-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .veq{display:flex;gap:3px;align-items:flex-end;height:12px;margin-top:6px;}
+  .veq i{display:block;width:3px;background:var(--accent,#FF3B30);height:30%;border-radius:2px;animation:veq 1.1s ease-in-out infinite;}
+  .veq i:nth-child(2){animation-delay:.15s}.veq i:nth-child(3){animation-delay:.3s}.veq i:nth-child(4){animation-delay:.45s}
+  .vbar{height:4px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden;margin-top:8px;}
+  .vfill{height:100%;width:0;background:var(--accent,#FF3B30);}
+  .vtimes{display:flex;justify-content:space-between;font-size:11px;color:#9fb0c6;margin-top:6px;}
+  .vnext{font-size:11px;color:#8ea1b8;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .vnext:empty{display:none;}
+  @keyframes vinylspin{to{transform:rotate(360deg)}}
+  @keyframes veq{0%,100%{height:25%}50%{height:95%}}
 </style>
 </head>
 <body>
@@ -906,10 +933,50 @@ internal sealed class OverlayServer : IDisposable
     <div class=""ow-toast"" id=""owToast""></div>
   </div>
 </div>
+<div id=""vinyl"">
+  <div class=""vcard"" id=""vCard"">
+    <div class=""vdisc""><div class=""vlabel""></div><div class=""vhole""></div></div>
+    <div class=""vtext"">
+      <div class=""vtitle"" id=""vTitle""></div>
+      <div class=""vartist"" id=""vArtist""></div>
+      <div class=""vreq"" id=""vReq""></div>
+      <div class=""veq""><i></i><i></i><i></i><i></i></div>
+      <div class=""vbar""><div class=""vfill"" id=""vFill""></div></div>
+      <div class=""vtimes""><span id=""vPos"">0:00</span><span id=""vDur"">0:00</span></div>
+      <div class=""vnext"" id=""vNext""></div>
+    </div>
+  </div>
+</div>
 <script>
 (function(){
   var wrap=document.getElementById('wrap');
   var ow=document.getElementById('ow');
+  var vinyl=document.getElementById('vinyl');
+  var vCard=document.getElementById('vCard');
+  var vTitle=document.getElementById('vTitle');
+  var vArtist=document.getElementById('vArtist');
+  var vReq=document.getElementById('vReq');
+  var vFill=document.getElementById('vFill');
+  var vPos=document.getElementById('vPos');
+  var vDur=document.getElementById('vDur');
+  var vNext=document.getElementById('vNext');
+
+  // 黑胶卡片：浏览器源样式 4，1:1 像素、440×240
+  function applyVinyl(st){
+    if(!st.show){ vinyl.className=''; return; }
+    vinyl.className='on' + (st.playing ? ' playing' : '');
+    document.documentElement.style.setProperty('--accent', st.accent||'#FF3B30');
+    vCard.style.background='rgba(15,17,22,'+(st.opacity!=null?st.opacity:0.96)+')';
+    vTitle.textContent=st.title||'';
+    vArtist.textContent=st.artist||'';
+    vReq.textContent=st.requester?('点歌人：'+st.requester):'';
+    var pos=Number(st.position)||0, dur=Number(st.duration)||0;
+    vPos.textContent=fmt(pos); vDur.textContent=fmt(dur);
+    vFill.style.width=(dur>0?Math.min(100,pos/dur*100):0).toFixed(1)+'%';
+    var next=st.nextTitle||'';
+    vNext.textContent=next?('下一首：'+next+(st.queueCount>1?('（队列 '+st.queueCount+'）'):'')):'';
+    if(location.search.indexOf('debug=1')>=0){ setTimeout(function(){ var r=vCard.getBoundingClientRect(); document.title='iw='+innerWidth+' card='+Math.round(r.left)+'..'+Math.round(r.right); },0); }
+  }
   var card=document.getElementById('card');
   var lastToast=0, toastTimer=null;
   function showToast(text, el){
@@ -1047,6 +1114,11 @@ internal sealed class OverlayServer : IDisposable
       lastToast = st.toastId;
       showToast(st.toast, st.style === 3 ? document.getElementById('owToast') : null);
     }
+
+    if(st && st.style === 4){
+      wrap.className=''; ow.className=''; applyVinyl(st); return;
+    }
+    vinyl.className='';
 
     if(st && st.style === 3){
       wrap.className='';

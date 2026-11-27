@@ -16,7 +16,7 @@ internal sealed class AppSettings
     public bool Green;
     public bool Locked = true;
 
-    /// <summary>卡片样式：0 = 击杀播报，1 = 极简，2 = 环状毛玻璃，3 = 守望先锋模式（显示歌词）。</summary>
+    /// <summary>卡片样式：0 = 击杀播报，1 = 极简，2 = 环状毛玻璃，3 = 守望先锋模式，4 = 黑胶卡片（浏览器源）。</summary>
     public int Style;
 
     public bool Compact
@@ -161,7 +161,7 @@ internal sealed class AppSettings
                 s.Green = ReadInt(key, "Green", 0) == 1;
                 s.Locked = ReadInt(key, "Locked", 1) == 1;
                 s.Style = ReadInt(key, "Style", ReadInt(key, "Compact", 0) == 1 ? 1 : 0);
-                if (s.Style < 0 || s.Style > 3) s.Style = 0;
+                if (s.Style < 0 || s.Style > 4) s.Style = 0;
                 s.AutoStart = ReadInt(key, "AutoStart", 0) == 1;
                 s.Visible = ReadInt(key, "Visible", 1) == 1;
                 s.Hotkeys = ReadInt(key, "Hotkeys", 1) == 1;

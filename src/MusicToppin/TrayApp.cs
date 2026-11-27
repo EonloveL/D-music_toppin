@@ -34,6 +34,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _itemKillfeed;
     private readonly ToolStripMenuItem _itemRing;
     private readonly ToolStripMenuItem _itemOverwatch;
+    private readonly ToolStripMenuItem _itemVinyl;
     private ToolStripMenuItem _itemSafeMedia;
     private readonly ToolStripMenuItem _itemAutoStart;
 
@@ -121,13 +122,14 @@ internal sealed class TrayApp : ApplicationContext
 
         PlaceHud();
 
-        _itemShow = new ToolStripMenuItem("显示浮窗", null, (_, _) => ToggleVisible()) { Checked = _settings.Visible && _settings.Style != 3 };
+        _itemShow = new ToolStripMenuItem("显示浮窗", null, (_, _) => ToggleVisible()) { Checked = _settings.Visible && !BrowserOnly(_settings.Style) };
         _itemLock = new ToolStripMenuItem("锁定浮窗（鼠标穿透）", null, (_, _) => ToggleLock()) { Checked = _settings.Locked };
         _itemGreen = new ToolStripMenuItem("绿幕模式（直播采集）", null, (_, _) => ToggleGreen()) { Checked = _settings.Green };
         _itemKillfeed = new ToolStripMenuItem("击杀播报", null, (_, _) => SetStyle(0)) { Checked = _settings.Style == 0 };
         _itemCompact = new ToolStripMenuItem("极简", null, (_, _) => SetStyle(1)) { Checked = _settings.Style == 1 };
         _itemRing = new ToolStripMenuItem("环状毛玻璃（新）", null, (_, _) => SetStyle(2)) { Checked = _settings.Style == 2 };
         _itemOverwatch = new ToolStripMenuItem("守望先锋模式（显示歌词）", null, (_, _) => SetStyle(3)) { Checked = _settings.Style == 3 };
+        _itemVinyl = new ToolStripMenuItem("黑胶卡片（浏览器源）", null, (_, _) => SetStyle(4)) { Checked = _settings.Style == 4 };
         _itemAutoStart = new ToolStripMenuItem("开机自启", null, (_, _) => ToggleAutoStart()) { Checked = _settings.AutoStart };
 
         _itemWizard = new ToolStripMenuItem("上屏向导…", null, (_, _) => ShowWizard());
@@ -212,6 +214,7 @@ internal sealed class TrayApp : ApplicationContext
         styleMenu.DropDownItems.Add(_itemCompact);
         styleMenu.DropDownItems.Add(_itemRing);
         styleMenu.DropDownItems.Add(_itemOverwatch);
+        styleMenu.DropDownItems.Add(_itemVinyl);
         styleMenu.DropDownItems.Add(BuildLyricsThemeMenu());
         styleMenu.DropDownItems.Add(BuildAlignMenu());
 
@@ -484,7 +487,7 @@ internal sealed class TrayApp : ApplicationContext
             fakeTimer.Start();
         }
 
-        if (_settings.Visible && _settings.Style != 3) ShowHud();
+        if (_settings.Visible && !BrowserOnly(_settings.Style)) ShowHud();
         EnsureHotkeys();
         if (!_settings.WizardShown)
         {
@@ -500,13 +503,13 @@ internal sealed class TrayApp : ApplicationContext
 
         // 启动时按保存的锚点重新贴边（屏幕分辨率/缩放变化后也能回到正确位置）
         if (!string.IsNullOrEmpty(_settings.Anchor) && !_settings.CaptureOffscreen) MoveHudTo(_settings.Anchor);
-        if (_settings.Style == 3 && !_settings.Overlay)
+        if (BrowserOnly(_settings.Style) && !_settings.Overlay)
         {
             // 守望先锋模式依赖浏览器源：升级后保持设置与托盘勾选一致
             _settings.Overlay = true;
             _settings.Save();
         }
-        if (_settings.Overlay || _settings.Style == 3)
+        if (_settings.Overlay || BrowserOnly(_settings.Style))
         {
             _itemOverlay.Checked = true;
             StartOverlay(notify: false);
@@ -3695,9 +3698,14 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Save();
     }
 
+    private static bool BrowserOnly(int style)
+    {
+        return style == 3 || style == 4;
+    }
+
     private void SetStyle(int style)
     {
-        style = Math.Max(0, Math.Min(3, style));
+        style = Math.Max(0, Math.Min(4, style));
         _settings.Style = style;
         _hud.SetCompact(style == 1);
         _hud.SetRing(style == 2);
@@ -3705,14 +3713,14 @@ internal sealed class TrayApp : ApplicationContext
         _itemKillfeed.Checked = style == 0;
         _itemRing.Checked = style == 2;
         _itemOverwatch.Checked = style == 3;
+        _itemVinyl.Checked = style == 4;
         _settings.Save();
 
-        if (style == 3)
+        if (BrowserOnly(style))
         {
-            // 守望先锋模式只在浏览器源里渲染（1920×1080），桌面浮窗保持隐藏，避免继续显示击杀播报
+            // 浏览器源样式：桌面浮窗保持隐藏，避免继续显示击杀播报
             if (_hud.Visible) HideHud();
             _itemShow.Checked = false;
-            // 桌面采集方式在 OW 模式下没有意义，一并退出，避免状态互相打架
             if (_settings.CaptureOccluded)
             {
                 _settings.CaptureOccluded = false;
@@ -3728,21 +3736,23 @@ internal sealed class TrayApp : ApplicationContext
             var overlayAlreadyOn = _settings.Overlay && _overlay != null;
             if (!_settings.Overlay) SetOverlayEnabled(true);
             else if (_overlay == null) StartOverlay(notify: false);
-            if (_activeSong != null)
+            if (style == 3 && _activeSong != null)
             {
                 LyricsService.SetSong(_activeSong.Title, _activeSong.Artist, _activeSong.SourceLabel, _activeSong.PageUrl);
             }
             if (overlayAlreadyOn)
             {
-                _tray.ShowBalloonTip(4000, "Music Toppin",
-                    "守望先锋模式：歌词只在这个样式里显示，桌面浮窗已自动隐藏。\n请在 OBS 用浏览器源显示（宽 1920 高 1080）：" + (_overlay != null ? _overlay.Url : ""),
+                var msg = style == 3
+                    ? "守望先锋模式：歌词只在这个样式里显示，桌面浮窗已自动隐藏。\n请在 OBS 用浏览器源显示（宽 1920 高 1080）："
+                    : "黑胶卡片：只在浏览器源里显示，桌面浮窗已自动隐藏。\n浏览器源宽约 440、高约 240：";
+                _tray.ShowBalloonTip(4000, "Music Toppin", msg + (_overlay != null ? _overlay.Url : ""),
                     ToolTipIcon.Info);
             }
         }
         else
         {
             LyricsService.Clear();
-            // 离开守望先锋模式后，若没显式开「直播叠加层」就停掉服务器，不白占端口
+            // 离开浏览器源样式后，若没显式开「直播叠加层」就停掉服务器，不白占端口
             if (!_settings.Overlay && _overlay != null) StopOverlay();
             if (_settings.Visible && !_hud.Visible)
             {
@@ -4204,7 +4214,7 @@ internal sealed class TrayApp : ApplicationContext
         if (np.HasSession)
         {
             _lastSessionUtc = DateTime.UtcNow;
-            if (_settings.Visible && _settings.Style != 3 && !_hud.Visible) ShowHud();
+            if (_settings.Visible && !BrowserOnly(_settings.Style) && !_hud.Visible) ShowHud();
             if (_hud.Visible) _hud.SetState(np, animate: true);
         }
         else if (_hud.Visible)

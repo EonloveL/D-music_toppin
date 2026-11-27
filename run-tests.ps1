@@ -1,4 +1,4 @@
-﻿# 单元测试：编译源文件 + tests/ 下的测试，跑完用退出码表示结果（0 = 全过）。
+# 单元测试：编译源文件 + tests/ 下的测试，跑完用退出码表示结果（0 = 全过）。
 # 不引测试框架，避免给构建加依赖；直接编译成 exe 跑。
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\toolchain.ps1"
@@ -31,6 +31,7 @@ $sources = @(
     'Playlist.cs',
     'Lyrics.cs',
     'OverlayServer.cs',
+  'SvgPet.cs',
     'VideoCache.cs'
 ) | ForEach-Object { Join-Path $app $_ }
 $sources += Get-ChildItem $tests -Filter *.cs -File | ForEach-Object { $_.FullName }
