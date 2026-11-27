@@ -495,6 +495,24 @@ internal sealed class TrayApp : ApplicationContext
             fakeTimer.Start();
         }
 
+        // 调试/自动化用：--fake-gift=gift|up 注入一次礼物/上舰事件，验证宠物互动
+        var fakeGiftArg = Environment.GetCommandLineArgs()
+            .FirstOrDefault(a => a.StartsWith("--fake-gift=", StringComparison.OrdinalIgnoreCase));
+        if (fakeGiftArg != null)
+        {
+            var kind = fakeGiftArg.Substring("--fake-gift=".Length).Trim().ToLowerInvariant();
+            var giftTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+            giftTimer.Tick += (_, _) =>
+            {
+                giftTimer.Stop();
+                giftTimer.Dispose();
+                OnDanmakuGift(kind == "up"
+                    ? new DanmakuGift { Kind = "up", UserName = "测试舰长", GuardLevel = 3 }
+                    : new DanmakuGift { Kind = "gift", UserName = "测试观众", GiftName = "小心心", Count = 3 });
+            };
+            giftTimer.Start();
+        }
+
         if (_settings.Visible && !BrowserOnly(_settings.Style)) ShowHud();
         EnsureHotkeys();
         if (!_settings.WizardShown)
@@ -654,6 +672,10 @@ internal sealed class TrayApp : ApplicationContext
     private TimeSpan _videoDuration;
     private ResolvedSong _videoSong;
     private int _videoNonce;
+    private string _petEvent = "";
+    private string _petEventText = "";
+    private int _petEventId;
+    private string _petEventAt = "";
     private int _playGeneration;
     private ResolvedSong _activeSong;
     private OwnHistoryEntry _currentOwnEntry;
@@ -2544,6 +2566,7 @@ internal sealed class TrayApp : ApplicationContext
             int proto;
             if (protoArg != null && int.TryParse(protoArg.Substring("--protover=".Length), out proto)) _danmaku.ProtoVersion = proto;
             _danmaku.Received += OnDanmaku;
+        _danmaku.GiftReceived += OnDanmakuGift;
             _danmaku.ConnectionChanged += connected => _ui.Post(_ => OnLiveConnectionChanged(connected), null);
             _danmaku.StatusChanged += status =>
             {
@@ -2679,6 +2702,25 @@ internal sealed class TrayApp : ApplicationContext
         if (_queue.Count > 0) text += " · 点歌 " + _queue.Count;
 
         _tray.Text = text.Length > 63 ? text.Substring(0, 63) : text;
+    }
+
+    private void OnDanmakuGift(DanmakuGift gift)
+    {
+        if (_exiting || gift == null) return;
+
+        _ui.Post(_ =>
+        {
+            _petEvent = gift.Kind;
+            _petEventText = gift.Kind == "up"
+                ? (string.IsNullOrEmpty(gift.UserName) ? "有人上舰" : gift.UserName + " 上舰")
+                : ((string.IsNullOrEmpty(gift.UserName) ? "" : gift.UserName + " 送出 ") +
+                   (string.IsNullOrEmpty(gift.GiftName) ? "礼物" : gift.GiftName) +
+                   (gift.Count > 1 ? " ×" + gift.Count : ""));
+            _petEventId++;
+            _petEventAt = DateTime.UtcNow.ToString("o");
+            Logger.Write("pet event: " + _petEvent + " " + (_petEventText ?? ""));
+            RefreshOverlaySnapshot();
+        }, null);
     }
 
     private void OnDanmaku(DanmakuMessage message)
@@ -3235,6 +3277,10 @@ internal sealed class TrayApp : ApplicationContext
             VideoBvid = _videoBvid,
             VideoSound = _settings.VideoAudio == 1,
             VideoNonce = _videoNonce,
+            PetEvent = _petEvent,
+            PetEventText = _petEventText,
+            PetEventId = _petEventId,
+            PetEventAt = _petEventAt,
             LyricsTheme = _settings.LyricsTheme ?? "siamese",
             RingSize = _settings.OverlayRingSize,
             RingY = _settings.OverlayRingY,

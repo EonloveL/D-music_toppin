@@ -18,6 +18,7 @@ namespace MusicToppin.Tests
             ParseTests();
             PermissionTests();
             RoomIdTests();
+            GiftTests();
         }
 
         private static void JsonTests()
@@ -213,6 +214,25 @@ namespace MusicToppin.Tests
             }
         }
 
+        private static void GiftTests()
+        {
+            TestRun.Section("礼物解析");
+
+            var gift = DanmakuProtocol.ParseGift(Json.Parse("{\"cmd\":\"SEND_GIFT\",\"data\":{\"uname\":\"观众A\",\"giftName\":\"小心心\",\"num\":3}}"));
+            TestRun.Check(gift != null && gift.Kind == "gift", "SEND_GIFT 识别");
+            TestRun.Check(gift != null && gift.UserName == "观众A" && gift.GiftName == "小心心" && gift.Count == 3, "SEND_GIFT 字段");
+
+            var suffix = DanmakuProtocol.ParseGift(Json.Parse("{\"cmd\":\"SEND_GIFT:123:0:2\",\"data\":{\"uname\":\"观众B\",\"giftName\":\"辣条\",\"num\":10}}"));
+            TestRun.Check(suffix != null && suffix.Count == 10, "SEND_GIFT 带后缀");
+
+            var guard = DanmakuProtocol.ParseGift(Json.Parse("{\"cmd\":\"GUARD_BUY\",\"data\":{\"username\":\"舰长C\",\"guard_level\":3}}"));
+            TestRun.Check(guard != null && guard.Kind == "up" && guard.UserName == "舰长C" && guard.GuardLevel == 3, "GUARD_BUY");
+
+            TestRun.Check(DanmakuProtocol.ParseGift(Json.Parse("{\"cmd\":\"SEND_GIFT\"}")) == null, "缺 data 返回 null");
+            TestRun.Check(DanmakuProtocol.ParseGift(Json.Parse("{\"cmd\":\"SEND_GIFT\",\"data\":\"oops\"}")) == null, "data 非对象返回 null");
+            TestRun.Check(DanmakuProtocol.ParseGift(null) == null, "null 输入");
+            TestRun.Check(DanmakuProtocol.ParseGift(Json.Parse("{\"cmd\":\"DANMU_MSG\",\"info\":[]}")) == null, "非礼物返回 null");
+        }
         private static byte[] ZlibCompress(byte[] data)
         {
             var raw = DeflateRaw(data);

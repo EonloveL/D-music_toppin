@@ -6,6 +6,16 @@ using System.Text.RegularExpressions;
 
 namespace MusicToppin;
 
+/// <summary>礼物 / 上舰事件（喂给叠加层宠物互动用）。</summary>
+internal sealed class DanmakuGift
+{
+    public string Kind = "";      // gift / up
+    public string UserName = "";
+    public string GiftName = "";
+    public int Count;
+    public int GuardLevel;
+}
+
 /// <summary>一条直播间弹幕（只保留点歌用得上的字段）。</summary>
 internal sealed class DanmakuMessage
 {
@@ -239,6 +249,40 @@ internal static class DanmakuProtocol
     }
 
     /// <summary>把一条 DANMU_MSG 的 JSON 解析成消息；不是弹幕返回 null。</summary>
+    /// <summary>解析 SEND_GIFT / GUARD_BUY；不是礼物返回 null。</summary>
+    public static DanmakuGift ParseGift(JsonValue root)
+    {
+        if (root == null) return null;
+
+        var cmd = root["cmd"] != null ? root["cmd"].AsString : null;
+        if (string.IsNullOrEmpty(cmd)) return null;
+
+        var isGift = cmd.IndexOf("SEND_GIFT", StringComparison.Ordinal) >= 0;
+        var isGuard = cmd.IndexOf("GUARD_BUY", StringComparison.Ordinal) >= 0;
+        if (!isGift && !isGuard) return null;
+
+        var data = root["data"];
+        if (data == null || data.Kind != JsonKind.Object) return null;
+
+        if (isGuard)
+        {
+            return new DanmakuGift
+            {
+                Kind = "up",
+                UserName = data["username"] != null ? data["username"].AsString : "",
+                GuardLevel = data["guard_level"] != null ? data["guard_level"].AsInt : 0
+            };
+        }
+
+        return new DanmakuGift
+        {
+            Kind = "gift",
+            UserName = data["uname"] != null ? data["uname"].AsString : "",
+            GiftName = data["giftName"] != null ? data["giftName"].AsString : "",
+            Count = data["num"] != null ? data["num"].AsInt : 1
+        };
+    }
+
     public static DanmakuMessage ParseDanmaku(JsonValue root)
     {
         if (root == null) return null;
@@ -613,6 +657,9 @@ internal sealed class DanmakuClient : IDisposable
 
     /// <summary>收到一条弹幕（后台线程）。</summary>
     public event Action<DanmakuMessage> Received;
+
+    /// <summary>礼物 / 上舰事件。</summary>
+    public event Action<DanmakuGift> GiftReceived;
 
     /// <summary>人气值（心跳回复）。</summary>
     public event Action<int> PopularityChanged;
@@ -1175,6 +1222,19 @@ internal sealed class DanmakuClient : IDisposable
 
         // 房间生命周期：重开直播后旧连接还在、但弹幕订阅会失效，主动换新连接
         if (HandleRoomLifecycle(root)) return;
+
+        // 礼物 / 上舰：转成宠物互动事件
+        var gift = DanmakuProtocol.ParseGift(root);
+        if (gift != null)
+        {
+            var giftHandler = GiftReceived;
+            if (giftHandler != null)
+            {
+                try { giftHandler(gift); }
+                catch (Exception ex) { Logger.Write("danmaku gift handler: " + ex.Message); }
+            }
+            return;
+        }
 
         var message = DanmakuProtocol.ParseDanmaku(root);
         if (message == null)

@@ -47,6 +47,10 @@ internal sealed class OverlayState
 
     /// <summary>视频重开标记：变一次就强制前端重建 iframe（用于「上一首」重播视频）。</summary>
     public int VideoNonce;
+    public string PetEvent = "";
+    public string PetEventText = "";
+    public int PetEventId;
+    public string PetEventAt = "";
 
     /// <summary>手写 JSON（.NET Framework 4.8 没有 System.Text.Json）。</summary>
     public string ToJson()
@@ -67,6 +71,10 @@ internal sealed class OverlayState
         AppendString(builder, "videoBvid", VideoBvid);
         builder.Append(",\"videoSound\":").Append(VideoSound ? "true" : "false");
         builder.Append(",\"videoNonce\":").Append(VideoNonce);
+        AppendString(builder, "petEvent", PetEvent);
+        AppendString(builder, "petEventText", PetEventText);
+        builder.Append(",\"petEventId\":").Append(PetEventId);
+        AppendString(builder, "petEventAt", PetEventAt);
         builder.Append(",\"queueCount\":").Append(QueueCount);
         builder.Append(",\"toastId\":").Append(ToastId);
         builder.Append(",\"style\":").Append(Style);
@@ -648,6 +656,10 @@ internal sealed class OverlayServer : IDisposable
         builder.Append(",\"ringSize\":").Append(state.RingSize);
         builder.Append(",\"ringY\":").Append(state.RingY);
         builder.Append(",\"petOffset\":").Append(state.PetOffset);
+        OverlayState.AppendString(builder, "petEvent", state.PetEvent ?? "");
+        OverlayState.AppendString(builder, "petEventText", state.PetEventText ?? "");
+        builder.Append(",\"petEventId\":").Append(state.PetEventId);
+        OverlayState.AppendString(builder, "petEventAt", state.PetEventAt ?? "");
         OverlayState.AppendString(builder, "accent", state.Accent ?? "#FF3B30");
         OverlayState.AppendString(builder, "titleColor", state.TitleColor ?? "#F5F8FC");
         OverlayState.AppendString(builder, "artistColor", state.ArtistColor ?? "#9FB0C6");
@@ -840,6 +852,10 @@ internal sealed class OverlayServer : IDisposable
   .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 10px rgba(143,184,255,.30);z-index:2;}
   .ow-cat{position:absolute;left:50%;top:calc(var(--ow-ring,104px) * -0.9);transform:translateX(-50%);z-index:1;
     width:calc(var(--ow-ring,104px) * 1.31);height:calc(var(--ow-ring,104px) * 1.31);pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .ow-cat.pet-glow{filter:drop-shadow(0 0 14px rgba(143,184,255,.95)) drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .ow-fx{position:absolute;left:50%;top:-6%;width:0;height:0;z-index:4;pointer-events:none;}
+  .ow-fx span{position:absolute;font-size:18px;animation:owFloat 1.5s ease-out forwards;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;}
+  @keyframes owFloat{0%{transform:translate(-50%,0) scale(.7);opacity:0}20%{opacity:1}100%{transform:translate(calc(-50% + var(--dx,0px)),-46px) scale(1.1);opacity:0}}
   .ow-deco span{position:absolute;left:50%;top:50%;font-size:17px;pointer-events:none;z-index:3;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
   .ow-toast{position:absolute;left:50%;bottom:400px;transform:translateX(-50%);padding:10px 20px;border-radius:10px;
     background:rgba(14,17,23,.92);color:#eaf2ff;font-size:18px;white-space:nowrap;opacity:0;transition:opacity .2s;pointer-events:none;}
@@ -914,7 +930,7 @@ internal sealed class OverlayServer : IDisposable
 <div id=""ow"">
   <div class=""ow-stage"" id=""owStage"">
     <div class=""ow-hud"">
-      <div class=""ow-circle""><div class=""ow-halo"" id=""owHalo""></div><div class=""ow-deco"" id=""owDeco""></div><img class=""ow-cat"" id=""owCat"" alt=""""></div>
+      <div class=""ow-circle""><div class=""ow-halo"" id=""owHalo""></div><div class=""ow-deco"" id=""owDeco""></div><img class=""ow-cat"" id=""owCat"" alt=""""><div class=""ow-fx"" id=""owFx""></div></div>
     </div>
     <div class=""ow-card ow-left"" id=""owLeft"">
       <div class=""ow-tag"" id=""owTag""></div>
@@ -1004,6 +1020,29 @@ internal sealed class OverlayServer : IDisposable
   var owCat=document.getElementById('owCat');
   var owDeco=document.getElementById('owDeco');
   var owHalo=document.getElementById('owHalo');
+  var owFx=document.getElementById('owFx');
+  var lastOwPetEvent=0, owBaseDone=false, owGlowTimer=null;
+
+  // 礼物 / 上舰：宠物发光 + 粒子（不改 owCat 的 transform，避免破坏对位）
+  function owPetReact(kind){
+    if(!owCat || owCat.classList.contains('hidden')) return;
+    owCat.classList.add('pet-glow');
+    if(owGlowTimer) clearTimeout(owGlowTimer);
+    owGlowTimer=setTimeout(function(){ owCat.classList.remove('pet-glow'); }, 1400);
+
+    var symbols = kind === 'up' ? ['🎉','✨','💖','👑'] : ['❤️','💛','✨','💫'];
+    var count = kind === 'up' ? 12 : 8;
+    for(var i=0;i<count;i++){
+      var node=document.createElement('span');
+      node.textContent=symbols[Math.floor(Math.random()*symbols.length)];
+      node.style.left=(Math.random()*60-30)+'px';
+      node.style.top=(Math.random()*6)+'px';
+      node.style.setProperty('--dx',(Math.random()*40-20)+'px');
+      node.style.animationDelay=(Math.random()*0.3)+'s';
+      node.addEventListener('animationend', function(){ if(this.parentNode) this.parentNode.removeChild(this); });
+      owFx.appendChild(node);
+    }
+  }
   owCat.onerror=function(){ owCat.classList.add('hidden'); owCat.removeAttribute('src'); };
 
   // OBS 旧内核（CEF 103）不支持 color-mix，这里用 JS 把强调色算成 rgba
@@ -1261,6 +1300,14 @@ internal sealed class OverlayServer : IDisposable
         }
       }
       owMeta.textContent = '守望先锋 · 主题：' + (owThemeNames[theme] || theme);
+
+      var pe=Number(st.petEventId)||0;
+      if(!owBaseDone){ owBaseDone=true; lastOwPetEvent=pe; }
+      else if(pe && pe!==lastOwPetEvent){
+        lastOwPetEvent=pe;
+        var petAt=Date.parse(st.petEventAt||'');
+        if(!isFinite(petAt) || Date.now()-petAt < 5000) owPetReact(st.petEvent==='up'?'up':'gift');
+      }
 
       var p = st.duration > 0 ? Math.min(1, (st.position||0)/st.duration) : 0;
       owFill.style.width = (p*100).toFixed(1) + '%';
