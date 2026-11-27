@@ -922,7 +922,8 @@ internal sealed class OverlayServer : IDisposable
   var owCatTop={siamese:-0.803,dachshund:-0.753,devon:-1.015};
   var owRingPx=104, owRingY=925, owCatVisibleTop=null, owCatMetrics={}, owPetOffset=0;
   // 尾巴长度不同：devon 长尾要更深地垂进圆环，身体才会压在环沿上
-  var owCatSink={siamese:26,dachshund:30,devon:95};
+  // 统一规则：肚皮底边（底轮廓最高点）先对住外圆边，再下移一个圆环厚度
+  var owRingThicknessRatio=0.08;
   function updateCompactTop(){
     if(!owCompact) return;
     // 紧凑源里圆环位置保持固定（不随主题/猫图变化），这样切主题不用重新对位
@@ -940,8 +941,8 @@ internal sealed class OverlayServer : IDisposable
       updateCompactTop();
       return;
     }
-    var overlap = hasKey(owCatSink, theme) ? owCatSink[theme] : 6;
-    var elementTop = overlap - m.bottom*H + owPetOffset;
+    var thickness = Math.max(4, ring*owRingThicknessRatio);
+    var elementTop = thickness - m.belly*H + owPetOffset;
     owCat.style.top = elementTop.toFixed(1)+'px';
     var shift = H/2 - (m.left+m.right)/2*H;
     owCat.style.transform='translateX(-50%) translateX('+shift.toFixed(1)+'px)';
@@ -961,16 +962,23 @@ internal sealed class OverlayServer : IDisposable
         cx.drawImage(img,0,0);
         var d=cx.getImageData(0,0,cv.width,cv.height).data;
         var minX=cv.width,maxX=-1,minY=cv.height,maxY=-1;
-        for(var y=0;y<cv.height;y++){
-          for(var x=0;x<cv.width;x++){
-            if(d[(y*cv.width+x)*4+3]>8){
+        var bottoms=[];
+        for(var x=0;x<cv.width;x++){
+          var colBottom=-1, colCount=0;
+          for(var y=0;y<cv.height;y++){
+            if(d[(y*cv.width+x)*4+3]>32){
               if(x<minX)minX=x; if(x>maxX)maxX=x;
               if(y<minY)minY=y; if(y>maxY)maxY=y;
+              colBottom=y; colCount++;
             }
           }
+          if(colBottom>=0 && colCount>=3) bottoms.push(colBottom);
         }
         if(maxY>=0){
-          owCatMetrics[theme]={left:minX/cv.width,right:(maxX+1)/cv.width,top:minY/cv.height,bottom:(maxY+1)/cv.height};
+          bottoms.sort(function(a,b){return a-b;});
+          // 底轮廓最高处（最小 y）：取 4% 分位，避开孤立噪点
+          var bellyY = bottoms.length ? bottoms[Math.max(0, Math.floor(bottoms.length*0.04))] : maxY;
+          owCatMetrics[theme]={left:minX/cv.width,right:(maxX+1)/cv.width,top:minY/cv.height,bottom:(maxY+1)/cv.height,belly:bellyY/cv.height};
           if(lastOwTheme===theme) layoutCat(theme);
         }
       }catch(e){}
