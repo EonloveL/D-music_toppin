@@ -2070,13 +2070,13 @@ internal sealed class TrayApp : ApplicationContext
         menu.DropDownItems.Add(new ToolStripSeparator());
         menu.DropDownItems.Add(new ToolStripMenuItem("宠物上移 10px", null, (_, _) => AdjustPetOffset(-10)));
         menu.DropDownItems.Add(new ToolStripMenuItem("宠物下移 10px", null, (_, _) => AdjustPetOffset(10)));
-        menu.DropDownItems.Add(new ToolStripMenuItem("宠物恢复默认位置", null, (_, _) => AdjustPetOffset(-_settings.OverlayPetOffset)));
+        menu.DropDownItems.Add(new ToolStripMenuItem("宠物恢复默认位置", null, (_, _) => AdjustPetOffset(AppSettings.PetOffsetDefault - _settings.OverlayPetOffset)));
         menu.DropDownItems.Add(new ToolStripSeparator());
         menu.DropDownItems.Add(new ToolStripMenuItem("恢复默认（104px / Y 925）", null, (_, _) =>
             AdjustRing(104 - _settings.OverlayRingSize, 925 - _settings.OverlayRingY)));
         menu.DropDownOpening += (_, _) =>
         {
-            menu.Text = "守望先锋对位：" + _settings.OverlayRingSize + "px · Y " + _settings.OverlayRingY;
+            menu.Text = "守望先锋对位：" + _settings.OverlayRingSize + "px · Y " + _settings.OverlayRingY + " · 宠物 " + (_settings.OverlayPetOffset >= 0 ? "+" : "") + _settings.OverlayPetOffset + "px";
         };
         return menu;
     }

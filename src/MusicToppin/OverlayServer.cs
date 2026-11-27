@@ -16,7 +16,7 @@ internal sealed class OverlayState
     public int RingY = 925;
 
     /// <summary>宠物整体上下偏移（px，正数=下移）。</summary>
-    public int PetOffset;
+    public int PetOffset = 20;
     public int Style;
     public bool Playing;
     public double Position;
@@ -208,6 +208,7 @@ internal sealed class OverlayServer : IDisposable
             using (var stream = client.GetStream())
             {
                 stream.ReadTimeout = 3000;
+                stream.WriteTimeout = 15000;
                 var request = ReadRequest(stream);
                 if (request == null) return;
 
@@ -352,7 +353,7 @@ internal sealed class OverlayServer : IDisposable
 
         // 等解析出总长度（或失败）；下载本身在后台继续，页面可以先播已缓存的部分
         var wait = Stopwatch.StartNew();
-        while (!entry.Failed && entry.Total <= 0 && wait.Elapsed < TimeSpan.FromSeconds(20))
+        while (!entry.Failed && !entry.Complete && entry.Total <= 0 && wait.Elapsed < TimeSpan.FromSeconds(20))
         {
             lock (entry.Gate) Monitor.Wait(entry.Gate, 100);
         }
@@ -365,13 +366,27 @@ internal sealed class OverlayServer : IDisposable
         }
 
         var total = entry.Total > 0 ? entry.Total : entry.Downloaded;
+        if (total <= 0)
+        {
+            // 拿不到总长度（分块响应/解析失败）时不要假装成功，让播放器走回退逻辑
+            WriteResponse(client, "503 Service Unavailable", "text/plain; charset=utf-8", "video not ready");
+            return;
+        }
+
         var isHead = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
 
-        // Range 起点越界：不要回 200 从头重发，按 416 拒绝
+        // Range 起点越界：不要回 200 从头重发，按 416 拒绝并告知总长度
         long rangeStart;
-        if (total > 0 && TryGetRangeStart(request.Range, out rangeStart) && rangeStart >= total)
+        if (TryGetRangeStart(request.Range, out rangeStart) && rangeStart >= total)
         {
-            WriteResponse(client, "416 Requested Range Not Satisfiable", "text/plain; charset=utf-8", "range out of bounds");
+            var rangeHeader = "HTTP/1.1 416 Requested Range Not Satisfiable\r\n" +
+                              "Content-Length: 0\r\n" +
+                              "Content-Range: bytes */" + total + "\r\n" +
+                              "Cache-Control: no-store\r\n" +
+                              "Connection: close\r\n\r\n";
+            var rangeBytes = Encoding.ASCII.GetBytes(rangeHeader);
+            client.Write(rangeBytes, 0, rangeBytes.Length);
+            client.Flush();
             return;
         }
 
@@ -415,6 +430,7 @@ internal sealed class OverlayServer : IDisposable
     {
         FileStream file = null;
         var buffer = new byte[64 * 1024];
+        var deadline = Stopwatch.StartNew();
 
         try
         {
@@ -444,6 +460,8 @@ internal sealed class OverlayServer : IDisposable
 
             while (position <= end)
             {
+                if (deadline.Elapsed > TimeSpan.FromMinutes(3)) break;
+
                 long available;
                 lock (entry.Gate) available = entry.Downloaded;
 
@@ -802,15 +820,15 @@ internal sealed class OverlayServer : IDisposable
   #ow{display:none;position:fixed;inset:0;}
   #ow.on{display:block;}
   .ow-stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#8fb8ff;}
-  /* 紧凑模式：?ow=compact。900×300 的浏览器源，按 1920×1080 的 1:1 像素裁出「圆环 + 左右卡片」区域，
+  /* 紧凑模式：?ow=compact。900×320 的浏览器源，按 1920×1080 的 1:1 像素裁出「圆环 + 左右卡片」区域，
      用户直接把源拖到大招圆环上对齐即可，不需要铺满全屏，也不需要缩放 */
-  .ow-stage.compact{left:-520px;top:-757px;transform:none!important;}
+  .ow-stage.compact{left:-510px;top:-767px;transform:none!important;}
   /* ?ow=compact&align=1：对位辅助线，套准游戏大招圆环后去掉 &align=1 */
   .ow-stage.align .ow-halo{border:2px dashed rgba(255,110,110,.95);box-shadow:0 0 18px rgba(255,90,90,.75);}
   .ow-stage.align .ow-circle::after{content:' ';position:absolute;left:-28px;right:-28px;top:-1px;height:2px;background:#ff6b6b;box-shadow:0 0 8px #ff6b6b;}
   .ow-stage.align::before{content:""对齐：红圈套住大招圆环（非卡片），对好后去掉 &align=1"";position:fixed;right:8px;top:6px;color:#fff;background:rgba(0,0,0,.7);padding:4px 10px;border-radius:8px;font-size:11px;white-space:nowrap;}
   .ow-stage.compact .ow-toast{position:fixed;left:50%;top:10px;bottom:auto;transform:translateX(-50%);}
-  /* 圆圈对齐守望先锋大招圆环（1280×720 实测：中心 640,627、直径约 70px → 1920 画布中心 960,940、直径 106px） */
+  /* 圆圈对齐守望先锋大招圆环（1280×720 实测：中心 640,627、直径约 70px → 1920 画布中心 960,940、直径 104px） */
   .ow-hud{position:absolute;left:0;right:0;bottom:var(--ow-ring-bottom,103px);height:var(--ow-ring,104px);display:flex;align-items:center;justify-content:center;}
   .ow-circle{position:relative;width:var(--ow-ring,104px);height:var(--ow-ring,104px);border-radius:50%;}
   /* 发光圆环画在宠物上面：猫趴在上沿，圈内始终完整可见 */
@@ -927,7 +945,7 @@ internal sealed class OverlayServer : IDisposable
   var owFestAccent={spring:'#ff4d4d',xmas:'#4ddf88',halloween:'#ff9f43',midautumn:'#ffd666',valentine:'#ff6ba9'};
   // 宠物图透明留白不同：按内容底边只搭在圆环上沿计算 top（相对圆环直径）
   var owCatTop={siamese:-0.803,dachshund:-0.753,devon:-1.015};
-  var owRingPx=104, owRingY=925, owCatVisibleTop=null, owCatMetrics={}, owPetOffset=0;
+  var owRingPx=104, owRingY=925, owCatMetrics={}, owPetOffset=0;
   // 三张图按同一视觉接触校准：身体底边压在外圆上，尾巴/腿自然垂进圈内
   var owCatSink={siamese:26,dachshund:30,devon:70};
   function updateCompactTop(){
@@ -940,19 +958,19 @@ internal sealed class OverlayServer : IDisposable
     var ring=owRingPx, H=ring*1.31;
     var m=owCatMetrics[theme];
     if(!m){
+      owCat.style.visibility='hidden';
       var top = (hasKey(owCatTop,theme) ? owCatTop[theme]*ring : -ring*0.9) + owPetOffset;
       owCat.style.top = top.toFixed(1)+'px';
       owCat.style.transform='translateX(-50%)';
-      owCatVisibleTop = top;
       updateCompactTop();
       return;
     }
     var sink = hasKey(owCatSink, theme) ? owCatSink[theme] : 26;
     var elementTop = sink - m.bottom*H + owPetOffset;
+    owCat.style.visibility='visible';
     owCat.style.top = elementTop.toFixed(1)+'px';
     var shift = H/2 - (m.left+m.right)/2*H;
     owCat.style.transform='translateX(-50%) translateX('+shift.toFixed(1)+'px)';
-    owCatVisibleTop = elementTop + m.top*H;
     updateCompactTop();
   }
   function ensureCatMetrics(theme){
@@ -968,25 +986,16 @@ internal sealed class OverlayServer : IDisposable
         cx.drawImage(img,0,0);
         var d=cx.getImageData(0,0,cv.width,cv.height).data;
         var minX=cv.width,maxX=-1,minY=cv.height,maxY=-1;
-        var bottoms=[];
-        for(var x=0;x<cv.width;x++){
-          var colBottom=-1, colCount=0;
-          for(var y=0;y<cv.height;y++){
+        for(var y=0;y<cv.height;y++){
+          for(var x=0;x<cv.width;x++){
             if(d[(y*cv.width+x)*4+3]>32){
               if(x<minX)minX=x; if(x>maxX)maxX=x;
               if(y<minY)minY=y; if(y>maxY)maxY=y;
-              colBottom=y; colCount++;
             }
           }
-          // 只看身体中段（避开左右两侧的腿/尾巴），取中段底轮廓最高点作为「肚皮底边」
-          var inMiddle = (x >= minX + (maxX-minX)*0.28) && (x <= maxX - (maxX-minX)*0.28);
-          if(colBottom>=0 && colCount>=3 && inMiddle) bottoms.push(colBottom);
         }
         if(maxY>=0){
-          bottoms.sort(function(a,b){return a-b;});
-          // 底轮廓最高处（最小 y）：取 4% 分位，避开孤立噪点
-          var bellyY = bottoms.length ? bottoms[Math.max(0, Math.floor(bottoms.length*0.04))] : maxY;
-          owCatMetrics[theme]={left:minX/cv.width,right:(maxX+1)/cv.width,top:minY/cv.height,bottom:(maxY+1)/cv.height,belly:bellyY/cv.height};
+          owCatMetrics[theme]={left:minX/cv.width,right:(maxX+1)/cv.width,top:minY/cv.height,bottom:(maxY+1)/cv.height};
           if(lastOwTheme===theme) layoutCat(theme);
         }
       }catch(e){}
@@ -1010,12 +1019,8 @@ internal sealed class OverlayServer : IDisposable
     return '/assets/themes/' + theme + '.png?v=150';
   }
 
-  var owCompact=location.search.indexOf('compact')>=0;
-  var owAlign=location.search.indexOf('align')>=0;
-  function compactTop(ring, ringY, offset){
-    var petTop = ringY - ring/2 + ring*offset;
-    return -(petTop - 12);
-  }
+  var owCompact=/[?&]ow=compact(?:&|$)/.test(location.search);
+  var owAlign=/[?&]align=1(?:&|$)/.test(location.search);
   function resizeOw(){
     if(owCompact){
       owStage.className='ow-stage compact' + (owAlign ? ' align' : '');
@@ -1114,7 +1119,7 @@ internal sealed class OverlayServer : IDisposable
       var ring=Number(st.ringSize); if(!isFinite(ring)) ring=104; ring=Math.max(80,Math.min(140,ring));
       var ringY=Number(st.ringY); if(!isFinite(ringY)) ringY=925; ringY=Math.max(820,Math.min(1020,ringY));
       var urlPet=/[?&]pet=(-?\d+)/.exec(location.search);
-      var petOffset=urlPet?Number(urlPet[1]):Number(st.petOffset); if(!isFinite(petOffset)) petOffset=0; petOffset=Math.max(-80,Math.min(80,petOffset)); owPetOffset=petOffset;
+      var petOffset=urlPet?Number(urlPet[1]):Number(st.petOffset); if(!isFinite(petOffset)) petOffset=20; petOffset=Math.max(-80,Math.min(80,petOffset)); owPetOffset=petOffset;
       owStage.style.setProperty('--ow-ring', ring+'px');
       owStage.style.setProperty('--ow-ring-bottom', (1080 - ringY - ring/2)+'px');
       owRingPx = ring; owRingY = ringY;
@@ -1254,15 +1259,23 @@ internal sealed class OverlayServer : IDisposable
 </div>
 <script>
   var w=innerWidth,h=innerHeight,dpr=devicePixelRatio||1;
+  var compact=location.search.indexOf('compact')>=0;
   document.getElementById('size').textContent=w+' × '+h+'  (DPR '+dpr+')';
   var tip=document.getElementById('tip');
-  if(w>=1800&&h>=950){
+  if(compact){
+    if(w>=860&&w<=940&&h>=280){
+      tip.className='tip ok';
+      tip.textContent='✅ 紧凑源分辨率正常（推荐 900×320），直接拖到大招圆环上对齐即可。';
+    }else{
+      tip.textContent='⚠️ 紧凑源建议「宽度 / 高度」= 900 / 320（当前 '+w+'×'+h+'），否则对齐会偏。';
+    }
+  }else if(w>=1800&&h>=950){
     tip.className='tip ok';
     tip.textContent='✅ 渲染分辨率正常，守望先锋模式可以直接使用。';
   }else{
-    tip.textContent='⚠️ 当前浏览器源只有 '+w+'×'+h+' 像素。拖满 1920×1080 画布时会被放大，文字和卡片会发糊。请把浏览器源的「宽度 / 高度」改成 1920 / 1080，再铺满画布。';
+    tip.textContent='⚠️ 当前浏览器源只有 '+w+'×'+h+' 像素。铺满 1920×1080 画布会被放大发糊：改成 1920 / 1080；守望先锋模式也可用紧凑源（?ow=compact，900×320）。';
   }
-  document.getElementById('extra').textContent='视频小窗源建议 480×270；经典/环状样式也建议 1920×1080（内容按边缘定位，不会变小）。守望先锋模式还可以用紧凑源：地址后面加 ?ow=compact，宽 900 高 320，直接拖到大招圆环上对齐，不用铺满全屏。';
+  document.getElementById('extra').textContent='视频小窗源建议 480×270；经典/环状桌面样式约 400×320；守望先锋紧凑源 900×320。直播姬：添加素材 → 浏览器，在属性里改宽度/高度。';
 </script>
 </body>
 </html>";

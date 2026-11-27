@@ -40,6 +40,15 @@ internal static class VideoCache
         }
     }
 
+    /// <summary>BV 号大小写敏感、Windows 文件名不敏感：用 hex 编码做文件名，避免大小写变体截断同一份缓存。</summary>
+    private static string FileNameFor(string bvid)
+    {
+        var bytes = Encoding.UTF8.GetBytes(bvid);
+        var hex = new StringBuilder(bytes.Length * 2);
+        foreach (var b in bytes) hex.Append(b.ToString("x2"));
+        return hex + ".mp4.part";
+    }
+
     public static VideoCacheEntry Get(string bvid)
     {
         if (string.IsNullOrWhiteSpace(bvid)) return null;
@@ -63,7 +72,7 @@ internal static class VideoCache
             entry = new VideoCacheEntry
             {
                 Bvid = bvid,
-                Path = Path.Combine(DirectoryPath, bvid + ".mp4.part")
+                Path = Path.Combine(DirectoryPath, FileNameFor(bvid))
             };
             Entries[bvid] = entry;
 
@@ -132,6 +141,17 @@ internal static class VideoCache
                 return;
             }
 
+            // 只接受 B 站 CDN 的 https 直链，避免被污染成 file:// 等 scheme
+            Uri uri;
+            if (!Uri.TryCreate(stream.Url, UriKind.Absolute, out uri) ||
+                uri.Scheme != Uri.UriSchemeHttps ||
+                !(uri.Host.EndsWith(".bilivideo.com", StringComparison.OrdinalIgnoreCase) ||
+                  uri.Host.EndsWith(".bilibili.com", StringComparison.OrdinalIgnoreCase)))
+            {
+                Fail(entry, "视频地址不合法");
+                return;
+            }
+
             var request = (HttpWebRequest)WebRequest.Create(stream.Url);
             request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
             request.Referer = "https://www.bilibili.com/";
@@ -167,6 +187,16 @@ internal static class VideoCache
                     {
                         Thread.Sleep((int)Math.Min(200, expectedMs - actualMs));
                     }
+                }
+
+                // 完整性校验：有 Content-Length 时必须读满；无长度时用实际字节数
+                if (entry.Total <= 0)
+                {
+                    lock (entry.Gate) entry.Total = written;
+                }
+                else if (written != entry.Total)
+                {
+                    throw new IOException("下载不完整 " + written + "/" + entry.Total);
                 }
 
                 file.Flush();
