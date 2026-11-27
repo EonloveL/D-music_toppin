@@ -290,6 +290,11 @@ internal sealed class OverlayServer : IDisposable
                     body = CheckPage;
                     contentType = "text/html; charset=utf-8";
                 }
+                else if (path == "/pets")
+                {
+                    body = SvgPet.Page;
+                    contentType = "text/html; charset=utf-8";
+                }
                 else
                 {
                     WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", "not found", includeBody);
