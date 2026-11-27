@@ -292,7 +292,7 @@ internal sealed class OverlayServer : IDisposable
                 }
                 else if (path == "/pets")
                 {
-                    body = SvgPet.Page;
+                    body = PetOverlay.Page;
                     contentType = "text/html; charset=utf-8";
                 }
                 else
