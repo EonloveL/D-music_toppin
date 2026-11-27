@@ -2068,6 +2068,10 @@ internal sealed class TrayApp : ApplicationContext
         menu.DropDownItems.Add(new ToolStripMenuItem("圆环放大 4px", null, (_, _) => AdjustRing(4, 0)));
         menu.DropDownItems.Add(new ToolStripMenuItem("圆环缩小 4px", null, (_, _) => AdjustRing(-4, 0)));
         menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(new ToolStripMenuItem("宠物上移 10px", null, (_, _) => AdjustPetOffset(-10)));
+        menu.DropDownItems.Add(new ToolStripMenuItem("宠物下移 10px", null, (_, _) => AdjustPetOffset(10)));
+        menu.DropDownItems.Add(new ToolStripMenuItem("宠物恢复默认位置", null, (_, _) => AdjustPetOffset(-_settings.OverlayPetOffset)));
+        menu.DropDownItems.Add(new ToolStripSeparator());
         menu.DropDownItems.Add(new ToolStripMenuItem("恢复默认（104px / Y 925）", null, (_, _) =>
             AdjustRing(104 - _settings.OverlayRingSize, 925 - _settings.OverlayRingY)));
         menu.DropDownOpening += (_, _) =>
@@ -2075,6 +2079,14 @@ internal sealed class TrayApp : ApplicationContext
             menu.Text = "守望先锋对位：" + _settings.OverlayRingSize + "px · Y " + _settings.OverlayRingY;
         };
         return menu;
+    }
+
+    private void AdjustPetOffset(int delta)
+    {
+        _settings.OverlayPetOffset = Math.Max(-80, Math.Min(80, _settings.OverlayPetOffset + delta));
+        _settings.Save();
+        RefreshOverlaySnapshot();
+        Logger.Write("overlay pet offset: " + _settings.OverlayPetOffset);
     }
 
     private void AdjustRing(int deltaSize, int deltaY)
@@ -3214,6 +3226,7 @@ internal sealed class TrayApp : ApplicationContext
             LyricsTheme = _settings.LyricsTheme ?? "siamese",
             RingSize = _settings.OverlayRingSize,
             RingY = _settings.OverlayRingY,
+            PetOffset = _settings.OverlayPetOffset,
             Style = _settings.Style,
             Show = np.HasSession && np.Title.Length > 0 && (_hud.Visible || _settings.Overlay)
         };

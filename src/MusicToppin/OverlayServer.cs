@@ -14,6 +14,9 @@ internal sealed class OverlayState
     /// <summary>守望先锋对位：圆环直径 / 中心 Y（1920×1080 画布像素）。</summary>
     public int RingSize = 104;
     public int RingY = 925;
+
+    /// <summary>宠物整体上下偏移（px，正数=下移）。</summary>
+    public int PetOffset;
     public int Style;
     public bool Playing;
     public double Position;
@@ -614,6 +617,7 @@ internal sealed class OverlayServer : IDisposable
         OverlayState.AppendString(builder, "theme", state.LyricsTheme ?? "siamese");
         builder.Append(",\"ringSize\":").Append(state.RingSize);
         builder.Append(",\"ringY\":").Append(state.RingY);
+        builder.Append(",\"petOffset\":").Append(state.PetOffset);
         OverlayState.AppendString(builder, "accent", state.Accent ?? "#FF3B30");
         OverlayState.AppendString(builder, "titleColor", state.TitleColor ?? "#F5F8FC");
         OverlayState.AppendString(builder, "artistColor", state.ArtistColor ?? "#9FB0C6");
@@ -916,6 +920,63 @@ internal sealed class OverlayServer : IDisposable
   var owFestAccent={spring:'#ff4d4d',xmas:'#4ddf88',halloween:'#ff9f43',midautumn:'#ffd666',valentine:'#ff6ba9'};
   // 宠物图透明留白不同：按内容底边只搭在圆环上沿计算 top（相对圆环直径）
   var owCatTop={siamese:-0.803,dachshund:-0.753,devon:-1.015};
+  var owRingPx=104, owRingY=925, owCatVisibleTop=null, owCatMetrics={}, owPetOffset=0;
+  // 尾巴长度不同：devon 长尾要更深地垂进圆环，身体才会压在环沿上
+  var owCatSink={siamese:16,dachshund:30,devon:95};
+  function updateCompactTop(){
+    if(!owCompact) return;
+    // 紧凑源里圆环位置保持固定（不随主题/猫图变化），这样切主题不用重新对位
+    owStage.style.top = (-(owRingY - owRingPx/2 - owRingPx*0.9 - 12)).toFixed(1) + 'px';
+  }
+  // 按 PNG 实际不透明内容定位：猫可见底边压在圆环上沿（overlap 像素），不同主题不用手调偏移
+  function layoutCat(theme){
+    var ring=owRingPx, H=ring*1.31;
+    var m=owCatMetrics[theme];
+    if(!m){
+      var top = (hasKey(owCatTop,theme) ? owCatTop[theme]*ring : -ring*0.9) + owPetOffset;
+      owCat.style.top = top.toFixed(1)+'px';
+      owCat.style.transform='translateX(-50%)';
+      owCatVisibleTop = top;
+      updateCompactTop();
+      return;
+    }
+    var overlap = hasKey(owCatSink, theme) ? owCatSink[theme] : 6;
+    var elementTop = overlap - m.bottom*H + owPetOffset;
+    owCat.style.top = elementTop.toFixed(1)+'px';
+    var shift = H/2 - (m.left+m.right)/2*H;
+    owCat.style.transform='translateX(-50%) translateX('+shift.toFixed(1)+'px)';
+    owCatVisibleTop = elementTop + m.top*H;
+    updateCompactTop();
+  }
+  function ensureCatMetrics(theme){
+    if(owCatMetrics[theme] || hasKey(owFestIcons, theme)) return;
+    var url=owThemeUrl(theme);
+    if(!url) return;
+    var img=new Image();
+    img.onload=function(){
+      try{
+        var cv=document.createElement('canvas');
+        cv.width=img.naturalWidth; cv.height=img.naturalHeight;
+        var cx=cv.getContext('2d');
+        cx.drawImage(img,0,0);
+        var d=cx.getImageData(0,0,cv.width,cv.height).data;
+        var minX=cv.width,maxX=-1,minY=cv.height,maxY=-1;
+        for(var y=0;y<cv.height;y++){
+          for(var x=0;x<cv.width;x++){
+            if(d[(y*cv.width+x)*4+3]>8){
+              if(x<minX)minX=x; if(x>maxX)maxX=x;
+              if(y<minY)minY=y; if(y>maxY)maxY=y;
+            }
+          }
+        }
+        if(maxY>=0){
+          owCatMetrics[theme]={left:minX/cv.width,right:(maxX+1)/cv.width,top:minY/cv.height,bottom:(maxY+1)/cv.height};
+          if(lastOwTheme===theme) layoutCat(theme);
+        }
+      }catch(e){}
+    };
+    img.src=url;
+  }
   var owFestIcons={
     spring:[['🏮',-53,-29],['🧨',50,-26],['🧧',44,47],['💮',-50,40],['✨',7,-50]],
     xmas:[['❄️',-53,-29],['🎄',50,-26],['🎁',44,47],['🔔',-50,40],['☃️',7,-50]],
@@ -1036,10 +1097,11 @@ internal sealed class OverlayServer : IDisposable
       // 对位微调：圆环直径 / 中心 Y（托盘「样式 → 守望先锋对位微调」）
       var ring=Number(st.ringSize); if(!isFinite(ring)) ring=104; ring=Math.max(80,Math.min(140,ring));
       var ringY=Number(st.ringY); if(!isFinite(ringY)) ringY=925; ringY=Math.max(820,Math.min(1020,ringY));
+      var petOffset=Number(st.petOffset); if(!isFinite(petOffset)) petOffset=0; petOffset=Math.max(-80,Math.min(80,petOffset)); owPetOffset=petOffset;
       owStage.style.setProperty('--ow-ring', ring+'px');
       owStage.style.setProperty('--ow-ring-bottom', (1080 - ringY - ring/2)+'px');
-      var catOffset = hasKey(owCatTop, theme) ? owCatTop[theme] : -0.9;
-      if(owCompact) owStage.style.top = compactTop(ring, ringY, catOffset) + 'px';
+      owRingPx = ring; owRingY = ringY;
+      layoutCat(theme);
 
       // 卡片背景透明度跟随「背景透明度」设置（与普通卡片一致）
       var op = Number(st.opacity);
@@ -1076,7 +1138,8 @@ internal sealed class OverlayServer : IDisposable
       if(theme !== lastOwTheme){
         lastOwTheme = theme;
         owDeco.innerHTML = '';
-        owCat.style.top = hasKey(owCatTop, theme) ? ((owCatTop[theme] * ring).toFixed(1) + 'px') : '';
+        layoutCat(theme);
+        ensureCatMetrics(theme);
         var icons = hasKey(owFestIcons, theme) ? owFestIcons[theme] : null;
         if(icons){
           owCat.classList.add('hidden');
