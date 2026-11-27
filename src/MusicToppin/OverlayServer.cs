@@ -71,7 +71,7 @@ internal sealed class OverlayState
         return builder.ToString();
     }
 
-    private static void AppendString(StringBuilder builder, string key, string value)
+    internal static void AppendString(StringBuilder builder, string key, string value)
     {
         if (builder.Length > 1) builder.Append(',');
         builder.Append('"').Append(key).Append("\":\"");
@@ -233,6 +233,21 @@ internal sealed class OverlayServer : IDisposable
                 {
                     body = VideoPage;
                     contentType = "text/html; charset=utf-8";
+                }
+                else if (path == "/lyrics/state")
+                {
+                    body = CurrentLyricsJson();
+                    contentType = "application/json; charset=utf-8";
+                }
+                else if (path == "/lyrics" || path == "/lyrics.html")
+                {
+                    body = LyricsPage;
+                    contentType = "text/html; charset=utf-8";
+                }
+                else if (path == "/assets/siamese-cat-small.png")
+                {
+                    ServeAsset(stream, "siamese-cat-small.png", "image/png", includeBody);
+                    return;
                 }
                 else if (path == "/ping")
                 {
@@ -430,7 +445,7 @@ internal sealed class OverlayServer : IDisposable
         }
     }
 
-    private static bool TryGetRangeStart(string range, out long start)
+    internal static bool TryGetRangeStart(string range, out long start)
     {
         start = 0;
         if (string.IsNullOrWhiteSpace(range)) return false;
@@ -446,7 +461,7 @@ internal sealed class OverlayServer : IDisposable
         return startText.Length > 0 && long.TryParse(startText, out start);
     }
 
-    private static bool TryParseRange(string range, long total, out long start, out long end)
+    internal static bool TryParseRange(string range, long total, out long start, out long end)
     {
         start = 0;
         end = total > 0 ? total - 1 : 0;
@@ -490,7 +505,7 @@ internal sealed class OverlayServer : IDisposable
     }
 
     /// <summary>只接受 BV1 + 10 位字母数字，避免任意字符串拼进 B 站接口。</summary>
-    private static bool IsValidBvid(string bvid)
+    internal static bool IsValidBvid(string bvid)
     {
         if (bvid == null || bvid.Length != 12) return false;
         if (bvid[0] != 'B' && bvid[0] != 'b') return false;
@@ -544,6 +559,98 @@ internal sealed class OverlayServer : IDisposable
         {
             Logger.Write("overlay state: " + ex.Message);
             return new OverlayState().ToJson();
+        }
+    }
+
+    private string CurrentLyricsJson()
+    {
+        OverlayState state = null;
+        try
+        {
+            state = _stateProvider == null ? null : _stateProvider();
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("overlay lyrics state: " + ex.Message);
+        }
+        if (state == null) state = new OverlayState();
+
+        var snap = LyricsService.Snapshot();
+        var builder = new StringBuilder();
+        builder.Append('{');
+        OverlayState.AppendString(builder, "key", snap.Key);
+        OverlayState.AppendString(builder, "title", string.IsNullOrEmpty(state.Title) ? snap.Title : state.Title);
+        OverlayState.AppendString(builder, "artist", string.IsNullOrEmpty(state.Artist) ? snap.Artist : state.Artist);
+        OverlayState.AppendString(builder, "requester", state.Requester ?? "");
+        OverlayState.AppendString(builder, "nextTitle", state.NextTitle ?? "");
+        OverlayState.AppendString(builder, "nextArtist", state.NextArtist ?? "");
+        builder.Append(",\"playing\":").Append(state.Playing ? "true" : "false");
+        builder.Append(",\"show\":").Append(snap.Lines.Count > 0 ? "true" : "false");
+        builder.Append(",\"position\":").Append(state.Position.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(",\"duration\":").Append(state.Duration.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(",\"queueCount\":").Append(state.QueueCount);
+        builder.Append(",\"version\":").Append(snap.Version);
+        builder.Append(",\"lines\":[");
+        for (var i = 0; i < snap.Lines.Count; i++)
+        {
+            var line = snap.Lines[i];
+            if (i > 0) builder.Append(',');
+            builder.Append("{\"t\":").Append(line.Time.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+            builder.Append(',');
+            OverlayState.AppendString(builder, "text", line.Text);
+            builder.Append('}');
+        }
+        builder.Append("]}");
+        return builder.ToString();
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> AssetCache =
+        new System.Collections.Concurrent.ConcurrentDictionary<string, byte[]>(StringComparer.Ordinal);
+
+    private static void ServeAsset(Stream client, string name, string contentType, bool includeBody)
+    {
+        var bytes = AssetCache.GetOrAdd(name, n => LoadEmbeddedResource(n) ?? new byte[0]);
+        if (bytes == null || bytes.Length == 0)
+        {
+            WriteResponse(client, "404 Not Found", "text/plain; charset=utf-8", "not found", includeBody);
+            return;
+        }
+
+        var header =
+            "HTTP/1.1 200 OK\r\n" +
+            "Content-Type: " + contentType + "\r\n" +
+            "Content-Length: " + bytes.Length + "\r\n" +
+            "Cache-Control: public, max-age=86400\r\n" +
+            "Connection: close\r\n\r\n";
+        var headerBytes = Encoding.ASCII.GetBytes(header);
+        client.Write(headerBytes, 0, headerBytes.Length);
+        if (!includeBody) return;
+        client.Write(bytes, 0, bytes.Length);
+    }
+
+    private static byte[] LoadEmbeddedResource(string name)
+    {
+        try
+        {
+            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+            using (var stream = assembly.GetManifestResourceStream(name))
+            {
+                if (stream == null) return null;
+                var bytes = new byte[stream.Length];
+                var offset = 0;
+                while (offset < bytes.Length)
+                {
+                    var read = stream.Read(bytes, offset, bytes.Length - offset);
+                    if (read <= 0) break;
+                    offset += read;
+                }
+                return bytes;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("asset load: " + ex.Message);
+            return null;
         }
     }
 
@@ -837,6 +944,138 @@ internal sealed class OverlayServer : IDisposable
   }else{
     tick();setInterval(tick,600);
   }
+})();
+</script>
+</body>
+</html>";
+
+    /// <summary>
+    /// 歌词叠层：以 1920×1080 为画布，中央圆圈留空给直播姬/游戏画面，
+    /// 左侧播放信息、右侧歌词；主题图从嵌入资源读。
+    /// </summary>
+    private const string LyricsPage = @"<!DOCTYPE html>
+<html lang=""zh-CN"">
+<head>
+<meta charset=""utf-8"">
+<title>Music Toppin Lyrics</title>
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;background:transparent;overflow:hidden;font-family:""Microsoft YaHei UI"",""Segoe UI"",sans-serif;}
+  .stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#8fb8ff;}
+  .hud{position:absolute;left:0;right:0;bottom:0;height:210px;display:flex;align-items:center;justify-content:center;}
+  .circle{position:relative;width:148px;height:148px;border-radius:50%;}
+  .halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.12);box-shadow:0 0 18px color-mix(in srgb, var(--accent) 28%, transparent);}
+  .catimg{position:absolute;left:50%;top:-88px;transform:translateX(-50%);width:230px;height:230px;pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .card{position:absolute;bottom:34px;width:360px;padding:16px 18px;border-radius:18px;background:rgba(10,15,24,.70);
+        box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),0 10px 26px rgba(0,0,0,.38);
+        backdrop-filter:blur(4px);color:#eaf2ff;transition:opacity .2s;}
+  .left{left:440px;text-align:right;}
+  .right{left:1120px;text-align:left;}
+  .tag{font-size:12px;color:color-mix(in srgb, var(--accent) 75%, #9fb0c6);letter-spacing:1px;margin-bottom:6px;}
+  .title{font-size:25px;font-weight:700;line-height:1.25;margin-bottom:4px;}
+  .artist{font-size:16px;color:#a9bcd3;margin-bottom:10px;}
+  .meta{font-size:12px;color:#8ea1b8;margin-bottom:8px;}
+  .bar{height:4px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden;margin:8px 0 6px;}
+  .fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#ff8a5c);}
+  .time{font-size:12px;color:#9fb0c6;display:flex;justify-content:space-between;}
+  .lyric{font-size:18px;line-height:1.6;color:#eaf2ff;transition:opacity .18s, transform .18s;}
+  .lyric.next{opacity:.72;font-size:16px;margin-top:6px;}
+  .empty{position:absolute;left:0;right:0;bottom:0;height:210px;display:flex;align-items:center;justify-content:center;color:rgba(220,232,255,.35);font-size:14px;letter-spacing:2px;}
+  .hidden{display:none!important;}
+</style>
+</head>
+<body>
+<div class=""stage"" id=""stage"">
+  <div class=""hud"">
+    <div class=""circle"">
+      <div class=""halo""></div>
+      <img class=""catimg"" src=""/assets/siamese-cat-small.png"" alt="""">
+    </div>
+  </div>
+
+  <div class=""card left"" id=""leftCard"">
+    <div class=""tag"" id=""tag"">正在播放</div>
+    <div class=""title"" id=""title""></div>
+    <div class=""artist"" id=""artist""></div>
+    <div class=""meta"" id=""meta""></div>
+    <div class=""bar""><div class=""fill"" id=""fill""></div></div>
+    <div class=""time""><span id=""pos"">0:00</span><span id=""dur"">0:00</span></div>
+  </div>
+
+  <div class=""card right"" id=""rightCard"">
+    <div class=""tag"">当前歌词</div>
+    <div class=""lyric"" id=""lyric1""></div>
+    <div class=""lyric next"" id=""lyric2""></div>
+    <div class=""meta"" style=""margin-top:10px"" id=""next""></div>
+  </div>
+
+  <div class=""empty"" id=""empty"">没有歌词</div>
+</div>
+<script>
+(function(){
+  var stage=document.getElementById('stage');
+  function resize(){
+    var s=Math.min(innerWidth/1920,innerHeight/1080);
+    stage.style.transform='translate(-50%,-50%) scale('+s+')';
+  }
+  addEventListener('resize',resize); resize();
+
+  var empty=document.getElementById('empty');
+  var left=document.getElementById('leftCard');
+  var right=document.getElementById('rightCard');
+  var tag=document.getElementById('tag');
+  var title=document.getElementById('title');
+  var artist=document.getElementById('artist');
+  var meta=document.getElementById('meta');
+  var fill=document.getElementById('fill');
+  var pos=document.getElementById('pos');
+  var dur=document.getElementById('dur');
+  var lyric1=document.getElementById('lyric1');
+  var lyric2=document.getElementById('lyric2');
+  var next=document.getElementById('next');
+  var lastVersion=0;
+
+  function fmt(t){
+    t=Math.max(0,t||0);
+    var m=Math.floor(t/60), s=Math.floor(t%60);
+    return (m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+  }
+
+  function apply(st){
+    var show=!!st.show && (st.lines||[]).length>0;
+    empty.classList.add('hidden');
+    left.classList.toggle('hidden', !show && !st.title);
+    right.classList.toggle('hidden', !show);
+
+    tag.textContent = st.playing ? '正在播放' : '已暂停';
+    if(st.requester) tag.textContent += ' · 点歌人 ' + st.requester;
+    title.textContent = st.title || '';
+    artist.textContent = st.artist || '';
+    meta.textContent = '歌词叠层 · 主题：暹罗猫';
+    var p = st.duration > 0 ? Math.min(1, (st.position||0)/st.duration) : 0;
+    fill.style.width = (p*100).toFixed(1) + '%';
+    pos.textContent = fmt(st.position||0);
+    dur.textContent = fmt(st.duration||0);
+
+    if(!show){
+      lyric1.textContent='';
+      lyric2.textContent='';
+      next.textContent='';
+      return;
+    }
+
+    var lines=st.lines;
+    var idx=0;
+    for(var i=0;i<lines.length;i++){ if((lines[i].t||0) <= (st.position||0)) idx=i; }
+    lyric1.textContent=(st.position||0) < (lines[0].t||0) ? '' : (lines[idx].text||'');
+    lyric2.textContent=(idx+1<lines.length)?(lines[idx+1].text||''):'';
+    next.textContent = st.nextTitle ? ('下一首：' + st.nextTitle + (st.nextArtist ? ' · ' + st.nextArtist : '')) : '';
+    lastVersion = st.version || 0;
+  }
+
+  function tick(){
+    fetch('/lyrics/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});
+  }
+  tick(); setInterval(tick,500);
 })();
 </script>
 </body>

@@ -58,6 +58,12 @@ internal sealed class AppSettings
     /// <summary>视频点播的声音：1 = 跟随视频（音画同步），0 = 走应用播放器（默认，确保 OBS 有声）。</summary>
     public int VideoAudio;
 
+    /// <summary>是否允许 BV 视频点播（弹幕点歌 BV / 手动 BV 测试）。默认开启。</summary>
+    public bool VideoRequestEnabled = true;
+
+    /// <summary>是否开启歌词叠层（OBS 浏览器源 /lyrics）。</summary>
+    public bool LyricsOverlayEnabled;
+
     /// <summary>叠加层上次用的端口（0 = 没记录）。</summary>
     public int OverlayPort;
 
@@ -156,6 +162,8 @@ internal sealed class AppSettings
                 s.LiveToast = ReadInt(key, "LiveToast", 0) == 1;
                 s.PlayerVolume = ReadInt(key, "PlayerVolume", 60);
                 s.VideoAudio = ReadInt(key, "VideoAudio", 0);
+                s.VideoRequestEnabled = ReadInt(key, "VideoRequestEnabled", 1) == 1;
+                s.LyricsOverlayEnabled = ReadInt(key, "LyricsOverlayEnabled", 0) == 1;
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 1);
@@ -276,6 +284,8 @@ internal sealed class AppSettings
                 WriteInt(key, "LiveToast", LiveToast ? 1 : 0);
                 WriteInt(key, "PlayerVolume", PlayerVolume);
                 WriteInt(key, "VideoAudio", VideoAudio);
+                WriteInt(key, "VideoRequestEnabled", VideoRequestEnabled ? 1 : 0);
+                WriteInt(key, "LyricsOverlayEnabled", LyricsOverlayEnabled ? 1 : 0);
                 WriteInt(key, "OverlayPort", OverlayPort);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
                 WriteInt(key, "RequestPolicy", RequestPolicy);

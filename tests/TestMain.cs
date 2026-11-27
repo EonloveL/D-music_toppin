@@ -13,6 +13,8 @@ namespace MusicToppin.Tests
             QQMusicTests.Run();
             ResolverTests.Run();
             IniFileTests.Run();
+            LyricsTests.Run();
+            OverlayTests.Run();
             return TestRun.Summarize();
         }
     }

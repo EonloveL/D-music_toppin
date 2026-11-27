@@ -204,6 +204,8 @@ internal sealed class TrayApp : ApplicationContext
         _itemOccluded = new ToolStripMenuItem("遮挡模式（压在其他窗口后面）", null, (_, _) => ToggleOccluded()) { Checked = _settings.CaptureOccluded };
         _itemCopyOverlay = new ToolStripMenuItem("复制叠加层地址", null, (_, _) => CopyOverlayUrl("")) { Enabled = false };
         _itemCopyVideo = new ToolStripMenuItem("复制视频小窗地址", null, (_, _) => CopyOverlayUrl("video")) { Enabled = false };
+        _itemLyricsOverlay = new ToolStripMenuItem("歌词叠层（暹罗猫）", null, (_, _) => ToggleLyricsOverlay()) { Checked = _settings.LyricsOverlayEnabled };
+        _itemCopyLyrics = new ToolStripMenuItem("复制歌词叠层地址", null, (_, _) => CopyOverlayUrl("lyrics")) { Enabled = false };
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -231,6 +233,8 @@ internal sealed class TrayApp : ApplicationContext
         _volumeMenu = BuildVolumeMenu();
         controlsMenu.DropDownItems.Add(_volumeMenu);
         controlsMenu.DropDownItems.Add(BuildVideoAudioMenu());
+        _itemVideoRequest = new ToolStripMenuItem("视频点播（BV 点歌）", null, (_, _) => ToggleVideoRequest()) { Checked = _settings.VideoRequestEnabled };
+        controlsMenu.DropDownItems.Add(_itemVideoRequest);
         _itemSafeMedia = new ToolStripMenuItem("反作弊保守模式（禁用媒体键切歌）", null, (_, _) => ToggleMediaKeys()) { Checked = _settings.DisableMediaKeys };
         controlsMenu.DropDownItems.Add(new ToolStripSeparator());
         controlsMenu.DropDownItems.Add(_itemSafeMedia);
@@ -262,6 +266,8 @@ internal sealed class TrayApp : ApplicationContext
             _itemOverlay,
             _itemCopyOverlay,
             _itemCopyVideo,
+            _itemLyricsOverlay,
+            _itemCopyLyrics,
             _itemOffscreen,
             _itemOccluded,
             _itemAutoStart,
@@ -332,7 +338,7 @@ internal sealed class TrayApp : ApplicationContext
 
         var playBv = Environment.GetCommandLineArgs()
             .FirstOrDefault(a => a.StartsWith("--play-bv=", StringComparison.OrdinalIgnoreCase));
-        if (playBv != null)
+        if (playBv != null && _settings.VideoRequestEnabled)
         {
             var bvid = playBv.Substring("--play-bv=".Length).Trim();
             if (bvid.Length > 0)
@@ -554,6 +560,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemCheckUpdate;
     private ToolStripMenuItem _itemPlayBv;
     private ToolStripMenuItem _itemStopPlay;
+    private ToolStripMenuItem _itemVideoRequest;
     private ToolStripMenuItem _liveStatus;
     private ToolStripMenuItem _itemLiveConnect;
     private ToolStripMenuItem _itemLiveDisconnect;
@@ -564,6 +571,8 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _volumeMenu;
     private ToolStripMenuItem _itemCopyOverlay;
     private ToolStripMenuItem _itemCopyVideo;
+    private ToolStripMenuItem _itemLyricsOverlay;
+    private ToolStripMenuItem _itemCopyLyrics;
     private ToolStripMenuItem _itemSkipPolicy;
     private ToolStripMenuItem _itemRequestPolicy;
     private ToolStripMenuItem _permissionMenu;
@@ -1036,6 +1045,12 @@ internal sealed class TrayApp : ApplicationContext
     }
     private void PromptAndPlayBv()
     {
+        if (!_settings.VideoRequestEnabled)
+        {
+            _tray.ShowBalloonTip(2600, "Music Toppin", "视频点播已关闭，可在托盘「播放控制 → 视频点播」里开启。", ToolTipIcon.Warning);
+            return;
+        }
+
         using (var prompt = new PromptDialog("播放 B 站视频", "输入 BV 号或视频链接（例如 BV1xx411c7mD）"))
         {
             if (prompt.ShowDialog(_hud) != DialogResult.OK) return;
@@ -1194,6 +1209,18 @@ internal sealed class TrayApp : ApplicationContext
 
         _service.SetOwnPlayback(np);
         RefreshOverlaySnapshot();
+        UpdateLyrics(song);
+    }
+
+    private void UpdateLyrics(ResolvedSong song)
+    {
+        if (!_settings.LyricsOverlayEnabled || song == null)
+        {
+            LyricsService.Clear();
+            return;
+        }
+
+        LyricsService.SetSong(song.Title, song.Artist, song.SourceLabel, song.PageUrl);
     }
 
     private void StopOwnPlayback(bool keepDisplayed = false)
@@ -1211,6 +1238,7 @@ internal sealed class TrayApp : ApplicationContext
         StopVideoTimer();
         _queue.ClearCurrent();
         try { if (_player != null) _ = _player.StopAsync(); } catch { }
+        LyricsService.Clear();
         if (!keepDisplayed && _service != null) _service.SetOwnPlayback(null);
         UpdateQueueMenu();
         UpdateDefaultPlaylistMenu();
@@ -1995,6 +2023,18 @@ internal sealed class TrayApp : ApplicationContext
         return menu;
     }
 
+    private void ToggleVideoRequest()
+    {
+        _settings.VideoRequestEnabled = !_settings.VideoRequestEnabled;
+        _itemVideoRequest.Checked = _settings.VideoRequestEnabled;
+        _settings.Save();
+        Logger.Write("video request: " + (_settings.VideoRequestEnabled ? "on" : "off"));
+
+        _tray.ShowBalloonTip(2200, "Music Toppin",
+            _settings.VideoRequestEnabled ? "已开启视频点播" : "已关闭视频点播（BV 点歌会被拒绝）",
+            ToolTipIcon.Info);
+    }
+
     private void SetVideoAudio(int mode)
     {
         _settings.VideoAudio = mode == 0 ? 0 : 1;
@@ -2559,6 +2599,14 @@ internal sealed class TrayApp : ApplicationContext
         // 点歌权限：所有人 / 粉丝团灯牌或舰长 / 仅舰长 / 关闭
         if (!CanUserRequestSong(message)) return;
 
+        if (request.IsVideo && !_settings.VideoRequestEnabled)
+        {
+            _lastRequestResult = "视频点播已关闭";
+            Logger.Write("song request denied: video off | " + message.UserName + ": " + message.Text);
+            ShowOverlayToast("主播已关闭视频点播");
+            return;
+        }
+
         var result = _queue.Enqueue(request, ignoreLimits: message.IsLocalTest);
         if (result.Accepted)
         {
@@ -3064,6 +3112,31 @@ internal sealed class TrayApp : ApplicationContext
         SetOverlayEnabled(!_settings.Overlay);
     }
 
+    private void ToggleLyricsOverlay()
+    {
+        _settings.LyricsOverlayEnabled = !_settings.LyricsOverlayEnabled;
+        _itemLyricsOverlay.Checked = _settings.LyricsOverlayEnabled;
+        _settings.Save();
+
+        if (_settings.LyricsOverlayEnabled)
+        {
+            StartOverlay(notify: false);
+            _itemCopyLyrics.Enabled = _overlay != null;
+            if (_activeSong != null)
+            {
+                LyricsService.SetSong(_activeSong.Title, _activeSong.Artist, _activeSong.SourceLabel, _activeSong.PageUrl);
+            }
+            Logger.Write("lyrics overlay: on");
+            _tray.ShowBalloonTip(3000, "Music Toppin", "歌词叠层已开启：" + (_overlay != null ? _overlay.Url + "lyrics" : ""), ToolTipIcon.Info);
+        }
+        else
+        {
+            _itemCopyLyrics.Enabled = false;
+            LyricsService.Clear();
+            Logger.Write("lyrics overlay: off");
+        }
+    }
+
     /// <summary>托盘和上屏向导共用：显式开启/关闭浏览器源叠加层。</summary>
     private void SetOverlayEnabled(bool enabled)
     {
@@ -3111,6 +3184,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _itemCopyOverlay.Enabled = true;
         _itemCopyVideo.Enabled = true;
+        _itemCopyLyrics.Enabled = _settings.LyricsOverlayEnabled;
         _itemCopyOverlay.Text = "复制叠加层地址（端口 " + _overlay.Port + "）";
         RefreshOverlaySnapshot();
 
@@ -3135,6 +3209,7 @@ internal sealed class TrayApp : ApplicationContext
         _overlay = null;
         _itemCopyOverlay.Enabled = false;
         _itemCopyVideo.Enabled = false;
+        _itemCopyLyrics.Enabled = false;
         _itemCopyOverlay.Text = "复制叠加层地址";
         Logger.Write("overlay server stopped");
     }

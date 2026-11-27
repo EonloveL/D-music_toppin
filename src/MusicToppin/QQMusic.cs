@@ -91,6 +91,20 @@ internal static class QQMusic
         };
     }
 
+    /// <summary>按 songmid 取歌词（LRC 文本）。</summary>
+    public static string GetLyric(string mid)
+    {
+        if (string.IsNullOrWhiteSpace(mid)) return null;
+
+        var url = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric.fcg?songmid=" + Uri.EscapeDataString(mid) +
+                  "&format=json&nobase64=1";
+        var json = Get(url);
+        if (string.IsNullOrEmpty(json)) return null;
+
+        var root = Json.Parse(json);
+        return root != null && root["lyric"] != null ? root["lyric"].AsString : null;
+    }
+
     /// <summary>读取 QQ 音乐歌单（默认歌单用）；只取元信息，播放时再逐首取 vkey。</summary>
     public static PlaylistData LoadPlaylist(string id)
     {

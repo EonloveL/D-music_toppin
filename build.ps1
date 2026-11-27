@@ -77,7 +77,7 @@ if (-not (Test-Path $icon)) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'src\MusicToppin\Assets\gen-icon.ps1')
 }
 
-Write-Host "== [2/5] 编译主程序（.NET Framework 4.8，产物约 335 KB）" -ForegroundColor Cyan
+Write-Host "== [2/5] 编译主程序（.NET Framework 4.8，产物约 480 KB）" -ForegroundColor Cyan
 $refs = @(Get-FrameworkRefArgs) + @(Get-WinmdRefArgs)
 
 $brotli = Join-Path $root 'src\MusicToppin\lib\BrotliSharpLib.dll'
@@ -102,6 +102,7 @@ $appArgs = @(
     "/out:`"$appExe`"",
     "/win32icon:`"$icon`"",
     "/win32manifest:`"$manifest`"",
+    "/resource:`"$(Join-Path $root 'src\MusicToppin\Assets\siamese-cat-small.png')`",siamese-cat-small.png",
     '/optimize+',
     '/debug-',
     '/platform:anycpu'

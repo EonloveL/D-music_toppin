@@ -126,6 +126,19 @@ internal static class Netease
         };
     }
 
+    /// <summary>按歌曲 id 取歌词（LRC 文本）。</summary>
+    public static string GetLyric(long id)
+    {
+        if (id <= 0) return null;
+        var url = "https://music.163.com/api/song/lyric?id=" + id + "&lv=1&kv=1&tv=-1";
+        var json = Get(url);
+        if (string.IsNullOrEmpty(json)) return null;
+
+        var root = Json.Parse(json);
+        var lrc = root != null ? root["lrc"] : null;
+        return lrc != null && lrc["lyric"] != null ? lrc["lyric"].AsString : null;
+    }
+
     /// <summary>读取网易云歌单（默认歌单用）；只取元信息，播放时再逐首取流。</summary>
     public static PlaylistData LoadPlaylist(string id)
     {

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>HUD 方案演示（能量圈 + 两侧信息 + 多主题）</title>
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;background:#0b0f16;overflow:hidden;font-family:"Microsoft YaHei UI","Segoe UI",sans-serif;}
+  .stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#59b7ff;}
+  .sky{position:absolute;inset:0;background:
+       radial-gradient(circle at 50% 30%, rgba(80,120,190,.20), transparent 42%),
+       linear-gradient(180deg,#17202c 0%,#101722 45%,#0b1018 100%);}
+  .ground{position:absolute;left:0;right:0;bottom:0;height:300px;background:linear-gradient(180deg,rgba(8,12,18,0) 0%,rgba(8,12,18,.72) 55%,rgba(6,9,14,.94) 100%);}
+  .crop{position:absolute;left:0;top:0;right:0;height:150px;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;color:#8ea0b8;font-size:20px;letter-spacing:2px;}
+  .safe{position:absolute;bottom:0;height:180px;background:rgba(255,70,70,.10);border:1px dashed rgba(255,90,90,.25);display:none;color:rgba(255,170,170,.75);font-size:14px;align-items:center;justify-content:center;}
+  .safe.l{left:0;width:430px;}
+  .safe.r{right:0;width:440px;}
+  .hud{position:absolute;left:0;right:0;bottom:0;height:210px;display:flex;align-items:center;justify-content:center;}
+  .circle{position:relative;width:148px;height:148px;border-radius:50%;}
+  .halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.10);box-shadow:0 0 18px color-mix(in srgb, var(--accent) 28%, transparent);}
+  .deco{position:absolute;left:50%;top:50%;color:#eaf2ff;text-shadow:0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
+        font-size:24px;opacity:.92;transition:all .2s;transform:translate(-50%,-50%);}
+  .catimg{position:absolute;left:50%;top:-88px;transform:translateX(-50%);width:230px;height:230px;pointer-events:none;
+       filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .card{position:absolute;bottom:34px;width:360px;padding:16px 18px;border-radius:18px;background:rgba(10,15,24,.70);
+        box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),0 10px 26px rgba(0,0,0,.38);
+        backdrop-filter:blur(4px);color:#eaf2ff;}
+  .pixel .card{border:2px solid var(--accent);border-radius:0;background-color:rgba(10,15,24,.82);
+        background-image:linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px),
+                         linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px);
+        background-size:8px 8px;
+        box-shadow:0 0 0 2px rgba(0,0,0,.45),0 0 18px var(--accent);
+        font-family:"Microsoft YaHei UI","Consolas",monospace;}
+  .pixel .card .tag{letter-spacing:2px;}
+  .pixel .halo{display:none;}
+  .pxring{position:absolute;left:50%;top:50%;width:6px;height:6px;background:var(--accent);
+          box-shadow:0 0 8px var(--accent);transform:translate(-50%,-50%);}
+  .left{left:440px;text-align:right;}
+  .right{left:1120px;text-align:left;}
+  .tag{font-size:12px;color:color-mix(in srgb, var(--accent) 75%, #9fb0c6);letter-spacing:1px;margin-bottom:6px;}
+  .title{font-size:25px;font-weight:700;line-height:1.25;margin-bottom:4px;}
+  .artist{font-size:16px;color:#a9bcd3;margin-bottom:10px;}
+  .meta{font-size:12px;color:#8ea1b8;margin-bottom:8px;}
+  .bar{height:4px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden;margin:8px 0 6px;}
+  .fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#ff8a5c);}
+  .time{font-size:12px;color:#9fb0c6;display:flex;justify-content:space-between;}
+  .lyric{font-size:18px;line-height:1.6;color:#eaf2ff;}
+  .lyric.next{opacity:.72;font-size:16px;margin-top:6px;}
+  .themes{position:absolute;right:26px;top:18px;display:flex;gap:8px;flex-wrap:wrap;max-width:520px;justify-content:flex-end;}
+  .themeBtn{padding:6px 12px;border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(255,255,255,.05);color:#eaf2ff;cursor:pointer;font-size:13px;}
+  .themeBtn.on{background:color-mix(in srgb, var(--accent) 28%, transparent);border-color:color-mix(in srgb, var(--accent) 65%, transparent);}
+  .ctrl{position:absolute;left:24px;bottom:22px;color:#9fb0c6;font-size:12px;line-height:1.8;}
+  .btn{margin-left:6px;padding:5px 10px;border:1px solid rgba(255,255,255,.16);border-radius:8px;background:rgba(255,255,255,.06);color:#eaf2ff;cursor:pointer;font-size:12px;}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="sky"></div>
+  <div class="ground"></div>
+  <div class="crop">视频画面裁边后铺满 1920×1080 的中区示意</div>
+  <div class="safe l" id="safeL">守望先锋 · 血量/状态区（不遮挡）</div>
+  <div class="safe r" id="safeR">守望先锋 · 技能区（不遮挡）</div>
+
+  <div class="themes" id="themes"></div>
+
+  <div class="card left">
+    <div class="tag">正在播放 · 点歌人 演示观众</div>
+    <div class="title">Lemon</div>
+    <div class="artist">米津玄師</div>
+    <div class="meta">网易云 · 320k · 队列 3</div>
+    <div class="bar"><div class="fill" id="fill"></div></div>
+    <div class="time"><span id="pos">0:00</span><span id="dur">4:17</span></div>
+  </div>
+
+  <div class="hud">
+    <div class="circle" id="circle">
+      <div class="halo"></div>
+    </div>
+  </div>
+
+  <div class="card right">
+    <div class="tag">当前歌词</div>
+    <div class="lyric" id="lyric1">胸に残り離れない 苦いレモンの匂い</div>
+    <div class="lyric next" id="lyric2">雨が降り止むまでは帰れない</div>
+    <div class="meta" style="margin-top:10px">下一首：起风了 · 买辣椒也用券</div>
+  </div>
+
+  <div class="ctrl">
+    预览控件：<button class="btn" onclick="toggle()">暂停/继续</button><button class="btn" onclick="resetDemo()">重播</button>
+    <label style="margin-left:12px"><input type="checkbox" id="showSafe" onchange="toggleSafe(this.checked)"> 显示安全区</label>
+  </div>
+</div>
+
+<script>
+var themes = {
+  def:      {name:'默认', accent:'#59b7ff', icons:[['✦',-74,-40],['☁',70,-36],['🐾',62,66],['🎀',-70,56],['✧',10,-70]]},
+  spring:   {name:'春节', accent:'#ff4d4d', icons:[['🏮',-74,-40],['🧨',70,-36],['🧧',62,66],['💮',-70,56],['✨',10,-70]]},
+  xmas:     {name:'圣诞', accent:'#4ddf88', icons:[['❄',-74,-40],['🎄',70,-36],['🎁',62,66],['🔔',-70,56],['☃',10,-70]]},
+  halloween:{name:'万圣', accent:'#ff9f43', icons:[['🎃',-74,-40],['🦇',70,-36],['👻',62,66],['🍬',-70,56],['✦',10,-70]]},
+  midautumn:{name:'中秋', accent:'#ffd666', icons:[['🌕',-74,-40],['🐇',70,-36],['🥮',62,66],['🌙',-70,56],['✨',10,-70]]},
+  valentine:{name:'情人', accent:'#ff6ba9', icons:[['💗',-74,-40],['💘',70,-36],['🌹',62,66],['💝',-70,56],['✨',10,-70]]},
+  pixel:    {name:'8bit', accent:'#4dff7a', icons:[['👾',-74,-40],['🍄',70,-36],['❤️',62,66],['⭐',-70,56],['⚡',10,-70]]},
+  siamese:  {name:'暹罗猫', accent:'#8fb8ff', icons:[['🐈',-74,-40],['🐾',70,-36],['🥛',62,66],['🐟',-70,56],['💙',10,-70]]}
+};
+var currentTheme='def';
+function buildThemes(){
+  var box=document.getElementById('themes');
+  box.innerHTML='';
+  Object.keys(themes).forEach(function(k){
+    var b=document.createElement('button');
+    b.className='themeBtn'+(k===currentTheme?' on':'');
+    b.textContent=themes[k].name;
+    b.onclick=function(){setTheme(k);};
+    box.appendChild(b);
+  });
+}
+function siameseCatImg(){
+  return '<img class="catimg" src="assets/siamese-cat-small.png" alt="">';
+}
+function setTheme(k){
+  currentTheme=k;
+  var t=themes[k];
+  var stage=document.getElementById('stage');
+  stage.style.setProperty('--accent',t.accent);
+  stage.classList.toggle('pixel', k==='pixel');
+  var circle=document.getElementById('circle');
+  Array.prototype.slice.call(circle.querySelectorAll('.deco')).forEach(function(d){d.remove();});
+  Array.prototype.slice.call(circle.querySelectorAll('.pxring')).forEach(function(d){d.remove();});
+  var oldCat=circle.querySelector('.cat');
+  if(oldCat) oldCat.remove();
+  t.icons.forEach(function(ic){
+    var d=document.createElement('div');
+    d.className='deco';
+    d.textContent=ic[0];
+    d.style.transform='translate(-50%,-50%) translate(' + ic[1] + 'px,' + ic[2] + 'px)';
+    circle.appendChild(d);
+  });
+  if(k==='siamese') circle.insertAdjacentHTML('beforeend', siameseCatImg());
+  if(k==='pixel') addPixelRing(circle);
+  buildThemes();
+}
+function addPixelRing(circle){
+  var n=12, r=74;
+  for(var i=0;i<n;i++){
+    var a=i*Math.PI*2/n;
+    var d=document.createElement('div');
+    d.className='pxring';
+    d.style.transform='translate(-50%,-50%) translate(' + Math.round(Math.cos(a)*r) + 'px,' + Math.round(Math.sin(a)*r) + 'px) rotate(45deg)';
+    circle.appendChild(d);
+  }
+}
+function toggleSafe(v){
+  document.getElementById('safeL').style.display=v?'flex':'none';
+  document.getElementById('safeR').style.display=v?'flex':'none';
+}
+function resize(){
+  var s=Math.min(innerWidth/1920,innerHeight/1080);
+  document.getElementById('stage').style.transform='translate(-50%,-50%) scale('+s+')';
+}
+addEventListener('resize',resize);resize();
+var paused=false,start=performance.now(),base=0;
+function tick(){
+  if(!paused){
+    var t=base+(performance.now()-start)/1000;
+    var p=Math.min(1,t/257);
+    document.getElementById('fill').style.width=(p*100).toFixed(1)+'%';
+    var m=Math.floor(p*257/60),s=Math.floor(p*257%60);
+    document.getElementById('pos').textContent=m+':'+(s<10?'0':'')+s;
+  }
+  requestAnimationFrame(tick);
+}
+function toggle(){paused=!paused;if(paused){base+=(performance.now()-start)/1000;}else{start=performance.now();}}
+function resetDemo(){base=0;start=performance.now();paused=false;}
+buildThemes();setTheme('def');tick();
+</script>
+</body>
+</html>
