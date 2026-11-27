@@ -71,7 +71,7 @@ internal sealed class AppSettings
     public int OverlayRingY = 925;
 
     /// <summary>守望先锋模式宠物整体上下偏移（px，正数=下移）。</summary>
-    public int OverlayPetOffset;
+    public int OverlayPetOffset = 20;
 
     /// <summary>叠加层上次用的端口（0 = 没记录）。</summary>
     public int OverlayPort;
@@ -177,7 +177,7 @@ internal sealed class AppSettings
                 s.LyricsTheme = ReadString(key, "LyricsTheme", "siamese");
                 s.OverlayRingSize = Math.Max(80, Math.Min(140, ReadInt(key, "OverlayRingSize", 104)));
                 s.OverlayRingY = Math.Max(820, Math.Min(1020, ReadInt(key, "OverlayRingY", 925)));
-        s.OverlayPetOffset = Math.Max(-80, Math.Min(80, ReadInt(key, "OverlayPetOffset", 0)));
+        s.OverlayPetOffset = Math.Max(-80, Math.Min(80, ReadInt(key, "OverlayPetOffset", 20)));
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 1);
