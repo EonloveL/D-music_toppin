@@ -88,8 +88,14 @@ internal sealed class TrayApp : ApplicationContext
                      ", qq=" + (QQMusic.IsLoggedIn ? "logged in" : "guest"));
 
         _hud = new HudForm();
-        _hud.SetCompact(_settings.Compact);
-        _hud.SetRing(_settings.Ring);
+        _hud.SetCompact(_settings.Compact && _settings.Style == 1);
+        _hud.SetRing(_settings.Ring || _settings.Style == 2);
+        _hud.SetVinyl(_settings.Style == 4);
+        if (_settings.Style == 4 && string.IsNullOrEmpty(_settings.Anchor))
+        {
+            _settings.Anchor = "top";
+            _settings.Save();
+        }
         _hud.SetGreen(_settings.Green);
         _hud.SetLocked(_settings.Locked);
         _hud.SetEditing(!_settings.Locked);
@@ -129,7 +135,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemCompact = new ToolStripMenuItem("极简", null, (_, _) => SetStyle(1)) { Checked = _settings.Style == 1 };
         _itemRing = new ToolStripMenuItem("环状毛玻璃（新）", null, (_, _) => SetStyle(2)) { Checked = _settings.Style == 2 };
         _itemOverwatch = new ToolStripMenuItem("守望先锋模式（显示歌词）", null, (_, _) => SetStyle(3)) { Checked = _settings.Style == 3 };
-        _itemVinyl = new ToolStripMenuItem("黑胶卡片（浏览器源）", null, (_, _) => SetStyle(4)) { Checked = _settings.Style == 4 };
+        _itemVinyl = new ToolStripMenuItem("黑胶卡片", null, (_, _) => SetStyle(4)) { Checked = _settings.Style == 4 };
         _itemAutoStart = new ToolStripMenuItem("开机自启", null, (_, _) => ToggleAutoStart()) { Checked = _settings.AutoStart };
 
         _itemWizard = new ToolStripMenuItem("上屏向导…", null, (_, _) => ShowWizard());
@@ -225,8 +231,10 @@ internal sealed class TrayApp : ApplicationContext
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("右上", null, (_, _) => MoveHudTo("tr")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("左下", null, (_, _) => MoveHudTo("bl")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("右下", null, (_, _) => MoveHudTo("br")));
+        positionMenu.DropDownItems.Add(new ToolStripMenuItem("顶部居中", null, (_, _) => MoveHudTo("top")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("左侧", null, (_, _) => MoveHudTo("left")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("右侧", null, (_, _) => MoveHudTo("right")));
+        positionMenu.DropDownItems.Add(new ToolStripMenuItem("顶部居中", null, (_, _) => MoveHudTo("top")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("屏幕居中", null, (_, _) => MoveHudTo("center")));
         positionMenu.DropDownItems.Add(new ToolStripSeparator());
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("自由拖动：先按快捷键解锁") { Enabled = false });
@@ -952,6 +960,7 @@ internal sealed class TrayApp : ApplicationContext
             int x, y;
             switch (anchor)
             {
+                case "top": x = area.Left + (area.Width - w) / 2; y = area.Top + margin; break;
                 case "tl": x = area.Left + margin; y = area.Top + 90; break;
                 case "tr": x = area.Right - w - margin; y = area.Top + 90; break;
                 case "bl": x = area.Left + margin; y = area.Bottom - h - margin; break;
@@ -3700,7 +3709,7 @@ internal sealed class TrayApp : ApplicationContext
 
     private static bool BrowserOnly(int style)
     {
-        return style == 3 || style == 4;
+        return style == 3;
     }
 
     private void SetStyle(int style)
@@ -3709,6 +3718,7 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Style = style;
         _hud.SetCompact(style == 1);
         _hud.SetRing(style == 2);
+        _hud.SetVinyl(style == 4);
         _itemCompact.Checked = style == 1;
         _itemKillfeed.Checked = style == 0;
         _itemRing.Checked = style == 2;
@@ -3742,10 +3752,8 @@ internal sealed class TrayApp : ApplicationContext
             }
             if (overlayAlreadyOn)
             {
-                var msg = style == 3
-                    ? "守望先锋模式：歌词只在这个样式里显示，桌面浮窗已自动隐藏。\n请在 OBS 用浏览器源显示（宽 1920 高 1080）："
-                    : "黑胶卡片：只在浏览器源里显示，桌面浮窗已自动隐藏。\n浏览器源宽约 440、高约 240：";
-                _tray.ShowBalloonTip(4000, "Music Toppin", msg + (_overlay != null ? _overlay.Url : ""),
+                _tray.ShowBalloonTip(4000, "Music Toppin",
+                    "守望先锋模式：歌词只在这个样式里显示，桌面浮窗已自动隐藏。\n请在 OBS 用浏览器源显示（宽 1920 高 1080）：" + (_overlay != null ? _overlay.Url : ""),
                     ToolTipIcon.Info);
             }
         }
@@ -3759,6 +3767,27 @@ internal sealed class TrayApp : ApplicationContext
                 ShowHud();
                 _hud.SetState(_latest, animate: false);
             }
+        }
+
+        if (style == 4)
+        {
+            // 黑胶卡片是桌面浮窗样式：默认放在屏幕上方，可拖动；同时叠加层页面也能显示同一个卡片
+            if (!_settings.Visible)
+            {
+                _settings.Visible = true;
+                _settings.Save();
+            }
+            if (string.IsNullOrEmpty(_settings.Anchor) || _settings.Anchor == "center")
+            {
+                _settings.Anchor = "top";
+                _settings.Save();
+            }
+            if (!_hud.Visible) ShowHud();
+            _hud.SetState(_latest, animate: false);
+            MoveHudTo("top", fromUser: false);
+            _tray.ShowBalloonTip(4000, "Music Toppin",
+                "黑胶卡片：桌面浮窗在屏幕上方，先在托盘关闭「锁定浮窗」即可拖动换位置；如需浏览器源，开启「直播叠加层」后用同一地址，源宽 440 高 240。",
+                ToolTipIcon.Info);
         }
 
         _itemShow.Checked = _hud.Visible;

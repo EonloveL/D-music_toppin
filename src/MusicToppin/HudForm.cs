@@ -56,6 +56,7 @@ internal sealed class HudForm : Form
     private NowPlaying _state = NowPlaying.Empty;
     private bool _compact;
     private bool _ring;
+    private bool _vinyl;
     private int _ringSide = 1;
     private bool _ringReverse;
     private bool _classicLeft;
@@ -195,6 +196,18 @@ internal sealed class HudForm : Form
         if (_ring == ring) return;
         _ring = ring;
         Render();
+    }
+
+    public void SetVinyl(bool vinyl)
+    {
+        if (_vinyl == vinyl) return;
+        _vinyl = vinyl;
+        Render();
+    }
+
+    public bool IsVinyl
+    {
+        get { return _vinyl; }
     }
 
     /// <summary>环状样式的方向：0 上、1 下、2 左、3 右。圆心在对应屏幕外侧。</summary>
@@ -398,10 +411,19 @@ internal sealed class HudForm : Form
             var s = Scale;
             HudLayout layout = null;
             RingLayout ringLayout = null;
+            VinylLayout vinylLayout = null;
             int width;
             int height;
 
-            if (_ring)
+            if (_vinyl)
+            {
+                vinylLayout = HudRenderer.MeasureVinyl(s);
+                width = vinylLayout.Width;
+                height = vinylLayout.Height;
+                _layout = null;
+                _ringLayout = null;
+            }
+            else if (_ring)
             {
                 ringLayout = HudRenderer.MeasureRing(_measureG, s, _state, _ringSide);
                 width = ringLayout.Width;
@@ -427,7 +449,11 @@ internal sealed class HudForm : Form
             using (var g = Graphics.FromImage(_bmp))
             {
                 g.Clear(Color.Transparent);
-                if (_ring)
+                if (_vinyl)
+                {
+                    HudRenderer.DrawVinyl(g, s, _state, vinylLayout, _green);
+                }
+                else if (_ring)
                 {
                     HudRenderer.DrawRing(g, s, _state, ringLayout, _green, _editing, _anim, _ringReverse);
                 }

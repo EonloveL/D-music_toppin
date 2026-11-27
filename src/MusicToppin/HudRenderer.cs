@@ -70,6 +70,22 @@ internal sealed class RingLayout
     public int QueueCount;
 }
 
+/// <summary>黑胶卡片布局：桌面浮窗与浏览器源共用同一套视觉（400×200 @ s=1）。</summary>
+internal sealed class VinylLayout
+{
+    public int Width;
+    public int Height;
+    public RectangleF Card;
+    public RectangleF Disc;
+    public RectangleF Title;
+    public RectangleF Artist;
+    public RectangleF Requester;
+    public RectangleF Bar;
+    public RectangleF TimePos;
+    public RectangleF TimeDur;
+    public RectangleF Next;
+}
+
 /// <summary>纯 GDI+ 绘制，无 GPU、无额外线程，只在内容变化时重绘。</summary>
 internal static class HudRenderer
 {
@@ -128,6 +144,9 @@ internal static class HudRenderer
 
     private static Font TitleFont(float s, bool compact) { return F("Microsoft YaHei UI", (compact ? 16f : 19f) * s, FontStyle.Bold); }
     private static Font ArtistFont(float s, bool compact) { return F("Microsoft YaHei UI", (compact ? 12.5f : 14f) * s, FontStyle.Regular); }
+    private static Font VinylTitleFont(float s) { return F("Microsoft YaHei UI", 20f * s, FontStyle.Bold); }
+    private static Font VinylArtistFont(float s) { return F("Microsoft YaHei UI", 13f * s, FontStyle.Regular); }
+    private static Font VinylSmallFont(float s) { return F("Microsoft YaHei UI", 11f * s, FontStyle.Regular); }
     private static Font RequesterFont(float s, bool compact) { return F("Microsoft YaHei UI", (compact ? 10.5f : 11.5f) * s, FontStyle.Regular); }
     private static Font TagFont(float s) { return F("Microsoft YaHei UI", 11f * s, FontStyle.Bold); }
     private static Font NavFont(float s) { return F("Microsoft YaHei UI", 12.5f * s, FontStyle.Regular); }
@@ -459,6 +478,124 @@ internal static class HudRenderer
         }
 
         return 10f * s + 14f * s + 5f * s + titleH + (artistH > 0f ? 3f * s + artistH : 0f) + 8f * s;
+    }
+
+    /// <summary>黑胶卡片：桌面浮窗尺寸（400×200 基准，按缩放 s 放大）。</summary>
+    public static VinylLayout MeasureVinyl(float s)
+    {
+        var l = new VinylLayout();
+        l.Width = (int)MF.Round(400f * s);
+        l.Height = (int)MF.Round(200f * s);
+        l.Card = new RectangleF(0, 0, l.Width, l.Height);
+        l.Disc = new RectangleF(14f * s, (l.Height - 140f * s) / 2f, 140f * s, 140f * s);
+        var x = 178f * s;
+        var w = l.Width - x - 16f * s;
+        l.Title = new RectangleF(x, 24f * s, w, 52f * s);
+        l.Artist = new RectangleF(x, 80f * s, w, 20f * s);
+        l.Requester = new RectangleF(x, 102f * s, w, 16f * s);
+        l.Bar = new RectangleF(x, 126f * s, w, 5f * s);
+        l.TimePos = new RectangleF(x, 138f * s, w / 2f, 14f * s);
+        l.TimeDur = new RectangleF(x + w / 2f, 138f * s, w / 2f, 14f * s);
+        l.Next = new RectangleF(x, 158f * s, w, 16f * s);
+        return l;
+    }
+
+    /// <summary>黑胶卡片绘制：圆盘按播放进度旋转，颜色跟随主题与背景透明度设置。</summary>
+    public static void DrawVinyl(Graphics g, float s, NowPlaying np, VinylLayout l, bool green)
+    {
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
+        var opacity = MF.Clamp(Theme.CardOpacity, 0.05f, 1f);
+        using (var path = RoundRect(l.Card, 24f * s))
+        {
+            using (var fill = new SolidBrush(green ? C_CardOpaque : HudTheme.WithAlpha(Theme.Card, (int)(255f * opacity))))
+                g.FillPath(fill, path);
+            using (var pen = new Pen(Color.FromArgb(56, Theme.Title), MF.Max(1f, s)))
+                g.DrawPath(pen, path);
+        }
+
+        // 黑胶盘 + 纹路 + 旋转标记（每 60 秒转一圈）
+        var disc = l.Disc;
+        var cx = disc.X + disc.Width / 2f;
+        var cy = disc.Y + disc.Height / 2f;
+        var r = disc.Width / 2f;
+        using (var b = new SolidBrush(Color.FromArgb(255, 18, 20, 26)))
+            g.FillEllipse(b, disc);
+
+        using (var pen = new Pen(Color.FromArgb(38, 255, 255, 255), MF.Max(1f, 1f * s)))
+        {
+            for (var i = 1; i <= 6; i++)
+            {
+                var rr = r - i * 8f * s;
+                if (rr <= 0) break;
+                g.DrawEllipse(pen, cx - rr, cy - rr, rr * 2f, rr * 2f);
+            }
+        }
+
+        var state = g.Save();
+        try
+        {
+            g.TranslateTransform(cx, cy);
+            g.RotateTransform((float)((np.Position.TotalSeconds * 6.0) % 360.0));
+            using (var pen = new Pen(Theme.Accent, MF.Max(2f, 2f * s)))
+                g.DrawLine(pen, 0, -r * 0.18f, 0, -r * 0.9f);
+        }
+        finally
+        {
+            g.Restore(state);
+        }
+
+        var labelR = r * 0.38f;
+        using (var b = new SolidBrush(Theme.Accent))
+            g.FillEllipse(b, cx - labelR, cy - labelR, labelR * 2f, labelR * 2f);
+        using (var b = new SolidBrush(Color.FromArgb(255, 10, 12, 16)))
+            g.FillEllipse(b, cx - labelR * 0.12f, cy - labelR * 0.12f, labelR * 0.24f, labelR * 0.24f);
+
+        using (var b = new SolidBrush(C_Title))
+        using (var fmt = new StringFormat { Trimming = StringTrimming.EllipsisWord, FormatFlags = StringFormatFlags.LineLimit })
+            g.DrawString(np.Title ?? "", VinylTitleFont(s), b, l.Title, fmt);
+
+        if (!string.IsNullOrWhiteSpace(np.Artist))
+        {
+            using (var b = new SolidBrush(C_Artist))
+            using (var fmt = EllipsisFormat())
+                g.DrawString(np.Artist, VinylArtistFont(s), b, l.Artist, fmt);
+        }
+
+        if (!string.IsNullOrWhiteSpace(np.Requester))
+        {
+            using (var b = new SolidBrush(C_Requester))
+            using (var fmt = EllipsisFormat())
+                g.DrawString("点歌人：" + np.Requester, VinylSmallFont(s), b, l.Requester, fmt);
+        }
+
+        using (var b = new SolidBrush(Color.FromArgb(36, 255, 255, 255)))
+            g.FillRectangle(b, l.Bar);
+
+        if (np.HasTimeline && np.Duration > TimeSpan.Zero)
+        {
+            var progress = MF.Clamp((float)(np.Position.TotalSeconds / np.Duration.TotalSeconds), 0f, 1f);
+            if (progress > 0f)
+            {
+                using (var b = new SolidBrush(Theme.Accent))
+                    g.FillRectangle(b, l.Bar.X, l.Bar.Y, l.Bar.Width * progress, l.Bar.Height);
+            }
+
+            using (var b = new SolidBrush(C_Muted))
+            using (var fmt = EllipsisFormat())
+                g.DrawString(Fmt(np.Position), VinylSmallFont(s), b, l.TimePos, fmt);
+            using (var b = new SolidBrush(C_Muted))
+            using (var fmt = EllipsisFormat(StringAlignment.Far))
+                g.DrawString(Fmt(np.Duration), VinylSmallFont(s), b, l.TimeDur, fmt);
+        }
+
+        if (!string.IsNullOrWhiteSpace(np.NextTitle))
+        {
+            var suffix = np.QueueCount > 1 ? "（队列 " + np.QueueCount + "）" : "";
+            using (var b = new SolidBrush(C_Muted))
+            using (var fmt = EllipsisFormat())
+                g.DrawString("下一首：" + np.NextTitle + suffix, VinylSmallFont(s), b, l.Next, fmt);
+        }
     }
 
     public static void DrawRing(Graphics g, float s, NowPlaying np, RingLayout layout, bool green, bool editing, float anim, bool reverse)
