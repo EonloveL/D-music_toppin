@@ -127,6 +127,7 @@ function setTheme(k){
   Array.prototype.slice.call(circle.querySelectorAll('.pxring')).forEach(function(d){d.remove();});
   var oldCat=circle.querySelector('.cat');
   if(oldCat) oldCat.remove();
+  Array.prototype.slice.call(circle.querySelectorAll('.catimg')).forEach(function(d){d.remove();});
   t.icons.forEach(function(ic){
     var d=document.createElement('div');
     d.className='deco';

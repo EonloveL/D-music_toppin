@@ -36,7 +36,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 
 ### 2. 版本号与更新日志
 
-已补 `src/MusicToppin/VersionInfo.cs`（当前 `AssemblyVersion 1.4.6.0`），安装器常量同步为 `1.4.6`。
+已补 `src/MusicToppin/VersionInfo.cs`（当前 `AssemblyVersion 1.4.7.0`），安装器常量同步为 `1.4.7`。
 每次发版改这几处：`src/MusicToppin/VersionInfo.cs`、`installer/Installer.cs` 的 `Version`、`CHANGELOG.md`（`MusicToppin.csproj` 仅历史兼容，顺手同步即可）。
 
 ### 3. 杀软白名单（决定"装完还能不能跑"）
@@ -64,7 +64,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 | 渠道 | 作用 | 优点 | 代价 |
 |---|---|---|---|
 | **自己的落地页**（主） | 下载 + 教程 + 更新说明 | 完全可控、可埋统计、可放 30 秒上手视频 | 要域名/备案（国内服务器） |
-| **蓝奏云**（备） | 国内免登录直链 | 约 932 KB 秒传秒下，最适合小白 | 单文件 100MB 内、偶尔限速 |
+| **蓝奏云**（备） | 国内免登录直链 | 约 956 KB 秒传秒下，最适合小白 | 单文件 100MB 内、偶尔限速 |
 | **GitHub Releases** | 更新源 + 技术用户 | 免费、有 API、可放校验值 | 国内访问慢，需镜像 |
 | **QQ 群 / 微信群** | 种子用户、反馈 | 传播快、能直接收到崩溃反馈 | 人工维护 |
 | **winget** | 技术受众 | `winget install` 一条命令 | 需 PR 到 winget-pkgs，审核慢 |
@@ -93,7 +93,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 
 ```json
 {
-  "version": "1.4.6",
+  "version": "1.4.7",
   "url": "https://example.com/musictoppin/MusicToppin-Setup.exe",
   "sha256": "7F906ADE…",
   "notes": "修复：解锁后立即回锁\n新增：背景透明度"
@@ -120,7 +120,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 4. 手测：安装 → 首启向导 → 播放显示 → 穿透 → 卸载
 5. 签名 `MusicToppin.exe`（重新打包）→ 签名 `MusicToppin-Setup.exe`
 6. `Get-FileHash build\MusicToppin-Setup.exe -Algorithm SHA256`
-7. 在版本提交上打 tag（`git tag -a v1.4.6 -m "Music Toppin v1.4.6"`），推送 `main` 和 tag
+7. 在版本提交上打 tag（`git tag -a v1.4.7 -m "Music Toppin v1.4.7"`），推送 `main` 和 tag
 8. GitHub Release：必须已发布（不能 draft / prerelease），确认成为 Latest；只上传一个 `MusicToppin-Setup*.exe`，并确认资产 `digest` 为 `sha256:…` 非空
 9. 上传：落地页 + 蓝奏云 + GitHub Release（附 changelog 与 SHA256）
 10. 发公告（B 站动态 / QQ 群），配一段 30 秒「三步上屏」演示
@@ -133,7 +133,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 
 > **Music Toppin** —— 开播时自动把「正在播放」显示在画面上。
 >
-> 约 932 KB，免安装运行时，支持网易云 / QQ音乐 / Apple Music / Spotify / 浏览器。
+> 约 956 KB，免安装运行时，支持网易云 / QQ音乐 / Apple Music / Spotify / 浏览器。
 >
 > 1. 双击安装
 > 2. 打开你常用的音乐软件放歌
@@ -156,4 +156,4 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 | 平台规则 | — | 直播间挂链接有风险，走粉丝群/简介 |
 | 版权 | — | 只显示元信息，不碰音源；若 V2 内置播放要另外评估 |
 
-**体积是优势**：约 932 KB 的安装包在群文件、网盘、邮件里都几乎瞬传，比动辄 70 MB 的 Electron 方案更容易传播。
+**体积是优势**：约 956 KB 的安装包在群文件、网盘、邮件里都几乎瞬传，比动辄 70 MB 的 Electron 方案更容易传播。
