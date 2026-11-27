@@ -276,6 +276,11 @@ internal sealed class OverlayServer : IDisposable
                     body = "ok";
                     contentType = "text/plain; charset=utf-8";
                 }
+                else if (path == "/check")
+                {
+                    body = CheckPage;
+                    contentType = "text/html; charset=utf-8";
+                }
                 else
                 {
                     WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", "not found", includeBody);
@@ -1124,6 +1129,43 @@ internal sealed class OverlayServer : IDisposable
     /// 平时透明；点歌点到 B 站视频时，这里用小窗播放（静音，声音仍走应用自己的播放器）。
     /// 它只存在于浏览器源里，所以主播自己的桌面上不会出现，只有直播画面里能看到。
     /// </summary>
+    private const string CheckPage = @"<!DOCTYPE html>
+<html lang=""zh-CN"">
+<head>
+<meta charset=""utf-8"">
+<title>Music Toppin · 分辨率自检</title>
+<style>
+  html,body{margin:0;height:100%;background:#10131a;color:#e8eef7;font-family:'Microsoft YaHei UI',sans-serif;display:flex;align-items:center;justify-content:center;}
+  .box{padding:26px 30px;border-radius:14px;background:#1a1f2a;max-width:900px;box-shadow:0 10px 40px rgba(0,0,0,.5);}
+  h1{font-size:20px;margin:0 0 10px;font-weight:700;}
+  .big{font-size:44px;font-weight:700;margin:6px 0 12px;color:#8fb8ff;}
+  .tip{font-size:16px;line-height:1.65;color:#ffb454;}
+  .tip.ok{color:#5ad07a;}
+  small{display:block;margin-top:12px;font-size:12.5px;line-height:1.6;color:#9fb0c6;}
+</style>
+</head>
+<body>
+<div class=""box"">
+  <h1>Music Toppin · 浏览器源分辨率自检</h1>
+  <div class=""big"" id=""size"">…</div>
+  <div class=""tip"" id=""tip"">检测中…</div>
+  <small id=""extra""></small>
+</div>
+<script>
+  var w=innerWidth,h=innerHeight,dpr=devicePixelRatio||1;
+  document.getElementById('size').textContent=w+' × '+h+'  (DPR '+dpr+')';
+  var tip=document.getElementById('tip');
+  if(w>=1800&&h>=950){
+    tip.className='tip ok';
+    tip.textContent='✅ 渲染分辨率正常，守望先锋模式可以直接使用。';
+  }else{
+    tip.textContent='⚠️ 当前浏览器源只有 '+w+'×'+h+' 像素。拖满 1920×1080 画布时会被放大，文字和卡片会发糊。请把浏览器源的「宽度 / 高度」改成 1920 / 1080，再铺满画布。';
+  }
+  document.getElementById('extra').textContent='视频小窗源建议 480×270；经典/环状样式也建议 1920×1080（内容按边缘定位，不会变小）。直播姬：添加素材 → 浏览器，在属性里改宽度/高度。';
+</script>
+</body>
+</html>";
+
     private const string VideoPage = @"<!DOCTYPE html>
 <html lang=""zh-CN"">
 <head>

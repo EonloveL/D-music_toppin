@@ -436,6 +436,7 @@ internal sealed class WizardForm : Form
             AddRich(_steps, "浏览器源叠加层（OBS 推荐）", _h2, Ink);
             AddRich(_steps, "1. 点下面的「一键应用推荐配置」：自动开启叠加层，并把地址复制到剪贴板。", _body, BodyInk);
             AddRich(_steps, "2. OBS → 来源 → 点「+」→ 选「浏览器」→ 把地址粘贴进去。", _body, BodyInk);
+            AddRich(_steps, "2b. 直播姬：添加素材 → 浏览器，把属性的「宽度 / 高度」改成 1920 / 1080（默认 800×600 放大后会糊），再把源铺满画布。", _body, BodyInk);
             var ow = _context.OverwatchMode != null && _context.OverwatchMode();
             AddRich(_steps, ow ? "3. 宽 1920、高 1080（16:9 全画布，别用 400×320）。圆圈按游戏默认 HUD 缩放 100% 对位，调过 HUD 缩放会偏移。" : "3. 宽 400、高 320；勾选「关闭源时关闭页面」。", _body, BodyInk);
             AddRich(_steps, "4. 需要视频点播再加一个浏览器源：地址后面加 /video，建议 480×270。", _body, BodyInk);
