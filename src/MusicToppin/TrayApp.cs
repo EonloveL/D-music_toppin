@@ -2082,6 +2082,12 @@ internal sealed class TrayApp : ApplicationContext
         _settings.Save();
         RefreshOverlaySnapshot();
         Logger.Write("overlay theme: " + theme);
+        if (_settings.Style != 3)
+        {
+            _tray.ShowBalloonTip(3000, "Music Toppin",
+                "主题只对「守望先锋模式」生效：托盘「样式 → 守望先锋模式（显示歌词）」。",
+                ToolTipIcon.Info);
+        }
     }
 
     private ToolStripMenuItem BuildVideoAudioMenu()
