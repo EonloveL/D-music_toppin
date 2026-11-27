@@ -1105,7 +1105,8 @@ internal sealed class OverlayServer : IDisposable
       // 对位微调：圆环直径 / 中心 Y（托盘「样式 → 守望先锋对位微调」）
       var ring=Number(st.ringSize); if(!isFinite(ring)) ring=104; ring=Math.max(80,Math.min(140,ring));
       var ringY=Number(st.ringY); if(!isFinite(ringY)) ringY=925; ringY=Math.max(820,Math.min(1020,ringY));
-      var petOffset=Number(st.petOffset); if(!isFinite(petOffset)) petOffset=0; petOffset=Math.max(-80,Math.min(80,petOffset)); owPetOffset=petOffset;
+      var urlPet=/[?&]pet=(-?\d+)/.exec(location.search);
+      var petOffset=urlPet?Number(urlPet[1]):Number(st.petOffset); if(!isFinite(petOffset)) petOffset=0; petOffset=Math.max(-80,Math.min(80,petOffset)); owPetOffset=petOffset;
       owStage.style.setProperty('--ow-ring', ring+'px');
       owStage.style.setProperty('--ow-ring-bottom', (1080 - ringY - ring/2)+'px');
       owRingPx = ring; owRingY = ringY;
