@@ -922,7 +922,7 @@ internal sealed class OverlayServer : IDisposable
   var owCatTop={siamese:-0.803,dachshund:-0.753,devon:-1.015};
   var owRingPx=104, owRingY=925, owCatVisibleTop=null, owCatMetrics={}, owPetOffset=0;
   // 尾巴长度不同：devon 长尾要更深地垂进圆环，身体才会压在环沿上
-  var owCatSink={siamese:16,dachshund:30,devon:95};
+  var owCatSink={siamese:26,dachshund:30,devon:95};
   function updateCompactTop(){
     if(!owCompact) return;
     // 紧凑源里圆环位置保持固定（不随主题/猫图变化），这样切主题不用重新对位
