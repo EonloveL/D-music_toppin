@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 
 namespace MusicToppin.Tests
 {
@@ -29,6 +30,27 @@ namespace MusicToppin.Tests
             TestRun.Check(!OverlayServer.IsValidBvid("AV1234567890"), "非 BV 前缀");
             TestRun.Check(!OverlayServer.IsValidBvid("BV1xx411c7m!"), "非法字符");
             TestRun.Check(!OverlayServer.IsValidBvid(""), "空 BV");
+
+            // 回归：歌词 JSON 曾输出 ,, 导致浏览器解析失败、守望先锋模式歌词/主题全不显示
+            var lyricsJson = new StringBuilder();
+            lyricsJson.Append('{');
+            OverlayState.AppendString(lyricsJson, "style", "3");
+            lyricsJson.Append(',');
+            OverlayState.AppendLyricLines(lyricsJson, new[]
+            {
+                new LyricLine { Time = TimeSpan.Zero, Text = "第一行" },
+                new LyricLine { Time = TimeSpan.FromSeconds(1.5), Text = "a \"quote\" \\ 行" }
+            });
+            lyricsJson.Append('}');
+            var parsed = Json.Parse(lyricsJson.ToString());
+            TestRun.Check(parsed["lines"].Count == 2, "歌词 JSON 合法（无 ,,）");
+            TestRun.Check(parsed["lines"][1]["text"].AsString == "a \"quote\" \\ 行", "歌词文本转义");
+
+            var emptyJson = new StringBuilder();
+            emptyJson.Append('{');
+            OverlayState.AppendLyricLines(emptyJson, new LyricLine[0]);
+            emptyJson.Append('}');
+            TestRun.Check(Json.Parse(emptyJson.ToString())["lines"].Count == 0, "空歌词数组合法");
         }
     }
 }

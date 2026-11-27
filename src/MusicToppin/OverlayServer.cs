@@ -96,6 +96,24 @@ internal sealed class OverlayState
         }
         builder.Append('"');
     }
+
+    /// <summary>
+    /// 追加 "lines":[{"t":秒,"text":"..."}]。AppendString 自带前导逗号，行内不能再手动加逗号，
+    /// 否则会输出 ,, 让浏览器 JSON.parse 直接失败（v1.4.6-1.5.0 的歌词不显示就是这个原因）。
+    /// </summary>
+    internal static void AppendLyricLines(StringBuilder builder, System.Collections.Generic.IList<LyricLine> lines)
+    {
+        builder.Append("\"lines\":[");
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            if (i > 0) builder.Append(',');
+            builder.Append("{\"t\":").Append(line.Time.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+            AppendString(builder, "text", line.Text);
+            builder.Append('}');
+        }
+        builder.Append(']');
+    }
 }
 
 /// <summary>
@@ -187,9 +205,14 @@ internal sealed class OverlayServer : IDisposable
                 var request = ReadRequest(stream);
                 if (request == null) return;
 
-                if (request.Path != "/state" && request.Path != "/state.json")
+                // 轮询端点每 400ms 一次，不能写日志（query 必须先剥掉，否则过滤永远不命中）
+                var path = request.Path;
+                var queryIndex = path.IndexOf('?');
+                if (queryIndex >= 0) path = path.Substring(0, queryIndex);
+
+                if (path != "/state" && path != "/state.json" && path != "/lyrics/state")
                 {
-                    Logger.Write("overlay req: " + request.Method + " " + request.Path + " host=" + request.Host);
+                    Logger.Write("overlay req: " + request.Method + " " + path + " host=" + request.Host);
                 }
 
                 // 只接受本机回环 Host，挡住 DNS rebinding（外部页面把域名解析到 127.0.0.1 来读 /state）
@@ -209,10 +232,6 @@ internal sealed class OverlayServer : IDisposable
                 }
 
                 var includeBody = !string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
-
-                var path = request.Path;
-                var queryIndex = path.IndexOf('?');
-                if (queryIndex >= 0) path = path.Substring(0, queryIndex);
 
                 string body;
                 string contentType;
@@ -596,17 +615,9 @@ internal sealed class OverlayServer : IDisposable
         builder.Append(",\"duration\":").Append(state.Duration.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
         builder.Append(",\"queueCount\":").Append(state.QueueCount);
         builder.Append(",\"version\":").Append(snap.Version);
-        builder.Append(",\"lines\":[");
-        for (var i = 0; i < snap.Lines.Count; i++)
-        {
-            var line = snap.Lines[i];
-            if (i > 0) builder.Append(',');
-            builder.Append("{\"t\":").Append(line.Time.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
-            builder.Append(',');
-            OverlayState.AppendString(builder, "text", line.Text);
-            builder.Append('}');
-        }
-        builder.Append("]}");
+        builder.Append(',');
+        OverlayState.AppendLyricLines(builder, snap.Lines);
+        builder.Append('}');
         return builder.ToString();
     }
 
@@ -772,22 +783,22 @@ internal sealed class OverlayServer : IDisposable
   .ow-stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#8fb8ff;}
   .ow-hud{position:absolute;left:0;right:0;bottom:0;height:210px;display:flex;align-items:center;justify-content:center;}
   .ow-circle{position:relative;width:148px;height:148px;border-radius:50%;}
-  .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.12);box-shadow:0 0 18px color-mix(in srgb, var(--accent) 28%, transparent);}
+  .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 18px rgba(143,184,255,.30);}
   .ow-cat{position:absolute;left:50%;top:-88px;transform:translateX(-50%);width:230px;height:230px;pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
   .ow-deco span{position:absolute;left:50%;top:50%;font-size:24px;pointer-events:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
-  .ow-card{position:absolute;bottom:34px;width:340px;padding:16px 18px;border-radius:18px;background:rgba(10,15,24,.70);
-    box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),0 10px 26px rgba(0,0,0,.38);
+  .ow-card{position:absolute;bottom:34px;width:340px;padding:16px 18px;box-sizing:border-box;border-radius:18px;background:rgba(10,15,24,.70);
+    box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 0 1px rgba(143,184,255,.16),0 10px 26px rgba(0,0,0,.38);
     backdrop-filter:blur(4px);color:#eaf2ff;transition:opacity .2s;}
   .ow-left{left:500px;text-align:right;}
   .ow-right{left:1080px;text-align:left;}
-  .ow-tag{font-size:12px;color:color-mix(in srgb, var(--accent) 75%, #9fb0c6);letter-spacing:1px;margin-bottom:6px;}
-  .ow-title{font-size:25px;font-weight:700;line-height:1.25;margin-bottom:4px;}
-  .ow-artist{font-size:16px;color:#a9bcd3;margin-bottom:10px;}
-  .ow-meta{font-size:12px;color:#8ea1b8;margin-bottom:8px;}
+  .ow-tag{font-size:12px;color:#a9bdd9;letter-spacing:1px;margin-bottom:6px;}
+  .ow-title{font-size:25px;font-weight:700;line-height:1.25;margin-bottom:4px;overflow-wrap:anywhere;}
+  .ow-artist{font-size:16px;color:#a9bcd3;margin-bottom:10px;overflow-wrap:anywhere;}
+  .ow-meta{font-size:12px;color:#8ea1b8;margin-bottom:8px;overflow-wrap:anywhere;}
   .ow-bar{height:4px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden;margin:8px 0 6px;}
   .ow-fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#ff8a5c);}
   .ow-time{font-size:12px;color:#9fb0c6;display:flex;justify-content:space-between;}
-  .ow-lyric{font-size:18px;line-height:1.6;color:#eaf2ff;transition:opacity .18s;}
+  .ow-lyric{font-size:18px;line-height:1.6;color:#eaf2ff;transition:opacity .18s;overflow-wrap:anywhere;}
   .ow-lyric.next{opacity:.72;font-size:16px;margin-top:6px;}
 </style>
 </head>
@@ -817,7 +828,7 @@ internal sealed class OverlayServer : IDisposable
 <div id=""ow"">
   <div class=""ow-stage"" id=""owStage"">
     <div class=""ow-hud"">
-      <div class=""ow-circle""><div class=""ow-halo""></div><div class=""ow-deco"" id=""owDeco""></div><img class=""ow-cat"" id=""owCat"" alt=""""></div>
+      <div class=""ow-circle""><div class=""ow-halo"" id=""owHalo""></div><div class=""ow-deco"" id=""owDeco""></div><img class=""ow-cat"" id=""owCat"" alt=""""></div>
     </div>
     <div class=""ow-card ow-left"" id=""owLeft"">
       <div class=""ow-tag"" id=""owTag""></div>
@@ -865,6 +876,16 @@ internal sealed class OverlayServer : IDisposable
   var owNext=document.getElementById('owNext');
   var owCat=document.getElementById('owCat');
   var owDeco=document.getElementById('owDeco');
+  var owHalo=document.getElementById('owHalo');
+  owCat.onerror=function(){ owCat.classList.add('hidden'); };
+
+  // OBS 旧内核（CEF 103）不支持 color-mix，这里用 JS 把强调色算成 rgba
+  function hexA(hex, a){
+    var m=/^#([0-9a-f]{6})$/i.exec(hex||'');
+    if(!m) return 'rgba(143,184,255,'+a+')';
+    var n=parseInt(m[1],16);
+    return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';
+  }
   var owThemeNames={none:'无装饰',siamese:'暹罗猫',dachshund:'腊肠狗',devon:'德文猫',spring:'春节',xmas:'圣诞',halloween:'万圣',midautumn:'中秋',valentine:'情人'};
   var owFestAccent={spring:'#ff4d4d',xmas:'#4ddf88',halloween:'#ff9f43',midautumn:'#ffd666',valentine:'#ff6ba9'};
   var owFestIcons={
@@ -882,7 +903,7 @@ internal sealed class OverlayServer : IDisposable
   }
 
   function resizeOw(){
-    var s=Math.min(innerWidth/1920,innerHeight/1080);
+    var s=Math.min(innerWidth/1920,innerHeight/1080)||1;
     owStage.style.transform='translate(-50%,-50%) scale('+s+')';
   }
   addEventListener('resize',resizeOw); resizeOw();
@@ -927,14 +948,24 @@ internal sealed class OverlayServer : IDisposable
     if(st.toast&&st.toastId&&st.toastId!==lastToast){lastToast=st.toastId;showToast(st.toast);}
   }
 
+  var owBusy=false;
   function applyOw(){
+    if(owBusy) return;
+    owBusy=true;
     fetch('/lyrics/state?t='+Date.now()).then(function(r){return r.json();}).then(function(st){
+      owBusy=false;
       if(!st || st.style !== 3){ ow.className=''; return; }
 
       var theme = st.theme || 'siamese';
       if(!owThemeNames[theme]) theme = 'siamese';
 
-      owStage.style.setProperty('--accent', owFestAccent[theme] || st.accent || '#8fb8ff');
+      var accent = owFestAccent[theme] || st.accent || '#8fb8ff';
+      if(!/^#[0-9a-f]{6}$/i.test(accent)) accent = '#8fb8ff';
+      owStage.style.setProperty('--accent', accent);
+      owHalo.style.boxShadow = '0 0 18px ' + hexA(accent, 0.30);
+      var tagColor = hexA(accent, 0.85);
+      var tagList = ow.querySelectorAll('.ow-tag');
+      for(var t=0;t<tagList.length;t++) tagList[t].style.color = tagColor;
       owTitle.style.color = st.titleColor || '#eaf2ff';
       owArtist.style.color = st.artistColor || '#a9bcd3';
 
@@ -991,11 +1022,14 @@ internal sealed class OverlayServer : IDisposable
       owLyric1.textContent=(st.position||0) < (lines[0].t||0) ? '' : (lines[idx].text||'');
       owLyric2.textContent=(idx+1<lines.length)?(lines[idx+1].text||''):'';
       owNext.textContent = st.nextTitle ? ('下一首：' + st.nextTitle + (st.nextArtist ? ' · ' + st.nextArtist : '')) : '';
-    }).catch(function(){});
+    }).catch(function(){ owBusy=false; });
   }
 
+  var tickBusy=false;
   function tick(){
-    fetch('/state?t='+Date.now()).then(function(r){return r.json();}).then(apply).catch(function(){});
+    if(tickBusy) return;
+    tickBusy=true;
+    fetch('/state?t='+Date.now()).then(function(r){return r.json();}).then(function(st){ tickBusy=false; apply(st); }).catch(function(){ tickBusy=false; });
   }
   var preview=location.search.indexOf('preview=1')>=0;
   if(preview){

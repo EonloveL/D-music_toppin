@@ -204,20 +204,14 @@ internal sealed class AppSettings
             }
         }
         // 读取中途异常时不能迁移：此时 s 是半成品，Save 会用默认值覆写注册表
-        catch { legacyLyrics = -1; }
+        catch { return s; }
 
-        // v1.5：独立歌词叠层并入「守望先锋模式」样式。开过歌词叠层的用户一次性迁到 Style=3，并删掉旧键避免重复迁移。
-        if (legacyLyrics >= 0)
+        // v1.5：独立歌词叠层并入「守望先锋模式」样式。开过歌词叠层的用户一次性迁到 Style=3，
+        // 落盘成功后再删旧键，避免「键删了但新值没存」或「反复强制切回样式 3」。
+        var legacyDelete = legacyLyrics >= 0;
+        if (legacyDelete)
         {
             if (legacyLyrics == 1) s.Style = 3;
-            try
-            {
-                using (var wkey = Registry.CurrentUser.OpenSubKey(KeyPath, true))
-                {
-                    if (wkey != null) wkey.DeleteValue("LyricsOverlayEnabled", false);
-                }
-            }
-            catch { }
             Logger.Write("legacy lyrics migrated: style=" + s.Style);
             // Schema 迁移块随后会 Save；只有 Schema 已最新时才需要这里单独落盘
             if (s.Schema >= CurrentSchema) s.Save();
@@ -248,6 +242,18 @@ internal sealed class AppSettings
             Logger.Write("settings migrated: style=" + s.Style + " request=" + s.RequestPolicy +
                          " skip=" + s.SkipPolicy + " remove=" + s.RemovePolicy);
             s.Save();
+        }
+
+        if (legacyDelete)
+        {
+            try
+            {
+                using (var wkey = Registry.CurrentUser.OpenSubKey(KeyPath, true))
+                {
+                    if (wkey != null) wkey.DeleteValue("LyricsOverlayEnabled", false);
+                }
+            }
+            catch { }
         }
 
         return s;

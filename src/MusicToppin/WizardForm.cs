@@ -15,6 +15,9 @@ internal sealed class WizardContext
     public Func<bool> Occluded;
     public Action<bool> SetOccluded;
 
+    /// <summary>当前是否为守望先锋模式（该样式只在浏览器源渲染，桌面浮窗隐藏）。</summary>
+    public Func<bool> OverwatchMode;
+
     public Action ConnectLive;
     public Action SyncNetease;
     public Action LoginNetease;
@@ -433,9 +436,10 @@ internal sealed class WizardForm : Form
             AddRich(_steps, "浏览器源叠加层（OBS 推荐）", _h2, Ink);
             AddRich(_steps, "1. 点下面的「一键应用推荐配置」：自动开启叠加层，并把地址复制到剪贴板。", _body, BodyInk);
             AddRich(_steps, "2. OBS → 来源 → 点「+」→ 选「浏览器」→ 把地址粘贴进去。", _body, BodyInk);
-            AddRich(_steps, "3. 宽 400、高 320；勾选「关闭源时关闭页面」。", _body, BodyInk);
+            var ow = _context.OverwatchMode != null && _context.OverwatchMode();
+            AddRich(_steps, ow ? "3. 宽 1920、高 1080（守望先锋模式是 16:9 全画布，别用 400×320）。" : "3. 宽 400、高 320；勾选「关闭源时关闭页面」。", _body, BodyInk);
             AddRich(_steps, "4. 需要视频点播再加一个浏览器源：地址后面加 /video，建议 480×270。", _body, BodyInk);
-            AddRich(_steps, "5. 桌面浮窗可以关掉，观众端照常显示；颜色、透明度、进度都和桌面一致。", _body, BodyInk);
+            AddRich(_steps, ow ? "5. 守望先锋模式的歌词主题在托盘「样式 → 主题」切换；桌面浮窗在该样式下自动隐藏。" : "5. 桌面浮窗可以关掉，观众端照常显示；颜色、透明度、进度都和桌面一致。", _body, BodyInk);
             AddRich(_steps, "", _body, BodyInk);
             AddRich(_steps, "适合：OBS Studio、支持「浏览器源」的直播软件。", _mono, SubInk);
         }
@@ -481,6 +485,22 @@ internal sealed class WizardForm : Form
         {
             // 向导不提供遮挡模式；如果之前开了，先退出，避免配好之后浮窗被压在窗口后面
             if (_context.Occluded != null && _context.Occluded()) _context.SetOccluded?.Invoke(false);
+
+            // 守望先锋模式只有浏览器源一种用法：忽略其它选项，避免关掉叠加层后彻底没有画面
+            if (_context.OverwatchMode != null && _context.OverwatchMode())
+            {
+                _context.SetOverlay?.Invoke(true);
+                _context.SetGreen?.Invoke(false);
+                if (_context.Offscreen != null && _context.Offscreen()) _context.SetOffscreen?.Invoke(false);
+                _context.SetHudVisible?.Invoke(false);
+                MessageBox.Show(this,
+                    "当前样式是「守望先锋模式（显示歌词）」，只能使用浏览器源：\n\n" +
+                    "OBS → 来源 → 浏览器，宽 1920 高 1080。\n" +
+                    "桌面浮窗在该样式下自动隐藏。想用窗口采集/绿幕，请先切回其它样式。",
+                    "Music Toppin", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                UpdateScreenStatus();
+                return;
+            }
 
             if (_methodOverlay.Checked)
             {

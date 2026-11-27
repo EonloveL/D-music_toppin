@@ -12,7 +12,7 @@ internal static class Program
 {
     internal const string AppName = "Music Toppin";
     internal const string AppExe = "MusicToppin.exe";
-    internal const string Version = "1.5.0";
+    internal const string Version = "1.5.1";
 
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\MusicToppin";
 

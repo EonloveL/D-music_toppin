@@ -121,7 +121,7 @@ internal sealed class TrayApp : ApplicationContext
 
         PlaceHud();
 
-        _itemShow = new ToolStripMenuItem("显示浮窗", null, (_, _) => ToggleVisible()) { Checked = _settings.Visible };
+        _itemShow = new ToolStripMenuItem("显示浮窗", null, (_, _) => ToggleVisible()) { Checked = _settings.Visible && _settings.Style != 3 };
         _itemLock = new ToolStripMenuItem("锁定浮窗（鼠标穿透）", null, (_, _) => ToggleLock()) { Checked = _settings.Locked };
         _itemGreen = new ToolStripMenuItem("绿幕模式（直播采集）", null, (_, _) => ToggleGreen()) { Checked = _settings.Green };
         _itemKillfeed = new ToolStripMenuItem("击杀播报", null, (_, _) => SetStyle(0)) { Checked = _settings.Style == 0 };
@@ -483,7 +483,7 @@ internal sealed class TrayApp : ApplicationContext
             fakeTimer.Start();
         }
 
-        if (_settings.Visible) ShowHud();
+        if (_settings.Visible && _settings.Style != 3) ShowHud();
         EnsureHotkeys();
         if (!_settings.WizardShown)
         {
@@ -499,8 +499,15 @@ internal sealed class TrayApp : ApplicationContext
 
         // 启动时按保存的锚点重新贴边（屏幕分辨率/缩放变化后也能回到正确位置）
         if (!string.IsNullOrEmpty(_settings.Anchor) && !_settings.CaptureOffscreen) MoveHudTo(_settings.Anchor);
+        if (_settings.Style == 3 && !_settings.Overlay)
+        {
+            // 守望先锋模式依赖浏览器源：升级后保持设置与托盘勾选一致
+            _settings.Overlay = true;
+            _settings.Save();
+        }
         if (_settings.Overlay || _settings.Style == 3)
         {
+            _itemOverlay.Checked = true;
             StartOverlay(notify: false);
         }
         if (_settings.UpdateCheckOnStart)
@@ -3190,6 +3197,16 @@ internal sealed class TrayApp : ApplicationContext
     /// <summary>托盘和上屏向导共用：显式开启/关闭浏览器源叠加层。</summary>
     private void SetOverlayEnabled(bool enabled)
     {
+        if (!enabled && _settings.Style == 3)
+        {
+            // 守望先锋模式只在浏览器源渲染，关掉叠加层等于没有输出
+            _itemOverlay.Checked = true;
+            _tray.ShowBalloonTip(4000, "Music Toppin",
+                "守望先锋模式需要浏览器源：关闭叠加层会没有任何画面输出。\n请先切回其它样式，再关闭叠加层。",
+                ToolTipIcon.Warning);
+            return;
+        }
+
         if (_settings.Overlay == enabled)
         {
             if (enabled && _overlay == null) StartOverlay(notify: true);
@@ -3245,9 +3262,15 @@ internal sealed class TrayApp : ApplicationContext
 
         try { Clipboard.SetText(url); } catch { }
 
+        var sizeHint = _settings.Style == 3
+            ? "守望先锋模式请设 宽 1920 高 1080（16:9 全画布）"
+            : "宽 400 高 320";
+        var tail = _settings.Style == 3
+            ? "守望先锋模式：桌面浮窗已自动隐藏，用这个浏览器源显示即可。"
+            : "现在可以关掉桌面浮窗，观众仍能看到。";
         _tray.ShowBalloonTip(6000, "Music Toppin",
-            "叠加层地址已复制：" + url + "\n在 OBS 添加「浏览器源」，宽 400 高 320。\n" +
-            "视频点播再加一个浏览器源：" + url + "video（480×270）。\n现在可以关掉桌面浮窗，观众仍能看到。",
+            "叠加层地址已复制：" + url + "\n在 OBS 添加「浏览器源」，" + sizeHint + "。\n" +
+            "视频点播再加一个浏览器源：" + url + "video（480×270）。\n" + tail,
             ToolTipIcon.Info);
     }
 
@@ -3272,6 +3295,14 @@ internal sealed class TrayApp : ApplicationContext
     }
     private void ToggleOccluded()
     {
+        if (!_settings.CaptureOccluded && _settings.Style == 3)
+        {
+            _tray.ShowBalloonTip(4000, "Music Toppin",
+                "守望先锋模式不使用桌面浮窗（遮挡模式不可用）。\n请在 OBS 用浏览器源显示，宽 1920 高 1080。",
+                ToolTipIcon.Info);
+            return;
+        }
+
         _settings.CaptureOccluded = !_settings.CaptureOccluded;
         _itemOccluded.Checked = _settings.CaptureOccluded;
 
@@ -3312,6 +3343,15 @@ internal sealed class TrayApp : ApplicationContext
 
     private void SetOffscreenEnabled(bool enabled)
     {
+        if (enabled && _settings.Style == 3)
+        {
+            _tray.ShowBalloonTip(4000, "Music Toppin",
+                "守望先锋模式不使用桌面浮窗（离屏采集不可用）。\n请在 OBS 用浏览器源显示，宽 1920 高 1080。",
+                ToolTipIcon.Info);
+            _itemOffscreen.Checked = false;
+            return;
+        }
+
         if (_settings.CaptureOffscreen == enabled) return;
 
         _settings.CaptureOffscreen = enabled;
@@ -3362,6 +3402,7 @@ internal sealed class TrayApp : ApplicationContext
                 SetOffscreen = SetOffscreenEnabled,
                 Occluded = () => _settings.CaptureOccluded,
                 SetOccluded = enabled => { if (_settings.CaptureOccluded != enabled) ToggleOccluded(); },
+                OverwatchMode = () => _settings.Style == 3,
                 ConnectLive = PromptLiveRoom,
                 SyncNetease = SyncNeteaseFromClient,
                 LoginNetease = LoginNetease,
@@ -3528,6 +3569,15 @@ internal sealed class TrayApp : ApplicationContext
     /// <summary>托盘/向导共用：显式显示或隐藏桌面浮窗（不影响浏览器源叠加层）。</summary>
     private void SetHudVisible(bool visible)
     {
+        if (visible && _settings.Style == 3)
+        {
+            _itemShow.Checked = false;
+            _tray.ShowBalloonTip(4000, "Music Toppin",
+                "守望先锋模式在浏览器源里显示：OBS 加「浏览器源」，宽 1920 高 1080。\n桌面浮窗在该样式下保持隐藏，避免遮住游戏。",
+                ToolTipIcon.Info);
+            return;
+        }
+
         if (visible == _hud.Visible)
         {
             _settings.Visible = visible;
@@ -3611,10 +3661,34 @@ internal sealed class TrayApp : ApplicationContext
 
         if (style == 3)
         {
-            StartOverlay(notify: false);
+            // 守望先锋模式只在浏览器源里渲染（1920×1080），桌面浮窗保持隐藏，避免继续显示击杀播报
+            if (_hud.Visible) HideHud();
+            _itemShow.Checked = false;
+            // 桌面采集方式在 OW 模式下没有意义，一并退出，避免状态互相打架
+            if (_settings.CaptureOccluded)
+            {
+                _settings.CaptureOccluded = false;
+                _itemOccluded.Checked = false;
+                _hud.SetCaptureOccluded(false);
+            }
+            if (_settings.CaptureOffscreen)
+            {
+                _settings.CaptureOffscreen = false;
+                _itemOffscreen.Checked = false;
+                _hud.SetCaptureOffscreen(false);
+            }
+            var overlayAlreadyOn = _settings.Overlay && _overlay != null;
+            if (!_settings.Overlay) SetOverlayEnabled(true);
+            else if (_overlay == null) StartOverlay(notify: false);
             if (_activeSong != null)
             {
                 LyricsService.SetSong(_activeSong.Title, _activeSong.Artist, _activeSong.SourceLabel, _activeSong.PageUrl);
+            }
+            if (overlayAlreadyOn)
+            {
+                _tray.ShowBalloonTip(4000, "Music Toppin",
+                    "守望先锋模式：歌词只在这个样式里显示，桌面浮窗已自动隐藏。\n请在 OBS 用浏览器源显示（宽 1920 高 1080）：" + (_overlay != null ? _overlay.Url : ""),
+                    ToolTipIcon.Info);
             }
         }
         else
@@ -3622,8 +3696,14 @@ internal sealed class TrayApp : ApplicationContext
             LyricsService.Clear();
             // 离开守望先锋模式后，若没显式开「直播叠加层」就停掉服务器，不白占端口
             if (!_settings.Overlay && _overlay != null) StopOverlay();
+            if (_settings.Visible && !_hud.Visible)
+            {
+                ShowHud();
+                _hud.SetState(_latest, animate: false);
+            }
         }
 
+        _itemShow.Checked = _hud.Visible;
         RefreshOverlaySnapshot();
 
         if (!string.IsNullOrEmpty(_anchor))
@@ -4076,7 +4156,7 @@ internal sealed class TrayApp : ApplicationContext
         if (np.HasSession)
         {
             _lastSessionUtc = DateTime.UtcNow;
-            if (_settings.Visible && !_hud.Visible) ShowHud();
+            if (_settings.Visible && _settings.Style != 3 && !_hud.Visible) ShowHud();
             if (_hud.Visible) _hud.SetState(np, animate: true);
         }
         else if (_hud.Visible)
