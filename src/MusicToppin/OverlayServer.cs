@@ -52,6 +52,9 @@ internal sealed class OverlayState
     public int PetEventId;
     public string PetEventAt = "";
 
+    /// <summary>页面结构版本：页面内常量不一致时自动 reload，避免旧页面一直跑。</summary>
+    public const int PageVersion = 3;
+
     /// <summary>手写 JSON（.NET Framework 4.8 没有 System.Text.Json）。</summary>
     public string ToJson()
     {
@@ -75,6 +78,7 @@ internal sealed class OverlayState
         AppendString(builder, "petEventText", PetEventText);
         builder.Append(",\"petEventId\":").Append(PetEventId);
         AppendString(builder, "petEventAt", PetEventAt);
+        builder.Append(",\"pageVersion\":").Append(PageVersion);
         builder.Append(",\"queueCount\":").Append(QueueCount);
         builder.Append(",\"toastId\":").Append(ToastId);
         builder.Append(",\"style\":").Append(Style);
@@ -274,10 +278,9 @@ internal sealed class OverlayServer : IDisposable
                 else if (path == "/lyrics/state")
                 {
                     // 端点名是历史沿用：独立歌词页已移除，此数据端点供守望先锋模式取歌词
-                    if ((DateTime.UtcNow - _lastPageVersionLogUtc).TotalSeconds > 30 && request.Path.IndexOf("v=3", StringComparison.Ordinal) >= 0)
+                    if (request.Path.IndexOf("boot=1", StringComparison.Ordinal) >= 0)
                     {
-                        _lastPageVersionLogUtc = DateTime.UtcNow;
-                        Logger.Write("ow page: v3 (pet animation)");
+                        Logger.Write("ow page: loaded v3");
                     }
                     body = CurrentLyricsJson();
                     contentType = "application/json; charset=utf-8";
@@ -655,6 +658,7 @@ internal sealed class OverlayServer : IDisposable
         OverlayState.AppendString(builder, "petEventText", state.PetEventText ?? "");
         builder.Append(",\"petEventId\":").Append(state.PetEventId);
         OverlayState.AppendString(builder, "petEventAt", state.PetEventAt ?? "");
+        builder.Append(",\"pageVersion\":").Append(OverlayState.PageVersion);
         OverlayState.AppendString(builder, "accent", state.Accent ?? "#FF3B30");
         OverlayState.AppendString(builder, "titleColor", state.TitleColor ?? "#F5F8FC");
         OverlayState.AppendString(builder, "artistColor", state.ArtistColor ?? "#9FB0C6");
@@ -829,7 +833,7 @@ internal sealed class OverlayServer : IDisposable
 
   /* 守望先锋模式（显示歌词）：1920×1080 画布，中央圆圈留空，左右卡片 */
   .hidden{display:none!important;}
-  #ow{display:none;position:fixed;inset:0;}
+  #ow{display:none;position:fixed;left:0;top:0;right:0;bottom:0;}
   #ow.on{display:block;}
   .ow-stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:center;--accent:#8fb8ff;}
   /* 紧凑模式：?ow=compact。900×320 的浏览器源，按 1920×1080 的 1:1 像素裁出「圆环 + 左右卡片」区域，
@@ -844,21 +848,14 @@ internal sealed class OverlayServer : IDisposable
   .ow-hud{position:absolute;left:0;right:0;bottom:var(--ow-ring-bottom,103px);height:var(--ow-ring,104px);display:flex;align-items:center;justify-content:center;}
   .ow-circle{position:relative;width:var(--ow-ring,104px);height:var(--ow-ring,104px);border-radius:50%;}
   /* 发光圆环画在宠物上面：猫趴在上沿，圈内始终完整可见 */
-  .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 10px rgba(143,184,255,.30);z-index:2;}
+  .ow-halo{position:absolute;left:0;top:0;width:100%;height:100%;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 10px rgba(143,184,255,.30);z-index:2;}
   .ow-pet{position:absolute;left:50%;top:calc(var(--ow-ring,104px) * -0.9);transform:translateX(-50%);z-index:1;
     width:calc(var(--ow-ring,104px) * 1.31);height:calc(var(--ow-ring,104px) * 1.31);pointer-events:none;}
   .ow-pet.hidden{display:none;}
-  .ow-pet-inner{position:absolute;inset:0;transform-origin:50% 95%;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));animation:owBreathe 3.8s ease-in-out infinite;}
-  .ow-pet-inner.pet-glow{filter:drop-shadow(0 0 14px rgba(143,184,255,.95)) drop-shadow(0 4px 8px rgba(0,0,0,.35));}
-  .ow-pet-inner.pet-hop{animation:owHop .5s cubic-bezier(.3,1.5,.4,1);}
-  .ow-pet-base,.ow-pet-tail{position:absolute;left:0;top:0;width:100%;height:100%;}
-  .ow-pet-tail{z-index:0;}
-  .ow-pet-base{z-index:1;}
-  .ow-pet[data-pet-theme=""siamese""] .ow-pet-tail{clip-path:url(#ow-tail-siamese);transform-origin:77% 53%;animation:owWag 2.8s ease-in-out infinite;}
-  .ow-pet[data-pet-theme=""dachshund""] .ow-pet-tail{clip-path:url(#ow-tail-dachshund);transform-origin:79% 44%;animation:owWag 2.8s ease-in-out infinite;}
-  .ow-pet[data-pet-theme=""devon""] .ow-pet-tail{clip-path:url(#ow-tail-devon);transform-origin:80% 44%;animation:owWag 2.8s ease-in-out infinite;}
+  .ow-pet-img{display:block;width:100%;height:100%;transform-origin:50% 95%;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));animation:owBreathe 3.8s ease-in-out infinite;}
+  .ow-pet.pet-glow .ow-pet-img{filter:drop-shadow(0 0 14px rgba(143,184,255,.95)) drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .ow-pet.pet-hop .ow-pet-img{animation:owHop .5s cubic-bezier(.3,1.5,.4,1);}
   @keyframes owBreathe{0%,100%{transform:scale(1,1);}50%{transform:scale(1.012,1.018);}}
-  @keyframes owWag{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-7deg);}}
   @keyframes owHop{0%,100%{transform:translateY(0);}40%{transform:translateY(-10px) scale(1.03);}}
   .ow-fx{position:absolute;left:50%;top:-6%;width:0;height:0;z-index:4;pointer-events:none;}
   .ow-fx span{position:absolute;font-size:18px;animation:owFloat 1.5s ease-out forwards;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;}
@@ -884,7 +881,7 @@ internal sealed class OverlayServer : IDisposable
   .ow-lyric.next{opacity:.72;font-size:16px;margin-top:6px;}
 
   /* 黑胶卡片（样式 4，浏览器源 440×230 1:1 像素） */
-  #vinyl{display:none;position:fixed;inset:0;align-items:center;justify-content:center;font-family:'Microsoft YaHei UI',sans-serif;}
+  #vinyl{display:none;position:fixed;left:0;top:0;right:0;bottom:0;align-items:center;justify-content:center;font-family:'Microsoft YaHei UI',sans-serif;}
   #vinyl.on{display:flex;}
   .vcard{width:400px;height:200px;box-sizing:border-box;border-radius:24px;padding:14px 16px;display:flex;gap:14px;overflow:hidden;
     background:rgba(15,17,22,.96);box-shadow:0 0 0 1px rgba(255,255,255,.08),0 18px 48px rgba(0,0,0,.45);color:#eaf2ff;}
@@ -912,11 +909,6 @@ internal sealed class OverlayServer : IDisposable
 </style>
 </head>
 <body>
-<svg width=""0"" height=""0"" style=""position:absolute"" aria-hidden=""true""><defs>
-<clipPath id=""ow-tail-siamese"" clipPathUnits=""objectBoundingBox""><polygon points=""0.70,0.50 0.76,0.50 0.82,0.53 0.86,0.57 0.88,0.63 0.885,0.71 0.87,0.79 0.845,0.815 0.815,0.80 0.80,0.72 0.795,0.64 0.78,0.585 0.74,0.55""/></clipPath>
-<clipPath id=""ow-tail-dachshund"" clipPathUnits=""objectBoundingBox""><polygon points=""0.73,0.41 0.79,0.41 0.85,0.45 0.885,0.50 0.90,0.56 0.905,0.64 0.90,0.70 0.885,0.745 0.855,0.745 0.835,0.68 0.825,0.60 0.795,0.53 0.755,0.47""/></clipPath>
-<clipPath id=""ow-tail-devon"" clipPathUnits=""objectBoundingBox""><polygon points=""0.75,0.41 0.81,0.41 0.86,0.45 0.885,0.51 0.90,0.58 0.905,0.66 0.905,0.76 0.895,0.86 0.875,0.93 0.845,0.935 0.825,0.87 0.815,0.76 0.805,0.66 0.785,0.56 0.745,0.47""/></clipPath>
-</defs></svg>
 <div id=""wrap"">
   <div class=""card"" id=""card"">
     <div class=""accent""></div>
@@ -942,7 +934,7 @@ internal sealed class OverlayServer : IDisposable
 <div id=""ow"">
   <div class=""ow-stage"" id=""owStage"">
     <div class=""ow-hud"">
-      <div class=""ow-circle""><div class=""ow-halo"" id=""owHalo""></div><div class=""ow-deco"" id=""owDeco""></div><div class=""ow-pet"" id=""owPet"" data-pet-theme=""siamese""><div class=""ow-pet-inner"" id=""owPetInner""><img class=""ow-pet-tail"" id=""owPetTail"" alt="""" /><img class=""ow-pet-base"" id=""owPetBase"" alt="""" /></div></div><div class=""ow-fx"" id=""owFx""></div></div>
+      <div class=""ow-circle""><div class=""ow-halo"" id=""owHalo""></div><div class=""ow-deco"" id=""owDeco""></div><div class=""ow-pet"" id=""owPet""><img class=""ow-pet-img"" id=""owPetImg"" alt="""" /></div><div class=""ow-fx"" id=""owFx""></div></div>
     </div>
     <div class=""ow-card ow-left"" id=""owLeft"">
       <div class=""ow-tag"" id=""owTag""></div>
@@ -1010,8 +1002,8 @@ internal sealed class OverlayServer : IDisposable
   function showToast(text, el){
     el = el || document.getElementById('toast');
     el.textContent=text; el.classList.add('on');
-    if(toastTimer) clearTimeout(toastTimer);
-    toastTimer=setTimeout(function(){ el.classList.remove('on'); },4500);
+    if(el._toastTimer) clearTimeout(el._toastTimer);
+    el._toastTimer=setTimeout(function(){ el.classList.remove('on'); },4500);
   }
   function pad(n){return (n<10?'0':'')+n;}
   function fmt(s){s=Math.max(0,s||0);return pad(Math.floor(s/60))+':'+pad(Math.floor(s%60));}
@@ -1030,23 +1022,22 @@ internal sealed class OverlayServer : IDisposable
   var owLyric2=document.getElementById('owLyric2');
   var owNext=document.getElementById('owNext');
   var owPet=document.getElementById('owPet');
-  var owPetInner=document.getElementById('owPetInner');
-  var owPetBase=document.getElementById('owPetBase');
-  var owPetTail=document.getElementById('owPetTail');
+  var owPetImg=document.getElementById('owPetImg');
   var owDeco=document.getElementById('owDeco');
   var owHalo=document.getElementById('owHalo');
   var owFx=document.getElementById('owFx');
-  var lastOwPetEvent=0, owBaseDone=false, owGlowTimer=null;
-  // 旧内核不支持 clip-path 时隐藏尾巴层，避免出现第二只静态猫
-  var owClipOk=!!(window.CSS && CSS.supports && CSS.supports('clip-path','url(#x)'));
-  if((!owClipOk || !document.getElementById('ow-tail-siamese')) && owPetTail) owPetTail.style.display='none';
+  var lastOwPetEvent=0, owBaseDone=false, owGlowTimer=null, owPetRetry=0;
 
   // 礼物 / 上舰：宠物发光 + 粒子（不改宠物外层 transform，避免破坏对位）
   function owPetReact(kind){
     if(!owPet || owPet.classList.contains('hidden')) return;
-    owPetInner.classList.add('pet-glow');
+    owPet.classList.add('pet-glow');
     if(owGlowTimer) clearTimeout(owGlowTimer);
-    owGlowTimer=setTimeout(function(){ owPetInner.classList.remove('pet-glow'); }, 1400);
+    owGlowTimer=setTimeout(function(){ owPet.classList.remove('pet-glow'); }, 1400);
+    owPet.classList.remove('pet-hop');
+    void owPet.offsetWidth;
+    owPet.classList.add('pet-hop');
+    setTimeout(function(){ owPet.classList.remove('pet-hop'); }, 600);
 
     var symbols = kind === 'up' ? ['🎉','✨','💖','👑'] : ['❤️','💛','✨','💫'];
     var count = kind === 'up' ? 12 : 8;
@@ -1061,8 +1052,8 @@ internal sealed class OverlayServer : IDisposable
       owFx.appendChild(node);
     }
   }
-  owPetBase.onerror=function(){ owPet.classList.add('hidden'); };
-  owPetTail.onerror=function(){ owPet.classList.add('hidden'); };
+
+  owPetImg.onerror=function(){ owPet.classList.add('hidden'); };
 
   // OBS 旧内核（CEF 103）不支持 color-mix，这里用 JS 把强调色算成 rgba
   function hexA(hex, a){
@@ -1146,7 +1137,7 @@ internal sealed class OverlayServer : IDisposable
 
   function owThemeUrl(theme){
     if(theme==='none' || hasKey(owFestIcons,theme)) return '';
-    return '/assets/themes/' + theme + '.png?v=150';
+    return '/assets/themes/' + theme + '.png?v=160';
   }
 
   var owCompact=/[?&]ow=compact(?:&|$)/.test(location.search);
@@ -1167,6 +1158,14 @@ internal sealed class OverlayServer : IDisposable
   addEventListener('resize',resizeOw); resizeOw();
 
   function apply(st){
+    // 页面结构版本握手：旧页面一次 reload 换新页面，之后不再触发
+    if(st && st.pageVersion && st.pageVersion !== 3){
+      if(!sessionStorage.getItem('mt_pv')){
+        sessionStorage.setItem('mt_pv','1');
+        location.reload();
+      }
+      return;
+    }
     // 点歌提示在两种样式下都要显示（OW 用自己的 toast）
     if(st && st.toast && st.toastId && st.toastId !== lastToast){
       lastToast = st.toastId;
@@ -1174,7 +1173,10 @@ internal sealed class OverlayServer : IDisposable
     }
 
     if(st && st.style === 4){
-      wrap.className=''; ow.className=''; applyVinyl(st); return;
+      wrap.className=''; ow.className='';
+      var owToastEl4=document.getElementById('owToast');
+      if(owToastEl4){ owToastEl4.classList.remove('on'); owToastEl4.textContent=''; }
+      applyVinyl(st); return;
     }
     vinyl.className='';
 
@@ -1237,10 +1239,13 @@ internal sealed class OverlayServer : IDisposable
   }
 
   var owBusy=false;
+  var owBooted=false;
   function applyOw(){
     if(owBusy) return;
     owBusy=true;
-    fetchJson('/lyrics/state?v=3&t='+Date.now()).then(function(st){
+    var req = '/lyrics/state?v=3' + (owBooted ? '' : '&boot=1') + '&t=' + Date.now();
+    owBooted = true;
+    fetchJson(req).then(function(st){
       owBusy=false;
       if(!st || st.style !== 3){ ow.className=''; return; }
 
@@ -1300,8 +1305,7 @@ internal sealed class OverlayServer : IDisposable
         var icons = hasKey(owFestIcons, theme) ? owFestIcons[theme] : null;
         if(icons){
           owPet.classList.add('hidden');
-          owPetBase.removeAttribute('src');
-          owPetTail.removeAttribute('src');
+          if(owPetImg) owPetImg.removeAttribute('src');
           for(var k=0;k<icons.length;k++){
             var d=document.createElement('span');
             d.textContent=icons[k][0];
@@ -1312,14 +1316,19 @@ internal sealed class OverlayServer : IDisposable
           var url = owThemeUrl(theme);
           if(!url){
             owPet.classList.add('hidden');
-            owPetBase.removeAttribute('src');
-            owPetTail.removeAttribute('src');
+            if(owPetImg) owPetImg.removeAttribute('src');
           } else {
-            owPet.classList.remove('hidden');
-            owPet.setAttribute('data-pet-theme', theme);
-            if(owPetBase.getAttribute('src') !== url){
-              owPetBase.src = url;
-              owPetTail.src = url;
+            if(owPetImg && owPetImg.getAttribute('src') !== url){
+              owPet.classList.add('hidden');
+              owPetRetry=0;
+              owPetImg.onload=function(){ if(lastOwTheme===theme){ owPet.classList.remove('hidden'); owPetRetry=0; } };
+              owPetImg.onerror=function(){
+                owPet.classList.add('hidden');
+                if(owPetRetry<2){ owPetRetry++; setTimeout(function(){ if(lastOwTheme===theme) owPetImg.src=url+'&r='+owPetRetry; },2500); }
+              };
+              owPetImg.src = url;
+            } else {
+              owPet.classList.remove('hidden');
             }
           }
         }
@@ -1384,6 +1393,9 @@ internal sealed class OverlayServer : IDisposable
     /// 平时透明；点歌点到 B 站视频时，这里用小窗播放（静音，声音仍走应用自己的播放器）。
     /// 它只存在于浏览器源里，所以主播自己的桌面上不会出现，只有直播画面里能看到。
     /// </summary>
+    /// <summary>测试用：主叠加层页面模板。</summary>
+    internal static string PageHtml { get { return Page; } }
+
     private const string CheckPage = @"<!DOCTYPE html>
 <html lang=""zh-CN"">
 <head>
@@ -1414,9 +1426,9 @@ internal sealed class OverlayServer : IDisposable
   if(compact){
     if(w>=860&&w<=940&&h>=280){
       tip.className='tip ok';
-      tip.textContent='✅ 紧凑源分辨率正常（推荐 900×320），直接拖到大招圆环上对齐即可。';
+      tip.textContent='✅ 紧凑源分辨率正常（推荐 900×320；调过圆环位置/尺寸时用 900×390），直接拖到大招圆环上对齐即可。';
     }else{
-      tip.textContent='⚠️ 紧凑源建议「宽度 / 高度」= 900 / 320（当前 '+w+'×'+h+'），否则对齐会偏。';
+      tip.textContent='⚠️ 紧凑源建议「宽度 / 高度」= 900 / 320（调过圆环位置/尺寸时 900×390；当前 '+w+'×'+h+'），否则对齐会偏。';
     }
   }else if(w>=1800&&h>=950){
     tip.className='tip ok';
@@ -1424,7 +1436,7 @@ internal sealed class OverlayServer : IDisposable
   }else{
     tip.textContent='⚠️ 当前浏览器源只有 '+w+'×'+h+' 像素。铺满 1920×1080 画布会被放大发糊：改成 1920 / 1080；守望先锋模式也可用紧凑源（?ow=compact，900×320）。';
   }
-  document.getElementById('extra').textContent='视频小窗源建议 480×270；经典/环状桌面样式约 400×320；守望先锋紧凑源 900×320。直播姬：添加素材 → 浏览器，在属性里改宽度/高度。';
+  document.getElementById('extra').textContent='视频小窗源建议 480×270；经典/环状桌面样式约 400×320；守望先锋紧凑源 900×320（调过圆环对位时 900×390）。直播姬：添加素材 → 浏览器，在属性里改宽度/高度。';
 </script>
 </body>
 </html>";

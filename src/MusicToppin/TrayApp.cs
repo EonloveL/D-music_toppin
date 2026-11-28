@@ -3373,7 +3373,7 @@ internal sealed class TrayApp : ApplicationContext
         try { Clipboard.SetText(url); } catch { }
 
         var sizeHint = _settings.Style == 3
-            ? "守望先锋模式请设 宽 1920 高 1080（16:9 全画布）"
+            ? "守望先锋模式：全屏源宽 1920 高 1080；紧凑源宽 900 高 320（调过圆环对位用 900×390）"
             : "宽 400 高 320";
         var tail = _settings.Style == 3
             ? "守望先锋模式：桌面浮窗已自动隐藏，用这个浏览器源显示即可。"
@@ -3402,7 +3402,11 @@ internal sealed class TrayApp : ApplicationContext
 
         var url = _overlay.Url + suffix;
         try { Clipboard.SetText(url); } catch { }
-        _tray.ShowBalloonTip(2500, "Music Toppin", "已复制：" + url, ToolTipIcon.Info);
+        var hint = suffix == "?ow=compact"
+            ? "（浏览器源宽 900 高 320；调过圆环对位时用 900×390；与全屏源二选一，首次可加 &align=1 对位）"
+            : "";
+        _tray.ShowBalloonTip(suffix == "?ow=compact" ? 5000 : 2500, "Music Toppin",
+            "已复制：" + url + hint, ToolTipIcon.Info);
     }
     private void ToggleOccluded()
     {

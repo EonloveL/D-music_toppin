@@ -10,6 +10,13 @@ namespace MusicToppin.Tests
         {
             TestRun.Section("叠加层 Range / BV");
 
+            // OW 页面结构回归：只允许一张宠物图，禁止旧的 base+tail 分层（会导致重复猫）
+            var page = OverlayServer.PageHtml;
+            TestRun.Check(page.Contains("id=\"" + "owPetImg" + "\""), "OW 单图宠物");
+            TestRun.Check(page.Split(new[] { "id=\"" + "owPetImg" + "\"" }, StringSplitOptions.None).Length == 2, "OW 只有一张宠物图");
+            TestRun.Check(!page.Contains("clipPath") && !page.Contains("ow-pet-tail") && !page.Contains("ow-pet-base"), "OW 无尾巴分层");
+            TestRun.Check(page.Contains("st.pageVersion"), "OW 页面版本握手");
+
             long start;
             long end;
 
