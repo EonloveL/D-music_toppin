@@ -298,11 +298,6 @@ internal sealed class OverlayServer : IDisposable
                     body = CheckPage;
                     contentType = "text/html; charset=utf-8";
                 }
-                else if (path == "/pets")
-                {
-                    body = PetOverlay.Page;
-                    contentType = "text/html; charset=utf-8";
-                }
                 else
                 {
                     WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", "not found", includeBody);
@@ -850,9 +845,21 @@ internal sealed class OverlayServer : IDisposable
   .ow-circle{position:relative;width:var(--ow-ring,104px);height:var(--ow-ring,104px);border-radius:50%;}
   /* 发光圆环画在宠物上面：猫趴在上沿，圈内始终完整可见 */
   .ow-halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.20);box-shadow:0 0 10px rgba(143,184,255,.30);z-index:2;}
-  .ow-cat{position:absolute;left:50%;top:calc(var(--ow-ring,104px) * -0.9);transform:translateX(-50%);z-index:1;
-    width:calc(var(--ow-ring,104px) * 1.31);height:calc(var(--ow-ring,104px) * 1.31);pointer-events:none;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));}
-  .ow-cat.pet-glow{filter:drop-shadow(0 0 14px rgba(143,184,255,.95)) drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .ow-pet{position:absolute;left:50%;top:calc(var(--ow-ring,104px) * -0.9);transform:translateX(-50%);z-index:1;
+    width:calc(var(--ow-ring,104px) * 1.31);height:calc(var(--ow-ring,104px) * 1.31);pointer-events:none;}
+  .ow-pet.hidden{display:none;}
+  .ow-pet-inner{position:absolute;inset:0;transform-origin:50% 95%;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));animation:owBreathe 3.8s ease-in-out infinite;}
+  .ow-pet-inner.pet-glow{filter:drop-shadow(0 0 14px rgba(143,184,255,.95)) drop-shadow(0 4px 8px rgba(0,0,0,.35));}
+  .ow-pet-inner.pet-hop{animation:owHop .5s cubic-bezier(.3,1.5,.4,1);}
+  .ow-pet-base,.ow-pet-tail{position:absolute;left:0;top:0;width:100%;height:100%;}
+  .ow-pet-tail{z-index:0;}
+  .ow-pet-base{z-index:1;}
+  .ow-pet[data-pet-theme=""siamese""] .ow-pet-tail{clip-path:url(#ow-tail-siamese);transform-origin:77% 53%;animation:owWag 2.8s ease-in-out infinite;}
+  .ow-pet[data-pet-theme=""dachshund""] .ow-pet-tail{clip-path:url(#ow-tail-dachshund);transform-origin:79% 44%;animation:owWag 2.8s ease-in-out infinite;}
+  .ow-pet[data-pet-theme=""devon""] .ow-pet-tail{clip-path:url(#ow-tail-devon);transform-origin:80% 44%;animation:owWag 2.8s ease-in-out infinite;}
+  @keyframes owBreathe{0%,100%{transform:scale(1,1);}50%{transform:scale(1.012,1.018);}}
+  @keyframes owWag{0%,100%{transform:rotate(0deg);}50%{transform:rotate(-7deg);}}
+  @keyframes owHop{0%,100%{transform:translateY(0);}40%{transform:translateY(-10px) scale(1.03);}}
   .ow-fx{position:absolute;left:50%;top:-6%;width:0;height:0;z-index:4;pointer-events:none;}
   .ow-fx span{position:absolute;font-size:18px;animation:owFloat 1.5s ease-out forwards;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;}
   @keyframes owFloat{0%{transform:translate(-50%,0) scale(.7);opacity:0}20%{opacity:1}100%{transform:translate(calc(-50% + var(--dx,0px)),-46px) scale(1.1);opacity:0}}
@@ -930,7 +937,7 @@ internal sealed class OverlayServer : IDisposable
 <div id=""ow"">
   <div class=""ow-stage"" id=""owStage"">
     <div class=""ow-hud"">
-      <div class=""ow-circle""><div class=""ow-halo"" id=""owHalo""></div><div class=""ow-deco"" id=""owDeco""></div><img class=""ow-cat"" id=""owCat"" alt=""""><div class=""ow-fx"" id=""owFx""></div></div>
+      <div class=""ow-circle""><div class=""ow-halo"" id=""owHalo""></div><div class=""ow-deco"" id=""owDeco""></div><div class=""ow-pet"" id=""owPet"" data-pet-theme=""siamese""><div class=""ow-pet-inner"" id=""owPetInner""><img class=""ow-pet-tail"" id=""owPetTail"" alt="""" /><img class=""ow-pet-base"" id=""owPetBase"" alt="""" /></div></div><div class=""ow-fx"" id=""owFx""></div></div>
     </div>
     <div class=""ow-card ow-left"" id=""owLeft"">
       <div class=""ow-tag"" id=""owTag""></div>
@@ -1017,18 +1024,21 @@ internal sealed class OverlayServer : IDisposable
   var owLyric1=document.getElementById('owLyric1');
   var owLyric2=document.getElementById('owLyric2');
   var owNext=document.getElementById('owNext');
-  var owCat=document.getElementById('owCat');
+  var owPet=document.getElementById('owPet');
+  var owPetInner=document.getElementById('owPetInner');
+  var owPetBase=document.getElementById('owPetBase');
+  var owPetTail=document.getElementById('owPetTail');
   var owDeco=document.getElementById('owDeco');
   var owHalo=document.getElementById('owHalo');
   var owFx=document.getElementById('owFx');
   var lastOwPetEvent=0, owBaseDone=false, owGlowTimer=null;
 
-  // 礼物 / 上舰：宠物发光 + 粒子（不改 owCat 的 transform，避免破坏对位）
+  // 礼物 / 上舰：宠物发光 + 粒子（不改宠物外层 transform，避免破坏对位）
   function owPetReact(kind){
-    if(!owCat || owCat.classList.contains('hidden')) return;
-    owCat.classList.add('pet-glow');
+    if(!owPet || owPet.classList.contains('hidden')) return;
+    owPetInner.classList.add('pet-glow');
     if(owGlowTimer) clearTimeout(owGlowTimer);
-    owGlowTimer=setTimeout(function(){ owCat.classList.remove('pet-glow'); }, 1400);
+    owGlowTimer=setTimeout(function(){ owPetInner.classList.remove('pet-glow'); }, 1400);
 
     var symbols = kind === 'up' ? ['🎉','✨','💖','👑'] : ['❤️','💛','✨','💫'];
     var count = kind === 'up' ? 12 : 8;
@@ -1043,7 +1053,8 @@ internal sealed class OverlayServer : IDisposable
       owFx.appendChild(node);
     }
   }
-  owCat.onerror=function(){ owCat.classList.add('hidden'); owCat.removeAttribute('src'); };
+  owPetBase.onerror=function(){ owPet.classList.add('hidden'); };
+  owPetTail.onerror=function(){ owPet.classList.add('hidden'); };
 
   // OBS 旧内核（CEF 103）不支持 color-mix，这里用 JS 把强调色算成 rgba
   function hexA(hex, a){
@@ -1069,19 +1080,19 @@ internal sealed class OverlayServer : IDisposable
     var ring=owRingPx, H=ring*1.31;
     var m=owCatMetrics[theme];
     if(!m){
-      owCat.style.visibility='hidden';
+      owPet.style.visibility='hidden';
       var top = (hasKey(owCatTop,theme) ? owCatTop[theme]*ring : -ring*0.9) + owPetOffset;
-      owCat.style.top = top.toFixed(1)+'px';
-      owCat.style.transform='translateX(-50%)';
+      owPet.style.top = top.toFixed(1)+'px';
+      owPet.style.transform='translateX(-50%)';
       updateCompactTop();
       return;
     }
     var sink = hasKey(owCatSink, theme) ? owCatSink[theme] : 26;
     var elementTop = sink - m.bottom*H + owPetOffset;
-    owCat.style.visibility='visible';
-    owCat.style.top = elementTop.toFixed(1)+'px';
+    owPet.style.visibility='visible';
+    owPet.style.top = elementTop.toFixed(1)+'px';
     var shift = H/2 - (m.left+m.right)/2*H;
-    owCat.style.transform='translateX(-50%) translateX('+shift.toFixed(1)+'px)';
+    owPet.style.transform='translateX(-50%) translateX('+shift.toFixed(1)+'px)';
     updateCompactTop();
   }
   function ensureCatMetrics(theme){
@@ -1280,8 +1291,9 @@ internal sealed class OverlayServer : IDisposable
         ensureCatMetrics(theme);
         var icons = hasKey(owFestIcons, theme) ? owFestIcons[theme] : null;
         if(icons){
-          owCat.classList.add('hidden');
-          owCat.removeAttribute('src');
+          owPet.classList.add('hidden');
+          owPetBase.removeAttribute('src');
+          owPetTail.removeAttribute('src');
           for(var k=0;k<icons.length;k++){
             var d=document.createElement('span');
             d.textContent=icons[k][0];
@@ -1291,11 +1303,16 @@ internal sealed class OverlayServer : IDisposable
         } else {
           var url = owThemeUrl(theme);
           if(!url){
-            owCat.classList.add('hidden');
-            owCat.removeAttribute('src');
+            owPet.classList.add('hidden');
+            owPetBase.removeAttribute('src');
+            owPetTail.removeAttribute('src');
           } else {
-            owCat.classList.remove('hidden');
-            if(owCat.getAttribute('src') !== url) owCat.src = url;
+            owPet.classList.remove('hidden');
+            owPet.setAttribute('data-pet-theme', theme);
+            if(owPetBase.getAttribute('src') !== url){
+              owPetBase.src = url;
+              owPetTail.src = url;
+            }
           }
         }
       }

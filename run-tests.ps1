@@ -31,7 +31,6 @@ $sources = @(
     'Playlist.cs',
     'Lyrics.cs',
     'OverlayServer.cs',
-    'PetOverlay.cs',
     'VideoCache.cs'
 ) | ForEach-Object { Join-Path $app $_ }
 $sources += Get-ChildItem $tests -Filter *.cs -File | ForEach-Object { $_.FullName }
