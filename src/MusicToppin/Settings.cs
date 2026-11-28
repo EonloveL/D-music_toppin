@@ -87,6 +87,9 @@ internal sealed class AppSettings
     /// <summary>击杀模板匹配阈值（百分比 50-99）。</summary>
     public int KillThreshold = 80;
 
+    /// <summary>音乐律动：宠物呼吸/节拍脉冲跟随音乐 BPM。</summary>
+    public bool BeatSync = true;
+
     /// <summary>弹幕点歌权限：0 = 所有人，1 = 粉丝团灯牌或舰长（默认），2 = 仅舰长，3 = 关闭。</summary>
     public int RequestPolicy = 1;
 
@@ -193,6 +196,8 @@ internal sealed class AppSettings
                 s.KillInteraction = ReadInt(key, "KillInteraction", 0) == 1;
                 s.KillRegion = ReadString(key, "KillRegion", "");
                 s.KillThreshold = Math.Max(50, Math.Min(99, ReadInt(key, "KillThreshold", 80)));
+                s.BeatSync = ReadInt(key, "BeatSync", 1) == 1;
+                s.BeatSync = ReadInt(key, "BeatSync", 1) == 1;
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 1);
                 s.RequestPolicy = ReadInt(key, "RequestPolicy", 1);
@@ -350,6 +355,8 @@ internal sealed class AppSettings
                 WriteInt(key, "KillInteraction", KillInteraction ? 1 : 0);
                 WriteString(key, "KillRegion", KillRegion ?? "");
                 WriteInt(key, "KillThreshold", KillThreshold);
+                WriteInt(key, "BeatSync", BeatSync ? 1 : 0);
+                WriteInt(key, "BeatSync", BeatSync ? 1 : 0);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
                 WriteInt(key, "RequestPolicy", RequestPolicy);
                 WriteInt(key, "RemovePolicy", RemovePolicy);

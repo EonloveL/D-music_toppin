@@ -55,6 +55,11 @@ internal sealed class OverlayState
     /// <summary>页面结构版本：页面内常量不一致时自动 reload，避免旧页面一直跑。</summary>
     public const int PageVersion = 3;
 
+    /// <summary>音乐律动：BPM 与最近鼓点时间（UTC ms），页面据此本地对齐节拍。</summary>
+    public int Bpm;
+    public long BeatEpochMs;
+    public int BeatCount;
+
     /// <summary>手写 JSON（.NET Framework 4.8 没有 System.Text.Json）。</summary>
     public string ToJson()
     {
@@ -79,6 +84,9 @@ internal sealed class OverlayState
         builder.Append(",\"petEventId\":").Append(PetEventId);
         AppendString(builder, "petEventAt", PetEventAt);
         builder.Append(",\"pageVersion\":").Append(PageVersion);
+        builder.Append(",\"bpm\":").Append(Bpm);
+        builder.Append(",\"beatEpochMs\":").Append(BeatEpochMs);
+        builder.Append(",\"beatCount\":").Append(BeatCount);
         builder.Append(",\"queueCount\":").Append(QueueCount);
         builder.Append(",\"toastId\":").Append(ToastId);
         builder.Append(",\"style\":").Append(Style);
@@ -659,6 +667,9 @@ internal sealed class OverlayServer : IDisposable
         builder.Append(",\"petEventId\":").Append(state.PetEventId);
         OverlayState.AppendString(builder, "petEventAt", state.PetEventAt ?? "");
         builder.Append(",\"pageVersion\":").Append(OverlayState.PageVersion);
+        builder.Append(",\"bpm\":").Append(state.Bpm);
+        builder.Append(",\"beatEpochMs\":").Append(state.BeatEpochMs);
+        builder.Append(",\"beatCount\":").Append(state.BeatCount);
         OverlayState.AppendString(builder, "accent", state.Accent ?? "#FF3B30");
         OverlayState.AppendString(builder, "titleColor", state.TitleColor ?? "#F5F8FC");
         OverlayState.AppendString(builder, "artistColor", state.ArtistColor ?? "#9FB0C6");
@@ -853,6 +864,8 @@ internal sealed class OverlayServer : IDisposable
     width:calc(var(--ow-ring,104px) * 1.31);height:calc(var(--ow-ring,104px) * 1.31);pointer-events:none;}
   .ow-pet.hidden{display:none;}
   .ow-pet-img{display:block;width:100%;height:100%;transform-origin:50% 95%;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));animation:owBreathe 3.8s ease-in-out infinite;}
+  .ow-pet.pet-beat .ow-pet-img{animation:owBeat .18s ease-out;}
+  @keyframes owBeat{0%{transform:scale(1);}40%{transform:scale(1.055,1.04);}100%{transform:scale(1);}}
   .ow-pet.pet-glow .ow-pet-img{filter:drop-shadow(0 0 14px rgba(143,184,255,.95)) drop-shadow(0 4px 8px rgba(0,0,0,.35));}
   .ow-pet.pet-hop .ow-pet-img{animation:owHop .5s cubic-bezier(.3,1.5,.4,1);}
   @keyframes owBreathe{0%,100%{transform:scale(1,1);}50%{transform:scale(1.012,1.018);}}
@@ -1027,6 +1040,7 @@ internal sealed class OverlayServer : IDisposable
   var owHalo=document.getElementById('owHalo');
   var owFx=document.getElementById('owFx');
   var lastOwPetEvent=0, owBaseDone=false, owGlowTimer=null, owPetRetry=0;
+  var owBpm=0, owBeatEpoch=0, owBeatTimer=null;
 
   // 礼物 / 上舰：宠物发光 + 粒子（不改宠物外层 transform，避免破坏对位）
   function owPetReact(kind){
@@ -1054,6 +1068,23 @@ internal sealed class OverlayServer : IDisposable
   }
 
   owPetImg.onerror=function(){ owPet.classList.add('hidden'); };
+
+  function owBeatPulse(){
+    if(!owPet) return;
+    owPet.classList.remove('pet-beat');
+    void owPet.offsetWidth;
+    owPet.classList.add('pet-beat');
+    setTimeout(function(){ owPet.classList.remove('pet-beat'); }, 200);
+  }
+  function scheduleOwBeat(){
+    if(owBeatTimer){ clearTimeout(owBeatTimer); owBeatTimer=null; }
+    if(!(owBpm>=55 && owBpm<=190) || !owBeatEpoch) return;
+    var period=60000/owBpm;
+    var now=Date.now();
+    var next=owBeatEpoch + Math.ceil((now-owBeatEpoch+8)/period)*period;
+    var delay=Math.max(15,next-now);
+    owBeatTimer=setTimeout(function(){ owBeatPulse(); scheduleOwBeat(); }, delay);
+  }
 
   // OBS 旧内核（CEF 103）不支持 color-mix，这里用 JS 把强调色算成 rgba
   function hexA(hex, a){
@@ -1334,6 +1365,13 @@ internal sealed class OverlayServer : IDisposable
         }
       }
       owMeta.textContent = '守望先锋 · 主题：' + (owThemeNames[theme] || theme);
+
+      var bpm=st.playing ? (Number(st.bpm)||0) : 0, beatEpoch=Number(st.beatEpochMs)||0;
+      if(bpm!==owBpm || Math.abs(beatEpoch-owBeatEpoch)>80){
+        owBpm=bpm; owBeatEpoch=beatEpoch;
+        if(owPetImg) owPetImg.style.animationDuration = (bpm>=55 && bpm<=190) ? (120000/bpm/1000).toFixed(2)+'s' : '';
+        scheduleOwBeat();
+      }
 
       var pe=Number(st.petEventId)||0;
       if(!owBaseDone){ owBaseDone=true; lastOwPetEvent=pe; }

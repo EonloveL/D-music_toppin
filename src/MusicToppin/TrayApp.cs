@@ -243,6 +243,8 @@ internal sealed class TrayApp : ApplicationContext
             }) { Checked = _settings.KillThreshold == value };
             killThresholdMenu.DropDownItems.Add(item);
         }
+        _itemBeatSync = new ToolStripMenuItem("音乐律动（呼吸/节拍跟随 BPM）", null, (_, _) => ToggleBeatSync()) { Checked = _settings.BeatSync };
+        interactMenu.DropDownItems.Add(_itemBeatSync);
         interactMenu.DropDownItems.Add(_itemKillEnable);
         interactMenu.DropDownItems.Add(_itemKillRegion);
         interactMenu.DropDownItems.Add(_itemKillTemplate);
@@ -548,6 +550,9 @@ internal sealed class TrayApp : ApplicationContext
         _killDetector.Hit += OnKillDetected;
         _killDetector.Enabled = _settings.KillInteraction && killRegion.HasValue && _killDetector.HasTemplate;
 
+        _beatTracker = new BeatTracker();
+        _beatTracker.Enabled = _settings.BeatSync;
+
         // 调试/自动化用：--fake-kill 注入一次击杀互动
         if (Environment.GetCommandLineArgs().Any(a => a.Equals("--fake-kill", StringComparison.OrdinalIgnoreCase)))
         {
@@ -656,6 +661,8 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemKillRegion;
     private ToolStripMenuItem _itemKillTemplate;
     private KillDetector _killDetector;
+    private BeatTracker _beatTracker;
+    private ToolStripMenuItem _itemBeatSync;
     private ToolStripMenuItem _itemSkipPolicy;
     private ToolStripMenuItem _itemRequestPolicy;
     private ToolStripMenuItem _permissionMenu;
@@ -3329,6 +3336,9 @@ internal sealed class TrayApp : ApplicationContext
             PetEventText = _petEventText,
             PetEventId = _petEventId,
             PetEventAt = _petEventAt,
+            Bpm = _beatTracker != null && _settings.BeatSync ? _beatTracker.Bpm : 0,
+            BeatEpochMs = _beatTracker != null && _settings.BeatSync ? _beatTracker.BeatEpochMs : 0,
+            BeatCount = _beatTracker != null && _settings.BeatSync ? _beatTracker.BeatCount : 0,
             LyricsTheme = _settings.LyricsTheme ?? "siamese",
             RingSize = _settings.OverlayRingSize,
             RingY = _settings.OverlayRingY,
@@ -3434,6 +3444,7 @@ internal sealed class TrayApp : ApplicationContext
         if (_overlay == null) return;
         _overlay.Dispose();
         if (_killDetector != null) { _killDetector.Dispose(); _killDetector = null; }
+        if (_beatTracker != null) { _beatTracker.Dispose(); _beatTracker = null; }
         _overlay = null;
         _itemCopyOverlay.Enabled = false;
         _itemCopyVideo.Enabled = false;
@@ -3536,6 +3547,18 @@ internal sealed class TrayApp : ApplicationContext
         if (_itemKillEnable != null) _itemKillEnable.Checked = true;
         _tray.ShowBalloonTip(4000, "Music Toppin",
             "击杀模板已抓取，击杀互动已开启。\n可在「击杀互动 → 匹配灵敏度」调整误判/漏判。", ToolTipIcon.Info);
+    }
+
+    private void ToggleBeatSync()
+    {
+        _settings.BeatSync = !_settings.BeatSync;
+        _settings.Save();
+        if (_beatTracker != null) _beatTracker.Enabled = _settings.BeatSync;
+        if (_itemBeatSync != null) _itemBeatSync.Checked = _settings.BeatSync;
+        RefreshOverlaySnapshot();
+        _tray.ShowBalloonTip(3000, "Music Toppin",
+            _settings.BeatSync ? "音乐律动已开启：宠物呼吸/节拍会跟随系统输出音乐的 BPM。" : "音乐律动已关闭。",
+            ToolTipIcon.Info);
     }
 
     private void OnKillDetected()
