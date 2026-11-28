@@ -278,6 +278,9 @@ internal sealed class TrayApp : ApplicationContext
         _itemSafeMedia = new ToolStripMenuItem("反作弊保守模式（禁用媒体键切歌）", null, (_, _) => ToggleMediaKeys()) { Checked = _settings.DisableMediaKeys };
         controlsMenu.DropDownItems.Add(new ToolStripSeparator());
         controlsMenu.DropDownItems.Add(_itemSafeMedia);
+        _hotkeyInfo = new ToolStripMenuItem("快捷键：…") { Enabled = false };
+        controlsMenu.DropDownItems.Add(new ToolStripSeparator());
+        controlsMenu.DropDownItems.Add(_hotkeyInfo);
 
         _defaultPlaylistMenu = BuildDefaultPlaylistMenu();
 
@@ -626,9 +629,13 @@ internal sealed class TrayApp : ApplicationContext
     private const int HK_PREV = 1;
     private const int HK_NEXT = 2;
     private const int HK_LOCK = 3;
+    private const int HK_STYLE = 4;
     private const uint VK_LEFT = 0x25;
     private const uint VK_RIGHT = 0x27;
     private const uint VK_M = 0x4D;
+    private const uint VK_PRIOR = 0x21;
+    private const uint VK_NEXT = 0x22;
+    private const uint VK_S = 0x53;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
@@ -637,7 +644,12 @@ internal sealed class TrayApp : ApplicationContext
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
     private bool _hotkeysRegistered;
+    private bool _extraHotkeysRegistered;
     private string _hotkeyLabel = "";
+    private string _hotkeyNextLabel = "";
+    private string _hotkeyPrevLabel = "";
+    private string _hotkeyStyleLabel = "";
+    private ToolStripMenuItem _hotkeyInfo;
     private ToolStripMenuItem _itemHotkey;
     private ToolStripMenuItem _itemWizard;
     private ToolStripMenuItem _itemCheckUpdate;
@@ -4055,54 +4067,95 @@ internal sealed class TrayApp : ApplicationContext
     /// </summary>
     private void EnsureHotkeys()
     {
-        if (!_settings.Hotkeys || _hotkeysRegistered) return;
-        if (!_hud.IsHandleCreated) return;
+        if (!_settings.Hotkeys || _hud == null) return;
+        // 守望先锋/黑胶样式下桌面浮窗可能隐藏，但热键消息窗口仍需创建
+        if (!_hud.IsHandleCreated) { var unused = _hud.Handle; }
 
-        // 用户自定义的快捷键优先
-        if (!string.IsNullOrWhiteSpace(_settings.Hotkey))
+        if (!_hotkeysRegistered)
         {
-            uint customMods, customVk;
-            string customDisplay;
-            if (TryParseHotkey(_settings.Hotkey, out customMods, out customVk, out customDisplay))
+            _hotkeysRegistered = true;
+            _hotkeyLabel = "";
+
+            // 用户自定义的锁定键优先
+            if (!string.IsNullOrWhiteSpace(_settings.Hotkey))
             {
-                if (RegisterHotKey(_hud.Handle, HK_LOCK, customMods | MOD_NOREPEAT, customVk))
+                uint customMods, customVk;
+                string customDisplay;
+                if (TryParseHotkey(_settings.Hotkey, out customMods, out customVk, out customDisplay) &&
+                    RegisterHotKey(_hud.Handle, HK_LOCK, customMods | MOD_NOREPEAT, customVk))
                 {
                     _hotkeyLabel = customDisplay;
-                    _hotkeysRegistered = true;
                     Log("registered custom " + customDisplay);
-                    UpdateHotkeyLabel();
-                    return;
                 }
-                Log("custom hotkey busy: " + _settings.Hotkey);
+                else
+                {
+                    Log("custom hotkey busy: " + _settings.Hotkey);
+                }
             }
-        }
 
-        var modsList = new[]
-        {
-            MOD_ALT | MOD_SHIFT | MOD_NOREPEAT,
-            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
-            MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
-            MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT
-        };
-        var names = new[] { "Alt+Shift+M", "Ctrl+Shift+M", "Ctrl+Alt+M", "Ctrl+Alt+Shift+M" };
-
-        for (var i = 0; i < modsList.Length; i++)
-        {
-            if (RegisterHotKey(_hud.Handle, HK_LOCK, modsList[i], VK_M))
+            if (string.IsNullOrEmpty(_hotkeyLabel))
             {
-                _hotkeyLabel = names[i];
-                _hotkeysRegistered = true;
-                Log("registered " + names[i]);
-                UpdateHotkeyLabel();
-                return;
+                var modsList = new[]
+                {
+                    MOD_ALT | MOD_SHIFT | MOD_NOREPEAT,
+                    MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+                    MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+                    MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT
+                };
+                var names = new[] { "Alt+Shift+M", "Ctrl+Shift+M", "Ctrl+Alt+M", "Ctrl+Alt+Shift+M" };
+                for (var i = 0; i < modsList.Length; i++)
+                {
+                    if (RegisterHotKey(_hud.Handle, HK_LOCK, modsList[i], VK_M))
+                    {
+                        _hotkeyLabel = names[i];
+                        Log("registered " + names[i]);
+                        break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(_hotkeyLabel))
+            {
+                _hotkeyLabel = "注册失败（快捷键都被占用）";
+                Log("hotkey registration failed");
             }
         }
 
-        _hotkeyLabel = "注册失败（快捷键都被占用）";
-        Log("hotkey registration failed");
+        EnsureExtraHotkeys();
         UpdateHotkeyLabel();
     }
 
+    private void EnsureExtraHotkeys()
+    {
+        if (_extraHotkeysRegistered || !_hud.IsHandleCreated) return;
+        _extraHotkeysRegistered = true;
+
+        _hotkeyNextLabel = RegisterHotkeyChoice(HK_NEXT, VK_NEXT,
+            new[] { "Ctrl+Alt+PageDown", "Ctrl+Shift+PageDown", "Alt+Shift+PageDown" });
+        _hotkeyPrevLabel = RegisterHotkeyChoice(HK_PREV, VK_PRIOR,
+            new[] { "Ctrl+Alt+PageUp", "Ctrl+Shift+PageUp", "Alt+Shift+PageUp" });
+        _hotkeyStyleLabel = RegisterHotkeyChoice(HK_STYLE, VK_S,
+            new[] { "Ctrl+Alt+S", "Ctrl+Shift+S", "Alt+Shift+S" });
+
+        Log("extra hotkeys: next=" + _hotkeyNextLabel + " prev=" + _hotkeyPrevLabel + " style=" + _hotkeyStyleLabel);
+        UpdateHotkeyLabel();
+    }
+
+    private string RegisterHotkeyChoice(int id, uint vk, string[] names)
+    {
+        var mods = new[]
+        {
+            MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+            MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+            MOD_ALT | MOD_SHIFT | MOD_NOREPEAT
+        };
+        for (var i = 0; i < mods.Length; i++)
+        {
+            if (RegisterHotKey(_hud.Handle, id, mods[i], vk))
+                return names[i];
+        }
+        return "";
+    }
     private static bool TryParseHotkey(string text, out uint modifiers, out uint vk, out string display)
     {
         modifiers = 0;
@@ -4213,15 +4266,24 @@ internal sealed class TrayApp : ApplicationContext
     }
     private void UpdateHotkeyLabel()
     {
-        if (_itemHotkey == null) return;
-        _itemHotkey.Text = "锁定快捷键：" + _hotkeyLabel + "（点击修改）";
+        if (_itemHotkey != null)
+            _itemHotkey.Text = "锁定快捷键：" + _hotkeyLabel + "（点击修改）";
+        if (_hotkeyInfo != null)
+        {
+            var next = string.IsNullOrEmpty(_hotkeyNextLabel) ? "未注册" : _hotkeyNextLabel;
+            var prev = string.IsNullOrEmpty(_hotkeyPrevLabel) ? "未注册" : _hotkeyPrevLabel;
+            var style = string.IsNullOrEmpty(_hotkeyStyleLabel) ? "未注册" : _hotkeyStyleLabel;
+            _hotkeyInfo.Text = "快捷键：" + next + " 切歌 / " + prev + " 上一首 / " + style + " 切换样式";
+        }
     }
 
     private void ReleaseHotkeys()
     {
-        if (!_hotkeysRegistered || !_hud.IsHandleCreated) return;
-        UnregisterHotKey(_hud.Handle, HK_LOCK);
+        if (_hud == null || !_hud.IsHandleCreated) return;
+        foreach (var id in new[] { HK_LOCK, HK_NEXT, HK_PREV, HK_STYLE })
+            UnregisterHotKey(_hud.Handle, id);
         _hotkeysRegistered = false;
+        _extraHotkeysRegistered = false;
     }
 
     private static void Log(string message)
@@ -4231,7 +4293,21 @@ internal sealed class TrayApp : ApplicationContext
 
     private void OnHotkey(int id)
     {
-        if (id == HK_LOCK) ToggleLock();
+        switch (id)
+        {
+            case HK_LOCK: ToggleLock(); break;
+            case HK_NEXT: _ = SkipAsync(previous: false); break;
+            case HK_PREV: _ = SkipAsync(previous: true); break;
+            case HK_STYLE: CycleStyle(); break;
+        }
+    }
+
+    private void CycleStyle()
+    {
+        var next = (_settings.Style + 1) % 5;
+        SetStyle(next);
+        var names = new[] { "击杀播报", "极简", "环状毛玻璃", "守望先锋模式", "黑胶卡片" };
+        _tray.ShowBalloonTip(1200, "Music Toppin", "样式：" + names[next], ToolTipIcon.Info);
     }
 
     private void CheckRelock()
