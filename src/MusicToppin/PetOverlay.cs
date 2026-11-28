@@ -19,7 +19,7 @@ internal static class PetOverlay
   #pet{position:absolute;left:50%;bottom:2%;transform:translateX(-50%);transform-origin:50% 92%;pointer-events:none;}
   #stage{position:relative;display:inline-block;transform-origin:50% 95%;
     filter:drop-shadow(0 8px 18px rgba(0,0,0,.35));}
-  #baseImg,#tailImg{display:block;height:min(86vh,86vw);max-height:520px;width:auto;}
+  #baseImg,#tailImg{display:block;height:min(72vh,72vw);max-height:470px;width:auto;}
   #tailImg{position:absolute;left:0;top:0;width:100%;height:100%;z-index:0;}
   #baseImg{position:relative;z-index:1;}
   #pet.idle #stage{animation:breathe 3.8s ease-in-out infinite;}
@@ -45,6 +45,17 @@ internal static class PetOverlay
   #pet[data-theme=""siamese""] #tailImg{clip-path:url(#tail-siamese);transform-origin:77% 53%;}
   #pet[data-theme=""dachshund""] #tailImg{clip-path:url(#tail-dachshund);transform-origin:79% 44%;}
   #pet[data-theme=""devon""] #tailImg{clip-path:url(#tail-devon);transform-origin:80% 44%;}
+  /* 歌曲信息卡片：与宠物同页，直播只加这一个浏览器源 */
+  #card{position:absolute;left:12px;top:12px;right:12px;max-width:396px;box-sizing:border-box;padding:10px 14px;border-radius:14px;
+    background:rgba(14,17,23,.93);border:1px solid rgba(255,255,255,.10);color:#eaf2ff;box-shadow:0 8px 24px rgba(0,0,0,.35);z-index:8;}
+  #card.hidden{display:none;}
+  #card .c1{font-size:18px;font-weight:700;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #card .c2{font-size:12.5px;color:#9fb0c6;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #card .c3{font-size:11px;color:#7f8ea4;margin-top:2px;min-height:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #card .cbar{height:3px;border-radius:2px;background:rgba(255,255,255,.14);margin-top:6px;overflow:hidden;}
+  #card .cbar i{display:block;height:100%;width:0;background:var(--accent,#FF3B30);}
+  #card .ctimes{display:flex;justify-content:space-between;font-size:10.5px;color:#9fb0c6;margin-top:3px;}
+  #card .cnext{font-size:11px;color:#8ea1b8;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   #sign{position:absolute;left:50%;bottom:100%;transform:translateX(-50%);background:rgba(14,17,23,.92);border:1px solid rgba(255,255,255,.18);
     border-radius:12px;padding:8px 14px;color:#eaf2ff;font-size:16px;white-space:nowrap;opacity:0;transition:opacity .2s;pointer-events:none;max-width:92%;overflow:hidden;text-overflow:ellipsis;z-index:5;}
   #sign.on{opacity:1;}
@@ -73,7 +84,14 @@ internal static class PetOverlay
   <div id=""crown"">👑</div>
   <div id=""fx""></div>
 </div></div>
-<div id=""demo"" class=""hidden"">
+<div id=""card"" class=""hidden"">
+  <div class=""c1"" id=""cTitle""></div>
+  <div class=""c2"" id=""cArtist""></div>
+  <div class=""c3"" id=""cReq""></div>
+  <div class=""cbar""><i id=""cFill""></i></div>
+  <div class=""ctimes""><span id=""cPos"">0:00</span><span id=""cDur"">0:00</span></div>
+  <div class=""cnext"" id=""cNext""></div>
+</div><div id=""demo"" class=""hidden"">
   <button onclick=""act('song','示例歌曲','测试观众')"">点歌</button>
   <button onclick=""act('beat')"">歌词/节拍</button>
   <button onclick=""act('gift',null,null,'示例观众 送出 小心心 ×3')"">礼物</button>
@@ -100,9 +118,37 @@ internal static class PetOverlay
   var signText=document.getElementById('signText');
   var fx=document.getElementById('fx');
   var crown=document.getElementById('crown');
+  var card=document.getElementById('card');
+  var cTitle=document.getElementById('cTitle');
+  var cArtist=document.getElementById('cArtist');
+  var cReq=document.getElementById('cReq');
+  var cFill=document.getElementById('cFill');
+  var cPos=document.getElementById('cPos');
+  var cDur=document.getElementById('cDur');
+  var cNext=document.getElementById('cNext');
 
   var themes={siamese:'/assets/themes/siamese.png?v=150',dachshund:'/assets/themes/dachshund.png?v=150',devon:'/assets/themes/devon.png?v=150'};
   var current='';
+
+  function fmtT(seconds){
+    seconds=Math.max(0,Math.floor(Number(seconds)||0));
+    var m=Math.floor(seconds/60), s=seconds%60;
+    return m+':'+(s<10?'0':'')+s;
+  }
+  function updateCard(st){
+    var title=st.title||'';
+    card.classList.toggle('hidden', !title || params.get('card')==='0');
+    if(!title) return;
+    document.documentElement.style.setProperty('--accent', st.accent||'#FF3B30');
+    cTitle.textContent=title;
+    cArtist.textContent=st.artist||'';
+    cReq.textContent=st.requester?('点歌人：'+st.requester):'';
+    var pos=Number(st.position)||0, dur=Number(st.duration)||0;
+    cPos.textContent=fmtT(pos); cDur.textContent=fmtT(dur);
+    cFill.style.width=(dur>0?Math.min(100,pos/dur*100):0).toFixed(1)+'%';
+    var next=st.nextTitle||'';
+    cNext.textContent=next?('下一首：'+next):'';
+  }
 
   var timers={};
   function once(cls, ms){
@@ -208,6 +254,7 @@ internal static class PetOverlay
           act(st.petEvent==='up'?'up':'gift', null, null, st.petEventText||'');
         }
       }
+      updateCard(st);
       pet.classList.toggle('idle', !!st.playing);
     }).catch(function(){}).then(function(){ setTimeout(poll, 700); });
   }
