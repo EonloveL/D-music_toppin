@@ -214,6 +214,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemOccluded = new ToolStripMenuItem("遮挡模式（压在其他窗口后面）", null, (_, _) => ToggleOccluded()) { Checked = _settings.CaptureOccluded };
         _itemCopyOverlay = new ToolStripMenuItem("复制叠加层地址", null, (_, _) => CopyOverlayUrl("")) { Enabled = false };
         _itemCopyVideo = new ToolStripMenuItem("复制视频小窗地址", null, (_, _) => CopyOverlayUrl("video")) { Enabled = false };
+        _itemCopyCompact = new ToolStripMenuItem("复制守望先锋紧凑源地址（?ow=compact）", null, (_, _) => CopyOverlayUrl("?ow=compact")) { Enabled = false };
 
         var styleMenu = new ToolStripMenuItem("样式");
         styleMenu.DropDownItems.Add(_itemKillfeed);
@@ -280,6 +281,7 @@ internal sealed class TrayApp : ApplicationContext
             _itemOverlay,
             _itemCopyOverlay,
             _itemCopyVideo,
+            _itemCopyCompact,
             _itemOffscreen,
             _itemOccluded,
             _itemAutoStart,
@@ -608,6 +610,7 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _volumeMenu;
     private ToolStripMenuItem _itemCopyOverlay;
     private ToolStripMenuItem _itemCopyVideo;
+    private ToolStripMenuItem _itemCopyCompact;
     private ToolStripMenuItem _itemSkipPolicy;
     private ToolStripMenuItem _itemRequestPolicy;
     private ToolStripMenuItem _permissionMenu;
@@ -3357,6 +3360,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _itemCopyOverlay.Enabled = true;
         _itemCopyVideo.Enabled = true;
+        _itemCopyCompact.Enabled = true;
         _itemCopyOverlay.Text = "复制叠加层地址（端口 " + _overlay.Port + "）";
         RefreshOverlaySnapshot();
 
@@ -3387,6 +3391,7 @@ internal sealed class TrayApp : ApplicationContext
         _overlay = null;
         _itemCopyOverlay.Enabled = false;
         _itemCopyVideo.Enabled = false;
+        _itemCopyCompact.Enabled = false;
         _itemCopyOverlay.Text = "复制叠加层地址";
         Logger.Write("overlay server stopped");
     }

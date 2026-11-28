@@ -1032,6 +1032,9 @@ internal sealed class OverlayServer : IDisposable
   var owHalo=document.getElementById('owHalo');
   var owFx=document.getElementById('owFx');
   var lastOwPetEvent=0, owBaseDone=false, owGlowTimer=null;
+  // 旧内核不支持 clip-path 时隐藏尾巴层，避免出现第二只静态猫
+  var owClipOk=!!(window.CSS && CSS.supports && CSS.supports('clip-path','url(#x)'));
+  if(!owClipOk && owPetTail) owPetTail.style.display='none';
 
   // 礼物 / 上舰：宠物发光 + 粒子（不改宠物外层 transform，避免破坏对位）
   function owPetReact(kind){
