@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -251,6 +251,11 @@ internal sealed class TrayApp : ApplicationContext
         interactMenu.DropDownItems.Add(killTest);
         interactMenu.DropDownItems.Add(killThresholdMenu);
 
+        var spotifyMenu = new ToolStripMenuItem("Spotify 点歌");
+        spotifyMenu.DropDownItems.Add(new ToolStripMenuItem("Spotify 设置 / 登录…", null, (_, _) => ShowSpotifySetup()));
+        spotifyMenu.DropDownItems.Add(new ToolStripMenuItem("检查 Spotify 状态", null, async (_, _) => await CheckSpotifyStatusAsync()));
+        spotifyMenu.DropDownItems.Add(new ToolStripMenuItem("退出 Spotify 登录", null, (_, _) => LogoutSpotify()));
+
         _colorMenu = BuildColorMenu();
 
         var positionMenu = new ToolStripMenuItem("位置");
@@ -301,6 +306,7 @@ internal sealed class TrayApp : ApplicationContext
             sourceMenu,
             styleMenu,
             interactMenu,
+            spotifyMenu,
             _colorMenu,
             positionMenu,
             _itemWizard,
@@ -552,6 +558,14 @@ internal sealed class TrayApp : ApplicationContext
         _killDetector.Hit += OnKillDetected;
 
         _beatTracker = new BeatTracker();
+        _beatTracker.Beat += OnBeatDetected;
+
+        _spotify = new SpotifyClient
+        {
+            ClientId = _settings.SpotifyClientId ?? "",
+            RefreshToken = _settings.SpotifyRefreshToken ?? ""
+        };
+
         SyncInteractionTimers();
 
         // 调试/自动化用：--fake-kill 注入一次击杀互动
@@ -560,6 +574,17 @@ internal sealed class TrayApp : ApplicationContext
             var killTimer = new System.Windows.Forms.Timer { Interval = 3000 };
             killTimer.Tick += (_, _) => { killTimer.Stop(); killTimer.Dispose(); OnKillDetected(); };
             killTimer.Start();
+        }
+
+        // 调试/自动化用：--fake-external="歌名|歌手" 注入外部播放器歌词测试
+        var fakeExternalArg = Environment.GetCommandLineArgs()
+            .FirstOrDefault(a => a.StartsWith("--fake-external=", StringComparison.OrdinalIgnoreCase));
+        if (fakeExternalArg != null)
+        {
+            var value = fakeExternalArg.Substring("--fake-external=".Length);
+            var sep = value.IndexOf('|');
+            _fakeExternalTitle = sep > 0 ? value.Substring(0, sep).Trim() : value.Trim();
+            _fakeExternalArtist = sep > 0 ? value.Substring(sep + 1).Trim() : "";
         }
 
         if (_settings.Visible && !BrowserOnly(_settings.Style)) ShowHud();
@@ -672,7 +697,10 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemKillTemplate;
     private KillDetector _killDetector;
     private BeatTracker _beatTracker;
+    private SpotifyClient _spotify;
     private string _beatSongKey = "";
+    private string _fakeExternalTitle = "";
+    private string _fakeExternalArtist = "";
     private bool _beatWasPlaying;
     private ToolStripMenuItem _itemBeatSync;
     private ToolStripMenuItem _itemSkipPolicy;
@@ -2821,6 +2849,12 @@ internal sealed class TrayApp : ApplicationContext
             return;
         }
 
+        if (TryHandleSpotifyRequest(message))
+        {
+            RefreshLiveStatus();
+            return;
+        }
+
         SongRequest request;
         if (!SongRequestParser.TryParse(message.Text, message.UserName, message.Uid, out request))
         {
@@ -3477,6 +3511,126 @@ internal sealed class TrayApp : ApplicationContext
         _tray.ShowBalloonTip(suffix == "?ow=compact" ? 5000 : 2500, "Music Toppin",
             "已复制：" + url + hint, ToolTipIcon.Info);
     }
+    private static readonly string[] SpotifyPrefixes =
+    {
+        "点歌 spotify ", "点歌 spotify：", "点歌 spotify:", "点歌 sp ", "点歌 sp：", "点歌 sp:",
+        "spotify ", "sp "
+    };
+
+    private static bool TryParseSpotifyQuery(string text, out string query)
+    {
+        query = "";
+        var value = (text ?? "").Trim();
+        foreach (var prefix in SpotifyPrefixes)
+        {
+            if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            query = value.Substring(prefix.Length).Trim();
+            return query.Length > 0;
+        }
+        return false;
+    }
+
+    private bool TryHandleSpotifyRequest(DanmakuMessage message)
+    {
+        string query;
+        if (message == null || !TryParseSpotifyQuery(message.Text, out query)) return false;
+        if (!CanUserRequestSong(message)) return true;
+        _ = HandleSpotifyRequestAsync(message, query);
+        return true;
+    }
+
+    private async Task HandleSpotifyRequestAsync(DanmakuMessage message, string query)
+    {
+        try
+        {
+            if (_spotify == null || string.IsNullOrWhiteSpace(_settings.SpotifyClientId))
+            {
+                Logger.Write("spotify request: not configured");
+                SpotifyToast("Spotify 未配置：托盘「Spotify 点歌 → 设置 / 登录」。当前已保留外部播放器歌词显示。");
+                return;
+            }
+
+            var status = await _spotify.GetStatusAsync();
+            if (status.Error.Length > 0)
+            {
+                SpotifyToast("Spotify：" + status.Error + "（自动降级为外部播放器歌词显示）");
+                return;
+            }
+            if (!status.IsPremium)
+            {
+                Logger.Write("spotify request: not premium (" + status.Product + ")");
+                SpotifyToast("Spotify 非 Premium：无法点歌/控制播放，已自动降级为外部播放器歌词显示。");
+                return;
+            }
+
+            var track = await _spotify.SearchTrackAsync(query);
+            if (track.Error.Length > 0) { SpotifyToast(track.Error); return; }
+
+            var error = await _spotify.QueueAsync(track.Uri);
+            if (error.Length > 0) { SpotifyToast(error); return; }
+
+            _lastRequestResult = "Spotify 已加入队列：" + track.Name + " - " + track.Artists;
+            Logger.Write("spotify request: " + message.UserName + " -> " + track.Name + " - " + track.Artists);
+            SpotifyToast("已加入 Spotify 队列：" + track.Name + " - " + track.Artists);
+        }
+        catch (Exception ex)
+        {
+            Logger.Write("spotify request: " + ex.Message);
+            SpotifyToast("Spotify 点歌失败：" + ex.Message);
+        }
+    }
+
+    private void SpotifyToast(string text)
+    {
+        _ui.Post(_ =>
+        {
+            ShowOverlayToast(text);
+            LiveNotify("Spotify 点歌", text, ToolTipIcon.Info);
+        }, null);
+    }
+
+    private void SaveSpotifySettings(string clientId, string refreshToken)
+    {
+        _settings.SpotifyClientId = clientId ?? "";
+        _settings.SpotifyRefreshToken = refreshToken ?? "";
+        _settings.Save();
+        if (_spotify != null)
+        {
+            _spotify.ClientId = _settings.SpotifyClientId;
+            _spotify.RefreshToken = _settings.SpotifyRefreshToken;
+        }
+    }
+
+    private void ShowSpotifySetup()
+    {
+        if (_spotify == null) return;
+        _spotify.ClientId = _settings.SpotifyClientId ?? "";
+        _spotify.RefreshToken = _settings.SpotifyRefreshToken ?? "";
+        using (var form = new SpotifySetupForm(_spotify, _settings.SpotifyClientId ?? "", SaveSpotifySettings))
+            form.ShowDialog(_hud != null && _hud.Visible ? _hud : null);
+    }
+
+    private async Task CheckSpotifyStatusAsync()
+    {
+        if (_spotify == null || !_spotify.HasLogin)
+        {
+            SpotifyToast("还没有登录 Spotify：托盘「Spotify 点歌 → 设置 / 登录」。");
+            return;
+        }
+        var status = await _spotify.GetStatusAsync();
+        if (status.Error.Length > 0) { SpotifyToast("Spotify：" + status.Error); return; }
+        SpotifyToast(status.IsPremium
+            ? "Spotify：Premium，可以点歌。"
+            : "Spotify：" + status.Product + "（非 Premium，只能显示外部歌词，不能控制播放）");
+    }
+
+    private void LogoutSpotify()
+    {
+        if (_spotify != null) _spotify.Logout();
+        SaveSpotifySettings(_settings.SpotifyClientId ?? "", "");
+        SpotifyToast("已退出 Spotify 登录。");
+    }
+
     private static Rectangle? ParseKillRegion(string text)
     {
         int x, y, w, h;
@@ -4576,6 +4730,16 @@ internal sealed class TrayApp : ApplicationContext
         else if (_hud.Visible)
         {
             _hud.SetState(np, animate: false);
+        }
+
+        if (_settings.Style == 3)
+        {
+            if (!string.IsNullOrEmpty(_fakeExternalTitle))
+                LyricsService.SetExternalSong(_fakeExternalTitle, _fakeExternalArtist);
+            else if (np.HasSession && !HasOwnPlayback)
+                LyricsService.SetExternalSong(np.Title, np.Artist);
+            else if (!np.HasSession && !HasOwnPlayback)
+                LyricsService.Clear();
         }
 
         RefreshOverlaySnapshot();

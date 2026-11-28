@@ -1,4 +1,18 @@
-# Changelog
+﻿# Changelog
+
+## v1.7.0（2026-11-28，dev）
+
+### 新增
+
+- **Spotify 点歌**：托盘「Spotify 点歌 → 设置 / 登录…」填 Spotify Developer App 的 Client ID（PKCE + `http://127.0.0.1:4683/callback` 回调），授权后弹幕发「点歌 sp 歌名」/「点歌 spotify 歌名」会把歌曲加入 Spotify 队列；需要 Spotify Premium 才能控制播放。
+- **无 Premium 自动降级**：Spotify 未登录 / 非 Premium / 没有活动设备时，点歌命令会提示原因，并自动保留「外部播放器歌词」显示，不影响看歌词。
+- **外部播放器歌词**：守望先锋模式下，播放器不是本应用时（Spotify / Apple Music / 系统媒体播放器），通过 SMTC 的歌名+歌手去网易云/QQ 歌词库匹配并显示同步歌词；按歌名+歌手做候选排序，找不到时保持无歌词。
+
+### 说明
+
+- Spotify 官方未在中国大陆提供服务，且没有官方歌词 API；歌词仍来自网易云/QQ 歌词库，可能与 Spotify 版本略有差异。
+- Spotify 点歌只控制 Spotify 客户端，应用不直接播放 Spotify 音频；HUD/歌词跟随系统 SMTC。
+- 使用前需在 Spotify Developer Dashboard 把 Redirect URI 配成 `http://127.0.0.1:4683/callback`。
 
 ## v1.6.1（2026-11-28，dev）
 

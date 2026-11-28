@@ -1,4 +1,4 @@
-# Music Toppin
+﻿# Music Toppin
 
 在游戏 / 直播画面上，用「击杀播报」的方式显示**系统正在播放的音乐**。
 
@@ -200,6 +200,9 @@ Uninstall.exe /S                                      静默卸载
 
 > 穿透只影响鼠标，不影响直播软件的窗口采集。
 > 踩过的坑：`TopMost` 变化会触发 `UpdateStyles()`，把单独用 `SetWindowLong` 设的穿透位冲掉。所以穿透位写进 `CreateParams`，切换状态只调 `SetWindowLong`，不触发样式重建（否则会闪一帧）。
+
+- **Spotify 点歌**：托盘「Spotify 点歌 → 设置 / 登录…」填 Developer App Client ID（回调 `http://127.0.0.1:4683/callback`），弹幕「点歌 sp 歌名」加入 Spotify 队列；需要 Premium。未登录/非 Premium 自动降级为外部播放器歌词显示。
+- **外部播放器歌词**：守望先锋模式下，Spotify / Apple Music 等非本应用播放时，按 SMTC 歌名+歌手从网易云/QQ 歌词库匹配并显示同步歌词。
 
 ## 更新机制
 

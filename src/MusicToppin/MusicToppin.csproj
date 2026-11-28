@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!-- 历史遗留文件：实际构建走 build.ps1 + toolchain.ps1（Roslyn csc，.NET Framework 4.8），不要用 dotnet build。 -->
   <PropertyGroup>
@@ -15,7 +15,7 @@
     <AssemblyName>MusicToppin</AssemblyName>
     <RootNamespace>MusicToppin</RootNamespace>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <Version>1.6.1</Version>
+    <Version>1.7.0</Version>
     <Product>Music Toppin</Product>
     <Company>Music Toppin</Company>
     <Description>系统正在播放 · 击杀播报风格悬浮窗</Description>

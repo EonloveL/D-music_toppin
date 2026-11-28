@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace MusicToppin;
 
@@ -179,6 +179,13 @@ internal static class QQMusic
     }
 
     // ---- 搜索 ----
+
+    /// <summary>公开搜索（外部播放器歌词匹配用）。失败返回空列表。</summary>
+    internal static List<Candidate> SearchTracks(string keyword)
+    {
+        try { return Search(keyword); }
+        catch (Exception ex) { Logger.Write("qq search: " + ex.Message); return new List<Candidate>(); }
+    }
 
     private static List<Candidate> Search(string keyword)
     {

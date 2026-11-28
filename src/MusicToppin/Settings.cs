@@ -1,4 +1,4 @@
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
 
 namespace MusicToppin;
 
@@ -89,6 +89,12 @@ internal sealed class AppSettings
 
     /// <summary>音乐律动：宠物呼吸/节拍脉冲跟随音乐 BPM。</summary>
     public bool BeatSync = true;
+
+    /// <summary>Spotify Developer App 的 Client ID（PKCE，无 Secret）。</summary>
+    public string SpotifyClientId = "";
+
+    /// <summary>Spotify refresh token（DPAPI 加密保存）。</summary>
+    public string SpotifyRefreshToken = "";
 
     /// <summary>弹幕点歌权限：0 = 所有人，1 = 粉丝团灯牌或舰长（默认），2 = 仅舰长，3 = 关闭。</summary>
     public int RequestPolicy = 1;
@@ -197,6 +203,8 @@ internal sealed class AppSettings
                 s.KillRegion = ReadString(key, "KillRegion", "");
                 s.KillThreshold = Math.Max(50, Math.Min(99, ReadInt(key, "KillThreshold", 80)));
                 s.BeatSync = ReadInt(key, "BeatSync", 1) == 1;
+                s.SpotifyClientId = ReadString(key, "SpotifyClientId", "");
+                s.SpotifyRefreshToken = Secrets.Unprotect(ReadString(key, "SpotifyRefreshToken", ""));
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 1);
                 s.RequestPolicy = ReadInt(key, "RequestPolicy", 1);
@@ -355,6 +363,8 @@ internal sealed class AppSettings
                 WriteString(key, "KillRegion", KillRegion ?? "");
                 WriteInt(key, "KillThreshold", KillThreshold);
                 WriteInt(key, "BeatSync", BeatSync ? 1 : 0);
+                WriteString(key, "SpotifyClientId", SpotifyClientId ?? "");
+                WriteString(key, "SpotifyRefreshToken", Secrets.Protect(SpotifyRefreshToken ?? ""));
                 WriteInt(key, "SkipPolicy", SkipPolicy);
                 WriteInt(key, "RequestPolicy", RequestPolicy);
                 WriteInt(key, "RemovePolicy", RemovePolicy);

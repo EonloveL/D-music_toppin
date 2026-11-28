@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 
 namespace MusicToppin;
@@ -186,6 +186,13 @@ internal static class Netease
     private static ResolvedSong TryResolve(Candidate candidate)
     {
         return ResolveById(candidate.Id, candidate.Name, candidate.Artist, candidate.Duration);
+    }
+
+    /// <summary>公开搜索（外部播放器歌词匹配用）。失败返回空列表。</summary>
+    internal static List<Candidate> SearchTracks(string keyword)
+    {
+        try { return Search(keyword); }
+        catch (Exception ex) { Logger.Write("netease search: " + ex.Message); return new List<Candidate>(); }
     }
 
     private static List<Candidate> Search(string keyword)
