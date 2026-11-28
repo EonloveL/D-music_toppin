@@ -14,7 +14,7 @@
 | 分支 | `main` 是唯一开发线（V2 + v1.1.1 已合并）；`fix/v1` 保留为 v1.1.1 发布点 |
 | 最新提交 | 见 `git log -1` |
 | 构建 | `powershell -ExecutionPolicy Bypass -File .\build.ps1`（**不需要 .NET SDK**，首次自动下载工具链到 `.cache\nuget`） |
-| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（217 项，退出码 0 = 全过） |
+| 测试 | `powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`（240 项，退出码 0 = 全过） |
 | 产物 | `build\MusicToppin-Setup.exe`（约 1204 KB）、`build\app\`（主程序约 431 KB） |
 | 运行 | 装好后从托盘启动；调试直接跑 `build\app\MusicToppin.exe` |
 
@@ -44,7 +44,7 @@
 | `src/MusicToppin/Json.cs` | 零依赖只读 JSON（对象→Dictionary / 数组→List） |
 | `src/MusicToppin/TrayApp.cs` | 「弹幕点歌」菜单：连接/断开、队列状态、自动播放、放不了就跳下一首 |
 | `src/MusicToppin/Settings.cs` | `LiveRoomId`、`LiveAutoConnect`（记住直播间，启动自动重连） |
-| `tests/` | 217 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
+| `tests/` | 240 项单元测试（点歌解析、队列、弹幕协议、JSON、网易云/QQ 解析） |
 
 行为要点：
 
@@ -230,7 +230,7 @@ MusicToppin.exe --login-test=netease      打开网易云登录窗口（netease|
 - 日志：`%TEMP%\musictoppin.log`（`sources:`、`netease client:`、`netease account:`、`danmaku:`、`song request:`、`resolved:`、`queue play:`、`queue skip:`、`qq:`、`notify:`、`player failed:`、`overlay server started at` 是排错关键词）
 - 设置：`HKCU\Software\MusicToppin`（`Hotkey`、`UpdateUrl`、`LiveRoomId`、`LiveAutoConnect`、`LiveToast`、`NeteaseCookie`、`QQMusicCookie`、`QQMusicUin`、`Overlay`、`CaptureOffscreen`、`CaptureOccluded`、`DefaultPlaylistSource`、`NeteasePlaylistId`、`QQPlaylistId` 等）
 - 安装目录：默认 `%LocalAppData%\Programs\MusicToppin`，可自定义
-- 单元测试：`run-tests.ps1`（217 项，不必联网；已引用 `src\MusicToppin\lib` 下的 brotli 依赖）
+- 单元测试：`run-tests.ps1`（240 项，不必联网；已引用 `src\MusicToppin\lib` 下的 brotli 依赖）
 - 叠加层：托盘开启后日志里有 `overlay server started at http://127.0.0.1:<port>/`，浏览器可直接打开验证
 
 ## 7. 新会话建议的第一次动作

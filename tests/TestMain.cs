@@ -15,6 +15,7 @@ namespace MusicToppin.Tests
             IniFileTests.Run();
             LyricsTests.Run();
             OverlayTests.Run();
+        KillTests.Run();
             return TestRun.Summarize();
         }
     }

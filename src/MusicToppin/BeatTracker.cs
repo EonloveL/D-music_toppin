@@ -18,7 +18,8 @@ internal sealed class BeatTracker : IDisposable
     private int _beatCount;
     private bool _enabled;
 
-    public float Level { get; private set; }
+    /// <summary>检测到一拍（用于让快照及时带上最新 beatEpoch）。</summary>
+    public event Action Beat;
 
     /// <summary>估计出的 BPM；0 = 还没测出来。</summary>
     public int Bpm
@@ -55,7 +56,7 @@ internal sealed class BeatTracker : IDisposable
 
     public BeatTracker()
     {
-        _timer = new System.Windows.Forms.Timer { Interval = 40 };
+        _timer = new System.Windows.Forms.Timer { Interval = 60 };
         _timer.Tick += (_, _) => Tick();
     }
 
@@ -75,7 +76,6 @@ internal sealed class BeatTracker : IDisposable
         var peak = AudioPeak.DevicePeak();
         if (peak < 0) return;
 
-        Level = peak;
         _baseline = _baseline * 0.90f + peak * 0.10f;
 
         // 瞬态检测：明显高于平均电平才算鼓点；180ms 内不重复计拍
@@ -104,6 +104,8 @@ internal sealed class BeatTracker : IDisposable
         _lastOnsetUtc = now;
         _lastBeatUtc = now;
         _beatCount++;
+        var beatHandler = Beat;
+        if (beatHandler != null) { try { beatHandler(); } catch { } }
     }
 
     public void Dispose()

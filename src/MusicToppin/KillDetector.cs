@@ -17,6 +17,7 @@ internal sealed class KillDetector : IDisposable
     private Rectangle _region;
     private byte[] _template;
     private DateTime _lastHitUtc = DateTime.MinValue;
+    private bool _armed = true;
     private bool _enabled;
 
     public int ThresholdPercent = 80;
@@ -49,6 +50,12 @@ internal sealed class KillDetector : IDisposable
         set { _region = value; }
     }
 
+    public void ClearTemplate()
+    {
+        _template = null;
+        try { if (File.Exists(_templatePath)) File.Delete(_templatePath); } catch { }
+    }
+
     public bool HasTemplate
     {
         get { return _template != null; }
@@ -79,7 +86,15 @@ internal sealed class KillDetector : IDisposable
         {
             if (frame == null) return false;
             var gray = ToGray(frame, Width, Height);
+            double mean = 0;
+            for (var i = 0; i < gray.Length; i++) mean += gray[i];
+            mean /= gray.Length;
+            double variance = 0;
+            for (var i = 0; i < gray.Length; i++) { var d = gray[i] - mean; variance += d * d; }
+            if (variance / gray.Length < 40) return false; // 纯色/黑屏不能当模板
             _template = gray;
+            _armed = false;
+            _lastHitUtc = DateTime.UtcNow;
             try { File.WriteAllBytes(_templatePath, gray); }
             catch (Exception ex) { Logger.Write("kill template save: " + ex.Message); }
             return true;
@@ -100,6 +115,13 @@ internal sealed class KillDetector : IDisposable
     {
         if (!_enabled || _template == null) return;
         if (_region.Width < 8 || _region.Height < 8) return;
+        if ((long)_region.Width * _region.Height > 640 * 480)
+        {
+            Logger.Write("kill detect: region too large, disabled");
+            _enabled = false;
+            _timer.Stop();
+            return;
+        }
         if ((DateTime.UtcNow - _lastHitUtc).TotalMilliseconds < CooldownMs) return;
         try
         {
@@ -107,13 +129,20 @@ internal sealed class KillDetector : IDisposable
             {
                 if (frame == null) return;
                 var gray = ToGray(frame, Width, Height);
-                var score = Ncc(_template, gray);
+                var score = KillMatch.Ncc(_template, gray);
                 if (score * 100 >= ThresholdPercent)
                 {
+                    if (!_armed) return;
+                    _armed = false;
                     _lastHitUtc = DateTime.UtcNow;
                     Logger.Write("kill detected: score=" + (score * 100).ToString("F1") + "%");
                     var handler = Hit;
                     if (handler != null) handler();
+                }
+                else if (score * 100 < ThresholdPercent * 0.7)
+                {
+                    // 模板消失后再武装，避免同一条击杀提示停留期间重复触发
+                    _armed = true;
                 }
             }
         }
@@ -126,16 +155,16 @@ internal sealed class KillDetector : IDisposable
     private Bitmap CaptureRegion()
     {
         if (_region.Width <= 0 || _region.Height <= 0) return null;
-        var bmp = new Bitmap(_region.Width, _region.Height, PixelFormat.Format32bppArgb);
+        Bitmap bmp;
         try
         {
+            bmp = new Bitmap(_region.Width, _region.Height, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(bmp))
                 g.CopyFromScreen(_region.Left, _region.Top, 0, 0, _region.Size, CopyPixelOperation.SourceCopy);
             return bmp;
         }
         catch
         {
-            bmp.Dispose();
             return null;
         }
     }
@@ -165,27 +194,6 @@ internal sealed class KillDetector : IDisposable
             }
         }
         return gray;
-    }
-
-    /// <summary>零均值归一化互相关，返回 -1..1（1 = 完全一致）。</summary>
-    internal static double Ncc(byte[] a, byte[] b)
-    {
-        if (a == null || b == null || a.Length == 0 || a.Length != b.Length) return 0;
-        double ma = 0, mb = 0;
-        for (var i = 0; i < a.Length; i++) { ma += a[i]; mb += b[i]; }
-        ma /= a.Length; mb /= b.Length;
-
-        double num = 0, da = 0, db = 0;
-        for (var i = 0; i < a.Length; i++)
-        {
-            double va = a[i] - ma, vb = b[i] - mb;
-            num += va * vb;
-            da += va * va;
-            db += vb * vb;
-        }
-
-        if (da <= 0 || db <= 0) return 0;
-        return num / Math.Sqrt(da * db);
     }
 
     public void Dispose()

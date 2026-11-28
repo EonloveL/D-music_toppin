@@ -46,12 +46,15 @@ internal static class AudioPeak
     private static IAudioMeterInformation _meter;
     private static DateTime _meterCreatedUtc = DateTime.MinValue;
     private static int _failures;
+    private static DateTime _lastFailureUtc = DateTime.MinValue;
 
     /// <summary>返回默认播放设备的峰值（0~1），失败返回 -1。COM 对象缓存复用，避免每 500ms 重新激活。</summary>
     public static float DevicePeak()
     {
         lock (Gate)
         {
+            // 连续失败后冷却 30 秒再重试，避免每秒十几次 CoCreate 拖慢 UI 线程
+            if (_failures > 5 && (DateTime.UtcNow - _lastFailureUtc).TotalSeconds < 30) return -1f;
             try
             {
                 if (_meter == null || (DateTime.UtcNow - _meterCreatedUtc).TotalSeconds > 30)
@@ -59,13 +62,15 @@ internal static class AudioPeak
                     ReleaseCom(_meter);
                     _meter = CreateMeter();
                     _meterCreatedUtc = DateTime.UtcNow;
-                    if (_meter == null) return -1f;
+                    if (_meter == null) { _lastFailureUtc = DateTime.UtcNow; return -1f; }
                 }
 
                 float peak;
                 if (_meter.GetPeakValue(out peak) != 0)
                 {
+                    ReleaseCom(_meter);
                     _meter = null;
+                    _lastFailureUtc = DateTime.UtcNow;
                     return -1f;
                 }
                 _failures = 0;
@@ -73,8 +78,10 @@ internal static class AudioPeak
             }
             catch
             {
+                ReleaseCom(_meter);
                 _meter = null;
                 _failures++;
+                _lastFailureUtc = DateTime.UtcNow;
                 return -1f;
             }
         }

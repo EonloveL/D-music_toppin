@@ -91,7 +91,7 @@ internal sealed class TrayApp : ApplicationContext
         _hud.SetCompact(_settings.Compact && _settings.Style == 1);
         _hud.SetRing(_settings.Ring || _settings.Style == 2);
         _hud.SetVinyl(_settings.Style == 4);
-        if (_settings.Style == 4 && string.IsNullOrEmpty(_settings.Anchor))
+        if (_settings.Style == 4 && string.IsNullOrEmpty(_settings.Anchor) && _settings.X < 0 && _settings.Y < 0)
         {
             _settings.Anchor = "top";
             _settings.Save();
@@ -229,7 +229,7 @@ internal sealed class TrayApp : ApplicationContext
         _itemKillEnable = new ToolStripMenuItem("启用击杀互动", null, (_, _) => ToggleKillInteraction()) { Checked = _settings.KillInteraction };
         _itemKillRegion = new ToolStripMenuItem("框选击杀提示区域…", null, (_, _) => PickKillRegion());
         _itemKillTemplate = new ToolStripMenuItem("抓取击杀模板（击杀提示出现时点）", null, (_, _) => CaptureKillTemplate());
-        var killTest = new ToolStripMenuItem("测试触发一次击杀互动", null, (_, _) => OnKillDetected());
+        var killTest = new ToolStripMenuItem("测试触发一次击杀互动", null, (_, _) => { if (_killDetector != null) _killDetector.Test(); else OnKillDetected(); });
         var killThresholdMenu = new ToolStripMenuItem("匹配灵敏度");
         foreach (var threshold in new[] { 60, 70, 80, 90 })
         {
@@ -261,7 +261,6 @@ internal sealed class TrayApp : ApplicationContext
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("顶部居中", null, (_, _) => MoveHudTo("top")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("左侧", null, (_, _) => MoveHudTo("left")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("右侧", null, (_, _) => MoveHudTo("right")));
-        positionMenu.DropDownItems.Add(new ToolStripMenuItem("顶部居中", null, (_, _) => MoveHudTo("top")));
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("屏幕居中", null, (_, _) => MoveHudTo("center")));
         positionMenu.DropDownItems.Add(new ToolStripSeparator());
         positionMenu.DropDownItems.Add(new ToolStripMenuItem("自由拖动：先按快捷键解锁") { Enabled = false });
@@ -548,10 +547,9 @@ internal sealed class TrayApp : ApplicationContext
         var killRegion = ParseKillRegion(_settings.KillRegion);
         if (killRegion.HasValue) _killDetector.Region = killRegion.Value;
         _killDetector.Hit += OnKillDetected;
-        _killDetector.Enabled = _settings.KillInteraction && killRegion.HasValue && _killDetector.HasTemplate;
 
         _beatTracker = new BeatTracker();
-        _beatTracker.Enabled = _settings.BeatSync;
+        SyncInteractionTimers();
 
         // 调试/自动化用：--fake-kill 注入一次击杀互动
         if (Environment.GetCommandLineArgs().Any(a => a.Equals("--fake-kill", StringComparison.OrdinalIgnoreCase)))
@@ -662,6 +660,8 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemKillTemplate;
     private KillDetector _killDetector;
     private BeatTracker _beatTracker;
+    private string _beatSongKey = "";
+    private bool _beatWasPlaying;
     private ToolStripMenuItem _itemBeatSync;
     private ToolStripMenuItem _itemSkipPolicy;
     private ToolStripMenuItem _itemRequestPolicy;
@@ -2773,7 +2773,7 @@ internal sealed class TrayApp : ApplicationContext
                    (gift.Count > 1 ? " ×" + gift.Count : ""));
             _petEventId++;
             _petEventAt = DateTime.UtcNow.ToString("o");
-            Logger.Write("pet event: " + _petEvent + " " + (_petEventText ?? ""));
+            Logger.Write("pet event: " + _petEvent);
             RefreshOverlaySnapshot();
         }, null);
     }
@@ -3421,6 +3421,7 @@ internal sealed class TrayApp : ApplicationContext
 
         var url = _overlay.Url;
         Logger.Write("overlay url: " + url);
+        SyncInteractionTimers();
 
         // 启动时自动恢复的叠加层不弹气泡、也不覆盖剪贴板；手动开启才复制地址并提示
         if (!notify) return;
@@ -3443,9 +3444,8 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (_overlay == null) return;
         _overlay.Dispose();
-        if (_killDetector != null) { _killDetector.Dispose(); _killDetector = null; }
-        if (_beatTracker != null) { _beatTracker.Dispose(); _beatTracker = null; }
         _overlay = null;
+        SyncInteractionTimers();
         _itemCopyOverlay.Enabled = false;
         _itemCopyVideo.Enabled = false;
         _itemCopyCompact.Enabled = false;
@@ -3467,16 +3467,24 @@ internal sealed class TrayApp : ApplicationContext
     }
     private static Rectangle? ParseKillRegion(string text)
     {
-        if (string.IsNullOrWhiteSpace(text)) return null;
-        var parts = text.Split(',');
-        if (parts.Length != 4) return null;
         int x, y, w, h;
-        if (!int.TryParse(parts[0], out x) || !int.TryParse(parts[1], out y) ||
-            !int.TryParse(parts[2], out w) || !int.TryParse(parts[3], out h)) return null;
-        if (w < 8 || h < 8) return null;
+        if (!KillMatch.TryParseRegion(text, out x, out y, out w, out h)) return null;
         return new Rectangle(x, y, w, h);
     }
 
+    /// <summary>低占用：互动定时器只在守望先锋模式 + 对应开关开启时运行。</summary>
+    private void SyncInteractionTimers()
+    {
+        if (_beatTracker != null)
+            _beatTracker.Enabled = _settings.BeatSync && _settings.Overlay && _settings.Style == 3;
+
+        if (_killDetector != null)
+        {
+            var region = ParseKillRegion(_settings.KillRegion);
+            _killDetector.Enabled = _settings.KillInteraction && _settings.Style == 3 &&
+                                    region.HasValue && _killDetector.HasTemplate;
+        }
+    }
     private void ToggleKillInteraction()
     {
         if (!_settings.KillInteraction)
@@ -3498,7 +3506,7 @@ internal sealed class TrayApp : ApplicationContext
 
         _settings.KillInteraction = !_settings.KillInteraction;
         _settings.Save();
-        if (_killDetector != null) _killDetector.Enabled = _settings.KillInteraction;
+        SyncInteractionTimers();
         if (_itemKillEnable != null) _itemKillEnable.Checked = _settings.KillInteraction;
         _tray.ShowBalloonTip(3000, "Music Toppin",
             _settings.KillInteraction ? "击杀互动已开启（区域模板匹配，不 OCR）。" : "击杀互动已关闭。",
@@ -3516,7 +3524,7 @@ internal sealed class TrayApp : ApplicationContext
         if (_killDetector != null)
         {
             _killDetector.Region = region.Value;
-            _killDetector.Enabled = false;
+            SyncInteractionTimers();
         }
         if (_itemKillEnable != null) _itemKillEnable.Checked = false;
         _tray.ShowBalloonTip(5000, "Music Toppin",
@@ -3543,17 +3551,24 @@ internal sealed class TrayApp : ApplicationContext
 
         _settings.KillInteraction = true;
         _settings.Save();
-        _killDetector.Enabled = true;
+        SyncInteractionTimers();
         if (_itemKillEnable != null) _itemKillEnable.Checked = true;
         _tray.ShowBalloonTip(4000, "Music Toppin",
             "击杀模板已抓取，击杀互动已开启。\n可在「击杀互动 → 匹配灵敏度」调整误判/漏判。", ToolTipIcon.Info);
+    }
+
+    private void OnBeatDetected()
+    {
+        // 只重建共享快照（轻量，2~3 次/秒），让页面拿到准确的 beatEpoch 做相位校正
+        if (_beatTracker != null && _overlay != null && _settings.Style == 3 && _settings.BeatSync)
+            RefreshOverlaySnapshot();
     }
 
     private void ToggleBeatSync()
     {
         _settings.BeatSync = !_settings.BeatSync;
         _settings.Save();
-        if (_beatTracker != null) _beatTracker.Enabled = _settings.BeatSync;
+        SyncInteractionTimers();
         if (_itemBeatSync != null) _itemBeatSync.Checked = _settings.BeatSync;
         RefreshOverlaySnapshot();
         _tray.ShowBalloonTip(3000, "Music Toppin",
@@ -3941,6 +3956,7 @@ internal sealed class TrayApp : ApplicationContext
         _hud.SetCompact(style == 1);
         _hud.SetRing(style == 2);
         _hud.SetVinyl(style == 4);
+        SyncInteractionTimers();
         _itemCompact.Checked = style == 1;
         _itemKillfeed.Checked = style == 0;
         _itemRing.Checked = style == 2;
@@ -4001,12 +4017,17 @@ internal sealed class TrayApp : ApplicationContext
             }
             if (string.IsNullOrEmpty(_settings.Anchor) || _settings.Anchor == "center")
             {
-                _settings.Anchor = "top";
-                _settings.Save();
+                // 只有从未定位过（没有保存 X/Y）才默认到顶部；拖动过就保留用户位置
+                if (_settings.X < 0 && _settings.Y < 0)
+                {
+                    _settings.Anchor = "top";
+                    _settings.Save();
+                }
             }
             if (!_hud.Visible) ShowHud();
             _hud.SetState(_latest, animate: false);
-            MoveHudTo("top", fromUser: false);
+            if (_settings.Anchor == "top" && _settings.X < 0 && _settings.Y < 0)
+                MoveHudTo("top", fromUser: false);
             _tray.ShowBalloonTip(4000, "Music Toppin",
                 "黑胶卡片：桌面浮窗在屏幕上方，先在托盘关闭「锁定浮窗」即可拖动换位置；如需浏览器源，开启「直播叠加层」后用同一地址，源宽 440 高 240。",
                 ToolTipIcon.Info);
@@ -4462,6 +4483,14 @@ internal sealed class TrayApp : ApplicationContext
         if (_exiting) return;
 
         _latest = np;
+        if (_beatTracker != null)
+        {
+            var songKey = np.HasSession ? np.Title + "|" + np.Artist : "";
+            if (songKey != _beatSongKey || (np.HasSession && !np.Playing && _beatWasPlaying))
+                _beatTracker.Reset();
+            _beatSongKey = songKey;
+            _beatWasPlaying = np.HasSession && np.Playing;
+        }
         if (np.HasSession)
         {
             _lastSessionUtc = DateTime.UtcNow;

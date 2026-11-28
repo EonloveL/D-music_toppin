@@ -197,7 +197,6 @@ internal sealed class AppSettings
                 s.KillRegion = ReadString(key, "KillRegion", "");
                 s.KillThreshold = Math.Max(50, Math.Min(99, ReadInt(key, "KillThreshold", 80)));
                 s.BeatSync = ReadInt(key, "BeatSync", 1) == 1;
-                s.BeatSync = ReadInt(key, "BeatSync", 1) == 1;
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 1);
                 s.RequestPolicy = ReadInt(key, "RequestPolicy", 1);
@@ -355,7 +354,6 @@ internal sealed class AppSettings
                 WriteInt(key, "KillInteraction", KillInteraction ? 1 : 0);
                 WriteString(key, "KillRegion", KillRegion ?? "");
                 WriteInt(key, "KillThreshold", KillThreshold);
-                WriteInt(key, "BeatSync", BeatSync ? 1 : 0);
                 WriteInt(key, "BeatSync", BeatSync ? 1 : 0);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
                 WriteInt(key, "RequestPolicy", RequestPolicy);

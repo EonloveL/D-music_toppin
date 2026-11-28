@@ -286,6 +286,10 @@ internal sealed class OverlayServer : IDisposable
                 else if (path == "/lyrics/state")
                 {
                     // 端点名是历史沿用：独立歌词页已移除，此数据端点供守望先锋模式取歌词
+                    if (request.Path.IndexOf("v=2", StringComparison.Ordinal) >= 0)
+                    {
+                        Logger.Write("old OW page detected (v=2): refresh browser source");
+                    }
                     if (request.Path.IndexOf("boot=1", StringComparison.Ordinal) >= 0)
                     {
                         Logger.Write("ow page: loaded v3");
@@ -634,7 +638,6 @@ internal sealed class OverlayServer : IDisposable
         }
     }
 
-    private static DateTime _lastPageVersionLogUtc;
 
     private string CurrentLyricsJson()
     {
@@ -863,15 +866,17 @@ internal sealed class OverlayServer : IDisposable
   .ow-pet{position:absolute;left:50%;top:calc(var(--ow-ring,104px) * -0.9);transform:translateX(-50%);z-index:1;
     width:calc(var(--ow-ring,104px) * 1.31);height:calc(var(--ow-ring,104px) * 1.31);pointer-events:none;}
   .ow-pet.hidden{display:none;}
-  .ow-pet-img{display:block;width:100%;height:100%;transform-origin:50% 95%;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));animation:owBreathe 3.8s ease-in-out infinite;}
-  .ow-pet.pet-beat .ow-pet-img{animation:owBeat .18s ease-out;}
-  @keyframes owBeat{0%{transform:scale(1);}40%{transform:scale(1.055,1.04);}100%{transform:scale(1);}}
+  .ow-pet-img{display:block;width:100%;height:100%;transform-origin:50% 95%;filter:drop-shadow(0 4px 8px rgba(0,0,0,.35));animation:owBreathe var(--ow-breathe-dur,3.8s) ease-in-out infinite;}
+  .ow-pet.pet-beat .ow-pet-img{animation:owBeat .22s ease-out;}
+  @keyframes owBeat{0%{transform:scale(1);}35%{transform:scale(1.09,1.06);}100%{transform:scale(1);}}
   .ow-pet.pet-glow .ow-pet-img{filter:drop-shadow(0 0 14px rgba(143,184,255,.95)) drop-shadow(0 4px 8px rgba(0,0,0,.35));}
   .ow-pet.pet-hop .ow-pet-img{animation:owHop .5s cubic-bezier(.3,1.5,.4,1);}
   @keyframes owBreathe{0%,100%{transform:scale(1,1);}50%{transform:scale(1.012,1.018);}}
   @keyframes owHop{0%,100%{transform:translateY(0);}40%{transform:translateY(-10px) scale(1.03);}}
   .ow-fx{position:absolute;left:50%;top:-6%;width:0;height:0;z-index:4;pointer-events:none;}
   .ow-fx span{position:absolute;font-size:18px;animation:owFloat 1.5s ease-out forwards;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;}
+  .ow-halo.beat{animation:owHaloBeat .30s ease-out;}
+  @keyframes owHaloBeat{0%{box-shadow:0 0 10px rgba(143,184,255,.30);}40%{box-shadow:0 0 26px rgba(143,184,255,.95);}100%{box-shadow:0 0 10px rgba(143,184,255,.30);}}
   @keyframes owFloat{0%{transform:translate(-50%,0) scale(.7);opacity:0}20%{opacity:1}100%{transform:translate(calc(-50% + var(--dx,0px)),-46px) scale(1.1);opacity:0}}
   .ow-deco span{position:absolute;left:50%;top:50%;font-size:17px;pointer-events:none;z-index:3;font-family:'Segoe UI Emoji','Apple Color Emoji',sans-serif;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35));}
   .ow-toast{position:absolute;left:50%;bottom:400px;transform:translateX(-50%);padding:10px 20px;border-radius:10px;
@@ -893,7 +898,7 @@ internal sealed class OverlayServer : IDisposable
   .ow-lyric{font-size:18px;line-height:1.6;color:#eaf2ff;transition:opacity .18s;overflow-wrap:anywhere;}
   .ow-lyric.next{opacity:.72;font-size:16px;margin-top:6px;}
 
-  /* 黑胶卡片（样式 4，浏览器源 440×230 1:1 像素） */
+  /* 黑胶卡片（样式 4，浏览器源 440×240 1:1 像素） */
   #vinyl{display:none;position:fixed;left:0;top:0;right:0;bottom:0;align-items:center;justify-content:center;font-family:'Microsoft YaHei UI',sans-serif;}
   #vinyl.on{display:flex;}
   .vcard{width:400px;height:200px;box-sizing:border-box;border-radius:24px;padding:14px 16px;display:flex;gap:14px;overflow:hidden;
@@ -1074,14 +1079,16 @@ internal sealed class OverlayServer : IDisposable
     owPet.classList.remove('pet-beat');
     void owPet.offsetWidth;
     owPet.classList.add('pet-beat');
-    setTimeout(function(){ owPet.classList.remove('pet-beat'); }, 200);
+    var halo=document.getElementById('owHalo');
+    if(halo){ halo.classList.remove('beat'); void halo.offsetWidth; halo.classList.add('beat'); }
+    setTimeout(function(){ owPet.classList.remove('pet-beat'); if(halo) halo.classList.remove('beat'); }, 260);
   }
   function scheduleOwBeat(){
     if(owBeatTimer){ clearTimeout(owBeatTimer); owBeatTimer=null; }
     if(!(owBpm>=55 && owBpm<=190) || !owBeatEpoch) return;
     var period=60000/owBpm;
     var now=Date.now();
-    var next=owBeatEpoch + Math.ceil((now-owBeatEpoch+8)/period)*period;
+    var next=owBeatEpoch + Math.ceil((now-owBeatEpoch+1)/period)*period;
     var delay=Math.max(15,next-now);
     owBeatTimer=setTimeout(function(){ owBeatPulse(); scheduleOwBeat(); }, delay);
   }
@@ -1366,10 +1373,12 @@ internal sealed class OverlayServer : IDisposable
       }
       owMeta.textContent = '守望先锋 · 主题：' + (owThemeNames[theme] || theme);
 
-      var bpm=st.playing ? (Number(st.bpm)||0) : 0, beatEpoch=Number(st.beatEpochMs)||0;
+      var beatEpoch=Number(st.beatEpochMs)||0;
+      // 有新鲜鼓点就跟随（兼容没有 SMTC 会话的外部播放器）；否则仅在应用报告播放时跟随
+      var bpm=(st.playing || (beatEpoch && Date.now()-beatEpoch < 1200)) ? (Number(st.bpm)||0) : 0;
       if(bpm!==owBpm || Math.abs(beatEpoch-owBeatEpoch)>80){
         owBpm=bpm; owBeatEpoch=beatEpoch;
-        if(owPetImg) owPetImg.style.animationDuration = (bpm>=55 && bpm<=190) ? (120000/bpm/1000).toFixed(2)+'s' : '';
+        if(owPet) owPet.style.setProperty('--ow-breathe-dur', (bpm>=55 && bpm<=190) ? (120000/bpm/1000).toFixed(2)+'s' : '');
         scheduleOwBeat();
       }
 
@@ -1382,6 +1391,7 @@ internal sealed class OverlayServer : IDisposable
           var kind = st.petEvent==='up'?'up':(st.petEvent==='kill'?'kill':'gift');
           owPetReact(kind);
           if(kind==='kill') showToast('⚔ 击杀！', document.getElementById('owToast'));
+          else if(st.petEventText) showToast(st.petEventText, document.getElementById('owToast'));
         }
       }
 

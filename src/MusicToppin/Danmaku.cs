@@ -248,7 +248,6 @@ internal static class DanmakuProtocol
         }
     }
 
-    /// <summary>把一条 DANMU_MSG 的 JSON 解析成消息；不是弹幕返回 null。</summary>
     /// <summary>解析 SEND_GIFT / GUARD_BUY；不是礼物返回 null。</summary>
     public static DanmakuGift ParseGift(JsonValue root)
     {
@@ -283,6 +282,7 @@ internal static class DanmakuProtocol
         };
     }
 
+    /// <summary>把一条 DANMU_MSG 的 JSON 解析成消息；不是弹幕返回 null。</summary>
     public static DanmakuMessage ParseDanmaku(JsonValue root)
     {
         if (root == null) return null;

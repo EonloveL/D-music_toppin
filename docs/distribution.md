@@ -36,7 +36,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 
 ### 2. 版本号与更新日志
 
-已补 `src/MusicToppin/VersionInfo.cs`（当前 `AssemblyVersion 1.5.4.0`），安装器常量同步为 `1.5.4`。
+已补 `src/MusicToppin/VersionInfo.cs`（当前 `AssemblyVersion 1.6.0.0`），安装器常量同步为 `1.6.0`。
 每次发版改这几处：`src/MusicToppin/VersionInfo.cs`、`installer/Installer.cs` 的 `Version`、`CHANGELOG.md`（`MusicToppin.csproj` 仅历史兼容，顺手同步即可）。
 
 ### 3. 杀软白名单（决定"装完还能不能跑"）
@@ -93,7 +93,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 
 ```json
 {
-  "version": "1.5.4",
+  "version": "1.6.0",
   "url": "https://example.com/musictoppin/MusicToppin-Setup.exe",
   "sha256": "7F906ADE…",
   "notes": "修复：解锁后立即回锁\n新增：背景透明度"
@@ -120,7 +120,7 @@ signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a build\M
 4. 手测：安装 → 首启向导 → 播放显示 → 穿透 → 卸载
 5. 签名 `MusicToppin.exe`（重新打包）→ 签名 `MusicToppin-Setup.exe`
 6. `Get-FileHash build\MusicToppin-Setup.exe -Algorithm SHA256`
-7. 在版本提交上打 tag（`git tag -a v1.5.4 -m "Music Toppin v1.5.4"`），推送 `main` 和 tag
+7. 在版本提交上打 tag（`git tag -a v1.6.0 -m "Music Toppin v1.6.0"`），推送 `main` 和 tag
 8. GitHub Release：必须已发布（不能 draft / prerelease），确认成为 Latest；只上传一个 `MusicToppin-Setup*.exe`，并确认资产 `digest` 为 `sha256:…` 非空
 9. 上传：落地页 + 蓝奏云 + GitHub Release（附 changelog 与 SHA256）
 10. 发公告（B 站动态 / QQ 群），配一段 30 秒「三步上屏」演示
