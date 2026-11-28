@@ -274,10 +274,10 @@ internal sealed class OverlayServer : IDisposable
                 else if (path == "/lyrics/state")
                 {
                     // 端点名是历史沿用：独立歌词页已移除，此数据端点供守望先锋模式取歌词
-                    if ((DateTime.UtcNow - _lastPageVersionLogUtc).TotalSeconds > 30 && request.Path.IndexOf("v=2", StringComparison.Ordinal) >= 0)
+                    if ((DateTime.UtcNow - _lastPageVersionLogUtc).TotalSeconds > 30 && request.Path.IndexOf("v=3", StringComparison.Ordinal) >= 0)
                     {
                         _lastPageVersionLogUtc = DateTime.UtcNow;
-                        Logger.Write("lyrics page: v2 (pet offset support)");
+                        Logger.Write("ow page: v3 (pet animation)");
                     }
                     body = CurrentLyricsJson();
                     contentType = "application/json; charset=utf-8";
@@ -1232,7 +1232,7 @@ internal sealed class OverlayServer : IDisposable
   function applyOw(){
     if(owBusy) return;
     owBusy=true;
-    fetchJson('/lyrics/state?v=2&t='+Date.now()).then(function(st){
+    fetchJson('/lyrics/state?v=3&t='+Date.now()).then(function(st){
       owBusy=false;
       if(!st || st.style !== 3){ ow.className=''; return; }
 
