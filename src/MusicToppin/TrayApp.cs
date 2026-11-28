@@ -225,6 +225,30 @@ internal sealed class TrayApp : ApplicationContext
         styleMenu.DropDownItems.Add(BuildLyricsThemeMenu());
         styleMenu.DropDownItems.Add(BuildAlignMenu());
 
+        var interactMenu = new ToolStripMenuItem("击杀互动");
+        _itemKillEnable = new ToolStripMenuItem("启用击杀互动", null, (_, _) => ToggleKillInteraction()) { Checked = _settings.KillInteraction };
+        _itemKillRegion = new ToolStripMenuItem("框选击杀提示区域…", null, (_, _) => PickKillRegion());
+        _itemKillTemplate = new ToolStripMenuItem("抓取击杀模板（击杀提示出现时点）", null, (_, _) => CaptureKillTemplate());
+        var killTest = new ToolStripMenuItem("测试触发一次击杀互动", null, (_, _) => OnKillDetected());
+        var killThresholdMenu = new ToolStripMenuItem("匹配灵敏度");
+        foreach (var threshold in new[] { 60, 70, 80, 90 })
+        {
+            var value = threshold;
+            var item = new ToolStripMenuItem(value + "%", null, (_, _) =>
+            {
+                _settings.KillThreshold = value;
+                _settings.Save();
+                if (_killDetector != null) _killDetector.ThresholdPercent = value;
+                foreach (ToolStripMenuItem sibling in killThresholdMenu.DropDownItems) sibling.Checked = sibling.Text == value + "%";
+            }) { Checked = _settings.KillThreshold == value };
+            killThresholdMenu.DropDownItems.Add(item);
+        }
+        interactMenu.DropDownItems.Add(_itemKillEnable);
+        interactMenu.DropDownItems.Add(_itemKillRegion);
+        interactMenu.DropDownItems.Add(_itemKillTemplate);
+        interactMenu.DropDownItems.Add(killTest);
+        interactMenu.DropDownItems.Add(killThresholdMenu);
+
         _colorMenu = BuildColorMenu();
 
         var positionMenu = new ToolStripMenuItem("位置");
@@ -272,6 +296,7 @@ internal sealed class TrayApp : ApplicationContext
             _permissionMenu,
             sourceMenu,
             styleMenu,
+            interactMenu,
             _colorMenu,
             positionMenu,
             _itemWizard,
@@ -515,6 +540,22 @@ internal sealed class TrayApp : ApplicationContext
             giftTimer.Start();
         }
 
+        _killDetector = new KillDetector();
+        _killDetector.ThresholdPercent = _settings.KillThreshold;
+        _killDetector.LoadTemplate();
+        var killRegion = ParseKillRegion(_settings.KillRegion);
+        if (killRegion.HasValue) _killDetector.Region = killRegion.Value;
+        _killDetector.Hit += OnKillDetected;
+        _killDetector.Enabled = _settings.KillInteraction && killRegion.HasValue && _killDetector.HasTemplate;
+
+        // 调试/自动化用：--fake-kill 注入一次击杀互动
+        if (Environment.GetCommandLineArgs().Any(a => a.Equals("--fake-kill", StringComparison.OrdinalIgnoreCase)))
+        {
+            var killTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+            killTimer.Tick += (_, _) => { killTimer.Stop(); killTimer.Dispose(); OnKillDetected(); };
+            killTimer.Start();
+        }
+
         if (_settings.Visible && !BrowserOnly(_settings.Style)) ShowHud();
         EnsureHotkeys();
         if (!_settings.WizardShown)
@@ -611,6 +652,10 @@ internal sealed class TrayApp : ApplicationContext
     private ToolStripMenuItem _itemCopyOverlay;
     private ToolStripMenuItem _itemCopyVideo;
     private ToolStripMenuItem _itemCopyCompact;
+    private ToolStripMenuItem _itemKillEnable;
+    private ToolStripMenuItem _itemKillRegion;
+    private ToolStripMenuItem _itemKillTemplate;
+    private KillDetector _killDetector;
     private ToolStripMenuItem _itemSkipPolicy;
     private ToolStripMenuItem _itemRequestPolicy;
     private ToolStripMenuItem _permissionMenu;
@@ -3388,6 +3433,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (_overlay == null) return;
         _overlay.Dispose();
+        if (_killDetector != null) { _killDetector.Dispose(); _killDetector = null; }
         _overlay = null;
         _itemCopyOverlay.Enabled = false;
         _itemCopyVideo.Enabled = false;
@@ -3408,6 +3454,104 @@ internal sealed class TrayApp : ApplicationContext
         _tray.ShowBalloonTip(suffix == "?ow=compact" ? 5000 : 2500, "Music Toppin",
             "已复制：" + url + hint, ToolTipIcon.Info);
     }
+    private static Rectangle? ParseKillRegion(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var parts = text.Split(',');
+        if (parts.Length != 4) return null;
+        int x, y, w, h;
+        if (!int.TryParse(parts[0], out x) || !int.TryParse(parts[1], out y) ||
+            !int.TryParse(parts[2], out w) || !int.TryParse(parts[3], out h)) return null;
+        if (w < 8 || h < 8) return null;
+        return new Rectangle(x, y, w, h);
+    }
+
+    private void ToggleKillInteraction()
+    {
+        if (!_settings.KillInteraction)
+        {
+            var region = ParseKillRegion(_settings.KillRegion);
+            if (!region.HasValue)
+            {
+                _tray.ShowBalloonTip(4000, "Music Toppin",
+                    "先「框选击杀提示区域」，再在击杀提示出现时点「抓取击杀模板」。", ToolTipIcon.Info);
+                return;
+            }
+            if (_killDetector == null || !_killDetector.HasTemplate)
+            {
+                _tray.ShowBalloonTip(4000, "Music Toppin",
+                    "还没有击杀模板：击杀提示出现时，点「抓取击杀模板」。", ToolTipIcon.Info);
+                return;
+            }
+        }
+
+        _settings.KillInteraction = !_settings.KillInteraction;
+        _settings.Save();
+        if (_killDetector != null) _killDetector.Enabled = _settings.KillInteraction;
+        if (_itemKillEnable != null) _itemKillEnable.Checked = _settings.KillInteraction;
+        _tray.ShowBalloonTip(3000, "Music Toppin",
+            _settings.KillInteraction ? "击杀互动已开启（区域模板匹配，不 OCR）。" : "击杀互动已关闭。",
+            ToolTipIcon.Info);
+    }
+
+    private void PickKillRegion()
+    {
+        var region = ScreenRegionSelector.Select();
+        if (!region.HasValue) return;
+
+        _settings.KillRegion = region.Value.X + "," + region.Value.Y + "," + region.Value.Width + "," + region.Value.Height;
+        _settings.KillInteraction = false;
+        _settings.Save();
+        if (_killDetector != null)
+        {
+            _killDetector.Region = region.Value;
+            _killDetector.Enabled = false;
+        }
+        if (_itemKillEnable != null) _itemKillEnable.Checked = false;
+        _tray.ShowBalloonTip(5000, "Music Toppin",
+            "击杀区域已保存：" + region.Value.Width + "×" + region.Value.Height +
+            "\n请等击杀提示出现时，点「抓取击杀模板」，之后自动开启。", ToolTipIcon.Info);
+    }
+
+    private void CaptureKillTemplate()
+    {
+        var region = ParseKillRegion(_settings.KillRegion);
+        if (!region.HasValue)
+        {
+            _tray.ShowBalloonTip(4000, "Music Toppin", "请先「框选击杀提示区域」。", ToolTipIcon.Info);
+            return;
+        }
+        if (_killDetector == null) return;
+
+        _killDetector.Region = region.Value;
+        if (!_killDetector.CaptureTemplate())
+        {
+            _tray.ShowBalloonTip(4000, "Music Toppin", "抓取模板失败，请重新框选区域后再试。", ToolTipIcon.Warning);
+            return;
+        }
+
+        _settings.KillInteraction = true;
+        _settings.Save();
+        _killDetector.Enabled = true;
+        if (_itemKillEnable != null) _itemKillEnable.Checked = true;
+        _tray.ShowBalloonTip(4000, "Music Toppin",
+            "击杀模板已抓取，击杀互动已开启。\n可在「击杀互动 → 匹配灵敏度」调整误判/漏判。", ToolTipIcon.Info);
+    }
+
+    private void OnKillDetected()
+    {
+        if (_exiting) return;
+        _ui.Post(_ =>
+        {
+            _petEvent = "kill";
+            _petEventText = "击杀！";
+            _petEventId++;
+            _petEventAt = DateTime.UtcNow.ToString("o");
+            Logger.Write("pet event: kill");
+            RefreshOverlaySnapshot();
+        }, null);
+    }
+
     private void ToggleOccluded()
     {
         if (!_settings.CaptureOccluded && _settings.Style == 3)

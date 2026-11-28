@@ -78,6 +78,15 @@ internal sealed class AppSettings
     /// <summary>叠加层上次用的端口（0 = 没记录）。</summary>
     public int OverlayPort;
 
+    /// <summary>击杀互动：屏幕区域模板匹配（不 OCR）。</summary>
+    public bool KillInteraction;
+
+    /// <summary>击杀提示屏幕区域（x,y,w,h）；空 = 未框选。</summary>
+    public string KillRegion = "";
+
+    /// <summary>击杀模板匹配阈值（百分比 50-99）。</summary>
+    public int KillThreshold = 80;
+
     /// <summary>弹幕点歌权限：0 = 所有人，1 = 粉丝团灯牌或舰长（默认），2 = 仅舰长，3 = 关闭。</summary>
     public int RequestPolicy = 1;
 
@@ -181,6 +190,9 @@ internal sealed class AppSettings
                 s.OverlayRingY = Math.Max(820, Math.Min(1020, ReadInt(key, "OverlayRingY", 925)));
         s.OverlayPetOffset = Math.Max(-80, Math.Min(80, ReadInt(key, "OverlayPetOffset", PetOffsetDefault)));
                 s.OverlayPort = ReadInt(key, "OverlayPort", 0);
+                s.KillInteraction = ReadInt(key, "KillInteraction", 0) == 1;
+                s.KillRegion = ReadString(key, "KillRegion", "");
+                s.KillThreshold = Math.Max(50, Math.Min(99, ReadInt(key, "KillThreshold", 80)));
 
                 s.SkipPolicy = ReadInt(key, "SkipPolicy", 1);
                 s.RequestPolicy = ReadInt(key, "RequestPolicy", 1);
@@ -300,6 +312,11 @@ internal sealed class AppSettings
         try { key.SetValue(name, value, RegistryValueKind.DWord); } catch { }
     }
 
+    private static void WriteString(RegistryKey key, string name, string value)
+    {
+        try { key.SetValue(name, value ?? "", RegistryValueKind.String); } catch { }
+    }
+
     public void Save()
     {
         try
@@ -330,6 +347,9 @@ internal sealed class AppSettings
                 WriteInt(key, "OverlayRingY", OverlayRingY);
         WriteInt(key, "OverlayPetOffset", OverlayPetOffset);
                 WriteInt(key, "OverlayPort", OverlayPort);
+                WriteInt(key, "KillInteraction", KillInteraction ? 1 : 0);
+                WriteString(key, "KillRegion", KillRegion ?? "");
+                WriteInt(key, "KillThreshold", KillThreshold);
                 WriteInt(key, "SkipPolicy", SkipPolicy);
                 WriteInt(key, "RequestPolicy", RequestPolicy);
                 WriteInt(key, "RemovePolicy", RemovePolicy);

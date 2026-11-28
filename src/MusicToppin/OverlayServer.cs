@@ -1340,7 +1340,11 @@ internal sealed class OverlayServer : IDisposable
       else if(pe && pe!==lastOwPetEvent){
         lastOwPetEvent=pe;
         var petAt=Date.parse(st.petEventAt||'');
-        if(!isFinite(petAt) || Date.now()-petAt < 5000) owPetReact(st.petEvent==='up'?'up':'gift');
+        if(!isFinite(petAt) || Date.now()-petAt < 5000){
+          var kind = st.petEvent==='up'?'up':(st.petEvent==='kill'?'kill':'gift');
+          owPetReact(kind);
+          if(kind==='kill') showToast('⚔ 击杀！', document.getElementById('owToast'));
+        }
       }
 
       var p = st.duration > 0 ? Math.min(1, (st.position||0)/st.duration) : 0;
