@@ -912,6 +912,11 @@ internal sealed class OverlayServer : IDisposable
 </style>
 </head>
 <body>
+<svg width=""0"" height=""0"" style=""position:absolute"" aria-hidden=""true""><defs>
+<clipPath id=""ow-tail-siamese"" clipPathUnits=""objectBoundingBox""><polygon points=""0.70,0.50 0.76,0.50 0.82,0.53 0.86,0.57 0.88,0.63 0.885,0.71 0.87,0.79 0.845,0.815 0.815,0.80 0.80,0.72 0.795,0.64 0.78,0.585 0.74,0.55""/></clipPath>
+<clipPath id=""ow-tail-dachshund"" clipPathUnits=""objectBoundingBox""><polygon points=""0.73,0.41 0.79,0.41 0.85,0.45 0.885,0.50 0.90,0.56 0.905,0.64 0.90,0.70 0.885,0.745 0.855,0.745 0.835,0.68 0.825,0.60 0.795,0.53 0.755,0.47""/></clipPath>
+<clipPath id=""ow-tail-devon"" clipPathUnits=""objectBoundingBox""><polygon points=""0.75,0.41 0.81,0.41 0.86,0.45 0.885,0.51 0.90,0.58 0.905,0.66 0.905,0.76 0.895,0.86 0.875,0.93 0.845,0.935 0.825,0.87 0.815,0.76 0.805,0.66 0.785,0.56 0.745,0.47""/></clipPath>
+</defs></svg>
 <div id=""wrap"">
   <div class=""card"" id=""card"">
     <div class=""accent""></div>
@@ -1034,7 +1039,7 @@ internal sealed class OverlayServer : IDisposable
   var lastOwPetEvent=0, owBaseDone=false, owGlowTimer=null;
   // 旧内核不支持 clip-path 时隐藏尾巴层，避免出现第二只静态猫
   var owClipOk=!!(window.CSS && CSS.supports && CSS.supports('clip-path','url(#x)'));
-  if(!owClipOk && owPetTail) owPetTail.style.display='none';
+  if((!owClipOk || !document.getElementById('ow-tail-siamese')) && owPetTail) owPetTail.style.display='none';
 
   // 礼物 / 上舰：宠物发光 + 粒子（不改宠物外层 transform，避免破坏对位）
   function owPetReact(kind){
